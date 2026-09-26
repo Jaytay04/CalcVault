@@ -90,30 +90,30 @@ static NSString *const HostOnlyGroupSuffix = @".com.jaylintaylor.calcvault.hosto
     return query;
 }
 
-- (NSString *)grantedApplicationIdentifier {
-    SecTaskRef task = SecTaskCreateFromSelf(kCFAllocatorDefault);
-    if (task == NULL) { return nil; }
-    CFTypeRef value = SecTaskCopyValueForEntitlement(task, CFSTR("application-identifier"), NULL);
-    CFRelease(task);
-    if (value == NULL) { return nil; }
-    id identifier = CFBridgingRelease(value);
-    return [identifier isKindOfClass:NSString.class] ? identifier : nil;
-}
-
-- (NSString *)grantedHostOnlyAccessGroup {
-    SecTaskRef task = SecTaskCreateFromSelf(kCFAllocatorDefault);
-    if (task == NULL) { return nil; }
-    CFTypeRef value = SecTaskCopyValueForEntitlement(task, CFSTR("keychain-access-groups"), NULL);
-    CFRelease(task);
-    if (value == NULL) { return nil; }
-    id groups = CFBridgingRelease(value);
-    if (![groups isKindOfClass:NSArray.class]) { return nil; }
-    for (id group in groups) {
-        if ([group isKindOfClass:NSString.class] && [group hasSuffix:HostOnlyGroupSuffix]) {
-            return group;
-        }
-    }
-    return nil;
+- (NSString *)discoverDefaultAccessGroup {
+    NSDictionary *query = @{
+        (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+        (__bridge id)kSecAttrService: SyntheticKeychainService,
+        (__bridge id)kSecAttrAccount: @"synthetic-group-discovery"
+    };
+    SecItemDelete((__bridge CFDictionaryRef)query);
+    uint8_t bytes[32];
+    if (SecRandomCopyBytes(kSecRandomDefault, sizeof(bytes), bytes) != errSecSuccess) { return nil; }
+    NSMutableDictionary *item = [query mutableCopy];
+    item[(__bridge id)kSecValueData] = [NSData dataWithBytes:bytes length:sizeof(bytes)];
+    item[(__bridge id)kSecAttrAccessible] = (__bridge id)kSecAttrAccessibleWhenUnlockedThisDeviceOnly;
+    memset(bytes, 0, sizeof(bytes));
+    if (SecItemAdd((__bridge CFDictionaryRef)item, NULL) != errSecSuccess) { return nil; }
+    NSMutableDictionary *attributesQuery = [query mutableCopy];
+    attributesQuery[(__bridge id)kSecReturnAttributes] = @YES;
+    CFTypeRef result = NULL;
+    OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)attributesQuery, &result);
+    id attributesValue = status == errSecSuccess && result != NULL ? (__bridge id)result : nil;
+    NSDictionary *attributes = [attributesValue isKindOfClass:NSDictionary.class] ? attributesValue : nil;
+    NSString *group = [attributes[(__bridge id)kSecAttrAccessGroup] copy];
+    if (result != NULL) { CFRelease(result); }
+    SecItemDelete((__bridge CFDictionaryRef)query);
+    return group;
 }
 
 - (NSDictionary *)hostOnlyKeychainQuery {
@@ -154,46 +154,57 @@ static NSString *const HostOnlyGroupSuffix = @".com.jaylintaylor.calcvault.hosto
         return;
     }
 
-    self.sharedAppAccessGroup = [self grantedApplicationIdentifier];
+    self.hostOnlyAccessGroup = [self discoverDefaultAccessGroup];
+    if (![self.hostOnlyAccessGroup hasSuffix:HostOnlyGroupSuffix]) {
+        self.hostOnlyAccessGroup = nil;
+#if TARGET_OS_SIMULATOR
+        NSLog(@"SYNTHETIC_DEVICE_BOUNDARY_SIMULATOR_HOST_GROUP_NOT_TESTED");
+#else
+        [self failWithMessage:@"Host-only Keychain group was not granted after signing. No isolation conclusion."];
+        return;
+#endif
+    } else {
+        NSRange prefixEnd = [self.hostOnlyAccessGroup rangeOfString:@"."];
+        NSString *bundleID = NSBundle.mainBundle.bundleIdentifier;
+        if (prefixEnd.location != NSNotFound && prefixEnd.location > 0 && bundleID.length > 0) {
+            self.sharedAppAccessGroup = [NSString stringWithFormat:@"%@.%@",
+                [self.hostOnlyAccessGroup substringToIndex:prefixEnd.location], bundleID];
+        }
+    }
     if (self.sharedAppAccessGroup.length == 0) {
 #if TARGET_OS_SIMULATOR
         NSLog(@"SYNTHETIC_DEVICE_BOUNDARY_SIMULATOR_SHARED_GROUP_NOT_TESTED");
 #else
-        [self failWithMessage:@"App-ID Keychain group was not available after signing. No isolation conclusion."];
-        return;
-#endif
-    }
-    SecItemDelete((__bridge CFDictionaryRef)[self syntheticKeychainQuery]);
-    uint8_t randomBytes[32];
-    if (SecRandomCopyBytes(kSecRandomDefault, sizeof(randomBytes), randomBytes) != errSecSuccess) {
-        [self failWithMessage:@"Keychain fixture setup failed."];
-        return;
-    }
-    NSMutableDictionary *item = [[self syntheticKeychainQuery] mutableCopy];
-    item[(__bridge id)kSecValueData] = [NSData dataWithBytes:randomBytes length:sizeof(randomBytes)];
-    item[(__bridge id)kSecAttrAccessible] = (__bridge id)kSecAttrAccessibleWhenUnlockedThisDeviceOnly;
-    memset(randomBytes, 0, sizeof(randomBytes));
-    OSStatus addStatus = SecItemAdd((__bridge CFDictionaryRef)item, NULL);
-    if (addStatus != errSecSuccess) {
-#if TARGET_OS_SIMULATOR
-        if (addStatus == errSecMissingEntitlement) {
-            NSLog(@"SYNTHETIC_DEVICE_BOUNDARY_SIMULATOR_KEYCHAIN_NOT_TESTED status=%d", (int)addStatus);
-        } else {
-            [self failWithMessage:[NSString stringWithFormat:@"Keychain fixture setup failed (%d).", (int)addStatus]];
-            return;
-        }
-#else
-        [self failWithMessage:[NSString stringWithFormat:@"Keychain fixture setup failed (%d).", (int)addStatus]];
+        [self failWithMessage:@"App-ID Keychain group could not be derived after signing. No isolation conclusion."];
         return;
 #endif
     } else {
-        self.keychainFixtureCreated = YES;
+        SecItemDelete((__bridge CFDictionaryRef)[self syntheticKeychainQuery]);
+        uint8_t randomBytes[32];
+        if (SecRandomCopyBytes(kSecRandomDefault, sizeof(randomBytes), randomBytes) != errSecSuccess) {
+            [self failWithMessage:@"Keychain fixture setup failed."];
+            return;
+        }
+        NSMutableDictionary *item = [[self syntheticKeychainQuery] mutableCopy];
+        item[(__bridge id)kSecValueData] = [NSData dataWithBytes:randomBytes length:sizeof(randomBytes)];
+        item[(__bridge id)kSecAttrAccessible] = (__bridge id)kSecAttrAccessibleWhenUnlockedThisDeviceOnly;
+        memset(randomBytes, 0, sizeof(randomBytes));
+        OSStatus addStatus = SecItemAdd((__bridge CFDictionaryRef)item, NULL);
+        if (addStatus != errSecSuccess) {
+#if TARGET_OS_SIMULATOR
+            NSLog(@"SYNTHETIC_DEVICE_BOUNDARY_SIMULATOR_SHARED_GROUP_NOT_TESTED status=%d", (int)addStatus);
+#else
+            [self failWithMessage:[NSString stringWithFormat:@"Keychain fixture setup failed (%d).", (int)addStatus]];
+            return;
+#endif
+        } else {
+            self.keychainFixtureCreated = YES;
+        }
     }
 
-    self.hostOnlyAccessGroup = [self grantedHostOnlyAccessGroup];
     if (self.hostOnlyAccessGroup.length == 0) {
 #if TARGET_OS_SIMULATOR
-        NSLog(@"SYNTHETIC_DEVICE_BOUNDARY_SIMULATOR_HOST_GROUP_NOT_TESTED");
+        NSLog(@"SYNTHETIC_DEVICE_BOUNDARY_SIMULATOR_HOST_GROUP_FIXTURE_NOT_TESTED");
 #else
         [self failWithMessage:@"Host-only Keychain group was not granted after signing. No isolation conclusion."];
         return;
@@ -290,13 +301,11 @@ static NSString *const HostOnlyGroupSuffix = @".com.jaylintaylor.calcvault.hosto
     NSNumber *fileErrorCodeValue = report[@"fileErrorCode"];
     NSNumber *keychainStatusValue = report[@"keychainStatus"];
     NSNumber *hostOnlyStatusValue = report[@"hostOnlyStatus"];
-    NSNumber *extensionClaimsHostGroupValue = report[@"extensionClaimsHostGroup"];
     NSNumber *extensionPIDValue = report[@"extensionPID"];
     if (![fileReadableValue isKindOfClass:NSNumber.class] ||
         ![fileErrorCodeValue isKindOfClass:NSNumber.class] ||
         ![keychainStatusValue isKindOfClass:NSNumber.class] ||
         ![hostOnlyStatusValue isKindOfClass:NSNumber.class] ||
-        ![extensionClaimsHostGroupValue isKindOfClass:NSNumber.class] ||
         ![extensionPIDValue isKindOfClass:NSNumber.class]) {
         [self failWithMessage:@"Extension returned an invalid report."];
         return;
@@ -305,7 +314,6 @@ static NSString *const HostOnlyGroupSuffix = @".com.jaylintaylor.calcvault.hosto
     NSInteger fileErrorCode = fileErrorCodeValue.integerValue;
     NSInteger keychainStatus = keychainStatusValue.integerValue;
     NSInteger hostOnlyStatus = hostOnlyStatusValue.integerValue;
-    BOOL extensionClaimsHostGroup = extensionClaimsHostGroupValue.boolValue;
     int extensionPID = extensionPIDValue.intValue;
     if (extensionPID <= 0 || extensionPID == getpid()) {
         [self failWithMessage:@"Separate extension process was not verified."];
@@ -319,12 +327,11 @@ static NSString *const HostOnlyGroupSuffix = @".com.jaylintaylor.calcvault.hosto
         ? (hostOnlyStatus == errSecSuccess ? @"READABLE" : @"NOT READABLE")
         : @"NOT TESTED (host fixture unavailable)";
     self.statusLabel.text = [NSString stringWithFormat:
-        @"Host PID: %d\nExtension PID: %d\nHost file: %@ (error %ld)\nShared app-ID Keychain: %@ (status %ld)\nHost-only Keychain: %@ (status %ld)\nExtension claims host group: %@",
+        @"Host PID: %d\nExtension PID: %d\nHost file: %@ (error %ld)\nShared app-ID Keychain: %@ (status %ld)\nHost-only Keychain: %@ (status %ld)",
         getpid(), extensionPID, fileResult, (long)fileErrorCode, keychainResult, (long)keychainStatus,
-        hostOnlyResult, (long)hostOnlyStatus, extensionClaimsHostGroup ? @"YES" : @"NO"];
-    NSLog(@"SYNTHETIC_DEVICE_BOUNDARY_RESULT hostPID=%d extensionPID=%d file=%@ defaultKeychain=%@ hostOnlyKeychain=%@ extensionClaimsHostGroup=%@",
-          getpid(), extensionPID, fileResult, keychainResult, hostOnlyResult,
-          extensionClaimsHostGroup ? @"YES" : @"NO");
+        hostOnlyResult, (long)hostOnlyStatus];
+    NSLog(@"SYNTHETIC_DEVICE_BOUNDARY_RESULT hostPID=%d extensionPID=%d file=%@ sharedKeychain=%@ hostOnlyKeychain=%@",
+          getpid(), extensionPID, fileResult, keychainResult, hostOnlyResult);
     [self finishProbe];
 }
 

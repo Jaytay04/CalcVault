@@ -42,7 +42,6 @@
     }
 
     OSStatus hostOnlyStatus = errSecItemNotFound;
-    BOOL extensionClaimsHostGroup = NO;
     if (hostOnlyGroup.length > 0) {
         NSMutableDictionary *hostOnlyQuery = [query mutableCopy];
         hostOnlyQuery[(__bridge id)kSecAttrAccount] = @"synthetic-host-explicit-group";
@@ -51,15 +50,6 @@
         hostOnlyStatus = SecItemCopyMatching((__bridge CFDictionaryRef)hostOnlyQuery, &hostOnlyValue);
         if (hostOnlyValue != NULL) { CFRelease(hostOnlyValue); }
 
-        SecTaskRef task = SecTaskCreateFromSelf(kCFAllocatorDefault);
-        if (task != NULL) {
-            CFTypeRef groupsValue = SecTaskCopyValueForEntitlement(task, CFSTR("keychain-access-groups"), NULL);
-            CFRelease(task);
-            if (groupsValue != NULL) {
-                id groups = CFBridgingRelease(groupsValue);
-                extensionClaimsHostGroup = [groups isKindOfClass:NSArray.class] && [groups containsObject:hostOnlyGroup];
-            }
-        }
     }
 
     NSExtensionItem *result = [NSExtensionItem new];
@@ -68,7 +58,6 @@
         @"fileErrorCode": @(fileError == nil ? 0 : fileError.code),
         @"keychainStatus": @(keychainStatus),
         @"hostOnlyStatus": @(hostOnlyStatus),
-        @"extensionClaimsHostGroup": @(extensionClaimsHostGroup),
         @"extensionPID": @(getpid())
     };
     [context completeRequestReturningItems:@[result] completionHandler:nil];
