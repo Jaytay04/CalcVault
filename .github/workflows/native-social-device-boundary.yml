@@ -66,7 +66,7 @@ jobs:
           app="$RUNNER_TEMP/boundary-simulator/Build/Products/Debug-iphonesimulator/SyntheticDeviceBoundary.app"
           codesign --force --sign - "$app/PlugIns/SyntheticBoundaryExtension.appex"
           codesign --force --sign - \
-            --entitlements experiments/native-social-device-boundary/Host/SyntheticHost.entitlements "$app"
+            --entitlements experiments/native-social-guest/simulator-host.entitlements "$app"
           codesign --verify --deep "$app"
           xcrun simctl install "$device" "$app"
           xcrun simctl launch "$device" com.jaylintaylor.calcvault
