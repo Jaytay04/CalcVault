@@ -8,11 +8,11 @@ The extension is invoked using the same nonpublic `NSExtension` class and `com.a
 
 ## Evidence gates
 
-1. Manual CI builds the separate simulator host and unsigned `iphoneos` host plus embedded extension, smoke-tests that a separate extension process reports results, and uploads an unsigned IPA with SHA-256. A simulator read is **not** an isolation pass.
+1. Manual CI builds the separate simulator host and unsigned `iphoneos` host plus embedded extension, smoke-tests that a separate extension process reports results, and uploads an unsigned IPA with SHA-256. Ad-hoc simulator signing may lack the Keychain entitlement; that check is explicitly **NOT TESTED** in this case. A simulator read is **not** an isolation pass.
 2. Before phone installation, verify the IPA's base bundle ID and embedded extension, download/hash, and preserve any CalcVault data or sessions the owner wants. The probe does not export or recover them.
 3. In SideStore, select **Keep All Extensions (Use Main Profile)**. Stop if it proposes another App ID, another active app, removal of Spotify, or deletion of CalcVault. Do not use an extension-stripping option: that makes the test inconclusive.
 4. Open **CalcVault Boundary Probe**. It runs once automatically; **Run test again** retries. A result must show distinct host and extension PIDs plus both access statuses. A screenshot of this synthetic-only screen is sufficient for the first device observation.
-5. `READABLE` for either host file or Keychain item fails that boundary. `NOT READABLE` for both is a provisional pass only for this minimal extension and its actual signing mode. Missing extension, no report, or timeout is inconclusive. Never infer real vault safety from installation or compilation alone.
+5. On the signed phone, fixture creation must succeed first. `READABLE` for either host file or Keychain item fails that boundary. `NOT READABLE` for both is a provisional pass only for this minimal extension and its actual signing mode. Missing extension, no report, timeout, or unavailable fixture is inconclusive. Never infer real vault safety from installation or compilation alone.
 
 The probe creates only a uniquely named synthetic file and a Keychain item under the exact test service `org.example.calcvault.synthetic-boundary-probe`. It removes those fixtures after a result or timeout. It does not enumerate, rewrite, or delete other app data. An interrupted run may leave a synthetic item; the next run replaces only that exact test item.
 

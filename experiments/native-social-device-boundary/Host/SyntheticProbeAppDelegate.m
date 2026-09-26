@@ -1,6 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 #import <Security/Security.h>
+#import <TargetConditionals.h>
 #import <unistd.h>
 #import "../Shared/SyntheticProbeReport.h"
 
@@ -20,6 +21,7 @@
 @property (nonatomic, strong) NSURL *syntheticFileURL;
 @property (nonatomic, strong) NSTimer *timeoutTimer;
 @property (nonatomic, assign) BOOL probePending;
+@property (nonatomic, assign) BOOL keychainFixtureCreated;
 @end
 
 @implementation SyntheticProbeAppDelegate
@@ -82,6 +84,7 @@ static NSString *const SyntheticKeychainAccount = @"synthetic-host-only";
 - (void)runProbe {
     if (self.probePending) { return; }
     self.probePending = YES;
+    self.keychainFixtureCreated = NO;
     self.runButton.enabled = NO;
     self.statusLabel.text = @"Preparing synthetic fixtures…";
 
@@ -115,8 +118,19 @@ static NSString *const SyntheticKeychainAccount = @"synthetic-host-only";
     memset(randomBytes, 0, sizeof(randomBytes));
     OSStatus addStatus = SecItemAdd((__bridge CFDictionaryRef)item, NULL);
     if (addStatus != errSecSuccess) {
+#if TARGET_OS_SIMULATOR
+        if (addStatus == errSecMissingEntitlement) {
+            NSLog(@"SYNTHETIC_DEVICE_BOUNDARY_SIMULATOR_KEYCHAIN_NOT_TESTED status=%d", (int)addStatus);
+        } else {
+            [self failWithMessage:[NSString stringWithFormat:@"Keychain fixture setup failed (%d).", (int)addStatus]];
+            return;
+        }
+#else
         [self failWithMessage:[NSString stringWithFormat:@"Keychain fixture setup failed (%d).", (int)addStatus]];
         return;
+#endif
+    } else {
+        self.keychainFixtureCreated = YES;
     }
 
     self.listener = [NSXPCListener anonymousListener];
@@ -170,7 +184,9 @@ static NSString *const SyntheticKeychainAccount = @"synthetic-host-only";
     dispatch_async(dispatch_get_main_queue(), ^{
         if (!self.probePending) { reply(); return; }
         NSString *fileResult = fileReadable ? @"READABLE" : @"NOT READABLE";
-        NSString *keychainResult = keychainStatus == errSecSuccess ? @"READABLE" : @"NOT READABLE";
+        NSString *keychainResult = self.keychainFixtureCreated
+            ? (keychainStatus == errSecSuccess ? @"READABLE" : @"NOT READABLE")
+            : @"NOT TESTED (host fixture unavailable)";
         self.statusLabel.text = [NSString stringWithFormat:
             @"Host PID: %d\nExtension PID: %d\nHost file: %@ (error %ld)\nHost Keychain item: %@ (status %ld)",
             getpid(), extensionPID, fileResult, (long)fileErrorCode, keychainResult, (long)keychainStatus];
@@ -200,7 +216,10 @@ static NSString *const SyntheticKeychainAccount = @"synthetic-host-only";
     self.listener = nil;
     [self.reportConnection invalidate];
     self.reportConnection = nil;
-    SecItemDelete((__bridge CFDictionaryRef)[self syntheticKeychainQuery]);
+    if (self.keychainFixtureCreated) {
+        SecItemDelete((__bridge CFDictionaryRef)[self syntheticKeychainQuery]);
+        self.keychainFixtureCreated = NO;
+    }
     if (self.syntheticFileURL != nil) {
         [[NSFileManager defaultManager] removeItemAtURL:self.syntheticFileURL error:nil];
         self.syntheticFileURL = nil;
