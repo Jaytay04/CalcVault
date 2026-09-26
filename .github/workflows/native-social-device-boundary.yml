@@ -1,0 +1,99 @@
+name: Synthetic device boundary IPA (manual)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  boundary-probe:
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+      - name: Select pinned toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+          xcodebuild -version
+          test "$(uname -m)" = arm64
+          brew install xcodegen
+          test "$(xcodegen version | awk '{print $2}')" = 2.46.0
+      - name: Generate and build synthetic host with extension
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd experiments/native-social-device-boundary
+          xcodegen generate
+          xcodebuild build \
+            -project SyntheticDeviceBoundary.xcodeproj \
+            -scheme SyntheticDeviceBoundary -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/boundary-simulator" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES
+          xcodebuild build \
+            -project SyntheticDeviceBoundary.xcodeproj \
+            -scheme SyntheticDeviceBoundary -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/boundary-device" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+          simulator_app="$RUNNER_TEMP/boundary-simulator/Build/Products/Debug-iphonesimulator/SyntheticDeviceBoundary.app"
+          device_app="$RUNNER_TEMP/boundary-device/Build/Products/Release-iphoneos/SyntheticDeviceBoundary.app"
+          test -d "$simulator_app/PlugIns/SyntheticBoundaryExtension.appex"
+          test -d "$device_app/PlugIns/SyntheticBoundaryExtension.appex"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$device_app/Info.plist")" = com.jaylintaylor.calcvault
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$device_app/PlugIns/SyntheticBoundaryExtension.appex/Info.plist")" = com.jaylintaylor.calcvault.SyntheticBoundaryExtension
+          file "$device_app/SyntheticDeviceBoundary"
+          lipo -archs "$device_app/SyntheticDeviceBoundary" | grep -qw arm64
+      - name: Smoke-test extension report on simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          device="$(xcrun simctl list devices available -j | jq -r '[.devices[][] | select(.name | startswith("iPhone")) | .udid][0] // empty')"
+          test -n "$device"
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          sleep 120
+          app="$RUNNER_TEMP/boundary-simulator/Build/Products/Debug-iphonesimulator/SyntheticDeviceBoundary.app"
+          codesign --force --deep --sign - "$app"
+          codesign --force --sign - "$app/PlugIns/SyntheticBoundaryExtension.appex"
+          codesign --force --sign - "$app"
+          codesign --verify --deep "$app"
+          xcrun simctl install "$device" "$app"
+          xcrun simctl launch "$device" com.jaylintaylor.calcvault
+          found=0
+          for attempt in {1..6}; do
+            sleep 15
+            xcrun simctl spawn "$device" log show --last 5m --style compact \
+              --predicate 'eventMessage CONTAINS "SYNTHETIC_DEVICE_BOUNDARY"' \
+              > "$RUNNER_TEMP/boundary-probe.log"
+            if grep -q 'SYNTHETIC_DEVICE_BOUNDARY_RESULT' "$RUNNER_TEMP/boundary-probe.log"; then
+              found=1
+              break
+            fi
+          done
+          sed -n '/SYNTHETIC_DEVICE_BOUNDARY/p' "$RUNNER_TEMP/boundary-probe.log" | tail -n 15
+          test "$found" = 1
+      - name: Package unsigned device IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/boundary-device/Build/Products/Release-iphoneos/SyntheticDeviceBoundary.app"
+          mkdir -p "$RUNNER_TEMP/boundary-ipa/Payload"
+          ditto "$app" "$RUNNER_TEMP/boundary-ipa/Payload/SyntheticDeviceBoundary.app"
+          cd "$RUNNER_TEMP/boundary-ipa"
+          zip -qr SyntheticDeviceBoundary-unsigned.ipa Payload
+          unzip -Z -1 SyntheticDeviceBoundary-unsigned.ipa | grep -q '^Payload/SyntheticDeviceBoundary.app/PlugIns/SyntheticBoundaryExtension.appex/'
+          shasum -a 256 SyntheticDeviceBoundary-unsigned.ipa > SyntheticDeviceBoundary-unsigned.ipa.sha256
+          cat SyntheticDeviceBoundary-unsigned.ipa.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-device-boundary-unsigned
+          path: |
+            ${{ runner.temp }}/boundary-ipa/SyntheticDeviceBoundary-unsigned.ipa
+            ${{ runner.temp }}/boundary-ipa/SyntheticDeviceBoundary-unsigned.ipa.sha256
+          if-no-files-found: error
+          retention-days: 7

@@ -1,0 +1,52 @@
+name: SyntheticDeviceBoundary
+
+options:
+  minimumXcodeGenVersion: 2.46.0
+  deploymentTarget:
+    iOS: "18.0"
+
+settings:
+  base:
+    IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+    TARGETED_DEVICE_FAMILY: "1"
+    CODE_SIGNING_ALLOWED: NO
+    CLANG_ENABLE_OBJC_ARC: YES
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  SyntheticDeviceBoundary:
+    type: application
+    platform: iOS
+    sources:
+      - path: Host
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jaylintaylor.calcvault
+        PRODUCT_NAME: SyntheticDeviceBoundary
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: CalcVault Boundary Probe
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+    dependencies:
+      - target: SyntheticBoundaryExtension
+        embed: true
+  SyntheticBoundaryExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Extension
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jaylintaylor.calcvault.SyntheticBoundaryExtension
+        PRODUCT_NAME: SyntheticBoundaryExtension
+        INFOPLIST_FILE: Extension/Info.plist
+
+schemes:
+  SyntheticDeviceBoundary:
+    build:
+      targets:
+        SyntheticDeviceBoundary: all
+    run:
+      config: Debug
