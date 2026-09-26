@@ -60,7 +60,8 @@ jobs:
           app="$RUNNER_TEMP/boundary-simulator/Build/Products/Debug-iphonesimulator/SyntheticDeviceBoundary.app"
           codesign --force --deep --sign - "$app"
           codesign --force --sign - "$app/PlugIns/SyntheticBoundaryExtension.appex"
-          codesign --force --sign - "$app"
+          codesign --force --sign - \
+            --entitlements experiments/native-social-guest/simulator-host.entitlements "$app"
           codesign --verify --deep "$app"
           xcrun simctl install "$device" "$app"
           xcrun simctl launch "$device" com.jaylintaylor.calcvault
@@ -76,6 +77,11 @@ jobs:
             fi
           done
           sed -n '/SYNTHETIC_DEVICE_BOUNDARY/p' "$RUNNER_TEMP/boundary-probe.log" | tail -n 15
+          if test "$found" != 1; then
+            xcrun simctl spawn "$device" log show --last 5m --style compact \
+              --predicate 'eventMessage CONTAINS "SyntheticBoundaryExtension" OR process == "SyntheticBoundaryExtension"' \
+              | tail -n 80
+          fi
           test "$found" = 1
       - name: Package unsigned device IPA
         shell: bash
