@@ -48,6 +48,12 @@ jobs:
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$device_app/PlugIns/SyntheticBoundaryExtension.appex/Info.plist")" = com.jaylintaylor.calcvault.SyntheticBoundaryExtension
           file "$device_app/SyntheticDeviceBoundary"
           lipo -archs "$device_app/SyntheticDeviceBoundary" | grep -qw arm64
+          codesign --force --sign - "$device_app/PlugIns/SyntheticBoundaryExtension.appex"
+          codesign --force --sign - \
+            --entitlements experiments/native-social-device-boundary/Host/SyntheticHost.entitlements "$device_app"
+          codesign --verify --deep "$device_app"
+          codesign -d --entitlements - "$device_app" 2>/dev/null \
+            | grep -q 'FAKETEAMID.com.jaylintaylor.calcvault.hostonly'
       - name: Smoke-test extension report on simulator
         shell: bash
         run: |
@@ -58,10 +64,9 @@ jobs:
           xcrun simctl bootstatus "$device" -b
           sleep 120
           app="$RUNNER_TEMP/boundary-simulator/Build/Products/Debug-iphonesimulator/SyntheticDeviceBoundary.app"
-          codesign --force --deep --sign - "$app"
           codesign --force --sign - "$app/PlugIns/SyntheticBoundaryExtension.appex"
           codesign --force --sign - \
-            --entitlements experiments/native-social-guest/simulator-host.entitlements "$app"
+            --entitlements experiments/native-social-device-boundary/Host/SyntheticHost.entitlements "$app"
           codesign --verify --deep "$app"
           xcrun simctl install "$device" "$app"
           xcrun simctl launch "$device" com.jaylintaylor.calcvault
@@ -91,15 +96,15 @@ jobs:
           mkdir -p "$RUNNER_TEMP/boundary-ipa/Payload"
           ditto "$app" "$RUNNER_TEMP/boundary-ipa/Payload/SyntheticDeviceBoundary.app"
           cd "$RUNNER_TEMP/boundary-ipa"
-          zip -qr SyntheticDeviceBoundary-unsigned.ipa Payload
-          unzip -Z -1 SyntheticDeviceBoundary-unsigned.ipa | grep -q '^Payload/SyntheticDeviceBoundary.app/PlugIns/SyntheticBoundaryExtension.appex/'
-          shasum -a 256 SyntheticDeviceBoundary-unsigned.ipa > SyntheticDeviceBoundary-unsigned.ipa.sha256
-          cat SyntheticDeviceBoundary-unsigned.ipa.sha256
+          zip -qr SyntheticDeviceBoundary-resignable.ipa Payload
+          unzip -Z -1 SyntheticDeviceBoundary-resignable.ipa | grep -q '^Payload/SyntheticDeviceBoundary.app/PlugIns/SyntheticBoundaryExtension.appex/'
+          shasum -a 256 SyntheticDeviceBoundary-resignable.ipa > SyntheticDeviceBoundary-resignable.ipa.sha256
+          cat SyntheticDeviceBoundary-resignable.ipa.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: synthetic-device-boundary-unsigned
+          name: synthetic-device-boundary-resignable
           path: |
-            ${{ runner.temp }}/boundary-ipa/SyntheticDeviceBoundary-unsigned.ipa
-            ${{ runner.temp }}/boundary-ipa/SyntheticDeviceBoundary-unsigned.ipa.sha256
+            ${{ runner.temp }}/boundary-ipa/SyntheticDeviceBoundary-resignable.ipa
+            ${{ runner.temp }}/boundary-ipa/SyntheticDeviceBoundary-resignable.ipa.sha256
           if-no-files-found: error
           retention-days: 7
