@@ -1,0 +1,88 @@
+diff --git a/LiveContainer/LCSharedUtils.m b/LiveContainer/LCSharedUtils.m
+--- a/LiveContainer/LCSharedUtils.m
++++ b/LiveContainer/LCSharedUtils.m
+@@ -4,2 +4,3 @@
+ #import "utils.h"
++#include <stdlib.h>
+ @import MachO;
+@@ -15,2 +15,7 @@
+ + (NSString*) teamIdentifier {
++#if TARGET_OS_SIMULATOR
++    if (getenv("LC_SYNTHETIC_DUAL_BINARY_TEST")) {
++        return @"AAAAA11111";
++    }
++#endif
+     static NSString* ans = nil;
+diff --git a/LiveContainer/Tweaks/Dyld.m b/LiveContainer/Tweaks/Dyld.m
+--- a/LiveContainer/Tweaks/Dyld.m
++++ b/LiveContainer/Tweaks/Dyld.m
+@@ -335,2 +335,8 @@
+ void DyldHookLoadableIntoProcess(void) {
++#if TARGET_OS_SIMULATOR
++    if (getenv("LC_SYNTHETIC_DUAL_BINARY_TEST")) {
++        NSLog(@"SYNTHETIC_DUAL_BINARY_SKIPPED_SIMULATOR_DYLD_PATCH");
++        return;
++    }
++#endif
+     uint32_t *patchAddr = (uint32_t *)litehook_find_symbol(getDyldBase(), "__ZNK6mach_o6Header19loadableIntoProcessENS_8PlatformE7CStringb");
+diff --git a/LiveContainer/LCBootstrap.m b/LiveContainer/LCBootstrap.m
+--- a/LiveContainer/LCBootstrap.m
++++ b/LiveContainer/LCBootstrap.m
+@@ -380,4 +380,21 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContainer, int argc, char *argv[]) {
+     // Overwrite @executable_path
+     const char *appExecPath = appBundle.executablePath.fileSystemRepresentation;
++    BOOL syntheticPayloadOverride = NO;
++#if TARGET_OS_SIMULATOR
++    if (getenv("LC_SYNTHETIC_DUAL_BINARY_TEST") &&
++        [selectedApp isEqualToString:@"org.example.syntheticnativeguest.app"]) {
++        NSString *relativePath = guestAppInfo[@"LCSyntheticGuestExecutable"];
++        if (![relativePath isEqualToString:@"Frameworks/SyntheticNativeGuestPayload.dylib"]) {
++            return @"Synthetic payload path is not allowlisted.";
++        }
++        NSString *payloadPath = [bundlePath stringByAppendingPathComponent:relativePath];
++        if (![fm fileExistsAtPath:payloadPath]) {
++            return @"Synthetic payload is missing.";
++        }
++        appExecPath = strdup(payloadPath.fileSystemRepresentation);
++        syntheticPayloadOverride = YES;
++        NSLog(@"SYNTHETIC_DUAL_BINARY_SELECTED_PAYLOAD");
++    }
++#endif
+     *path = appExecPath;
+     overwriteExecPath(appExecPath);
+@@ -622,7 +639,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContainer, int argc, char *argv[]) {
+ #if is32BitSupported
+         !is32bit &&
+ #endif
+-        ![appBundle loadAndReturnError:&error]
++        !syntheticPayloadOverride && ![appBundle loadAndReturnError:&error]
+         ) {
+         appError = error.localizedDescription;
+         NSLog(@"[LCBootstrap] loading bundle failed: %@", error);
+@@ -680,3 +697,26 @@ int LiveContainerMain(int argc, char *argv[]) {
+     NSString *selectedApp = [lcUserDefaults stringForKey:@"selected"];
+     NSString *selectedContainer = [lcUserDefaults stringForKey:@"selectedContainer"];
++#if TARGET_OS_SIMULATOR
++    if (getenv("LC_SYNTHETIC_DUAL_BINARY_TEST")) {
++        NSString *guestName = @"org.example.syntheticnativeguest.app";
++        NSString *guestPath = [NSString stringWithFormat:@"%s/Documents/Applications/%@", getenv("LC_HOME_PATH"), guestName];
++        NSString *payload = [guestPath stringByAppendingPathComponent:@"Frameworks/SyntheticNativeGuestPayload.dylib"];
++        NSString *patchMarker = [guestPath stringByAppendingPathComponent:@"synthetic-dual-binary-patched.txt"];
++        if (![[NSFileManager defaultManager] fileExistsAtPath:patchMarker]) {
++            NSString *patchError = LCParseMachO(payload.UTF8String, false, ^(const char *path, struct mach_header_64 *header, int fd, void *filePtr) {
++                if (header->cputype == CPU_TYPE_ARM64) {
++                    LCPatchExecSlice(path, header, false);
++                }
++            });
++            if (patchError) {
++                NSLog(@"SYNTHETIC_DUAL_BINARY_PATCH_FAILED: %@", patchError);
++            } else {
++                [@"patched" writeToFile:patchMarker atomically:YES encoding:NSUTF8StringEncoding error:nil];
++                NSLog(@"SYNTHETIC_DUAL_BINARY_PATCH_PASSED");
++            }
++        }
++        selectedApp = guestName;
++        selectedContainer = @"synthetic-fixture-container";
++    }
++#endif
+     NSString *launchUrl = nil;

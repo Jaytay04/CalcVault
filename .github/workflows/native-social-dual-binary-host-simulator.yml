@@ -1,0 +1,111 @@
+name: Synthetic dual-binary host load (manual)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-load:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - name: Select pinned toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+          xcodebuild -version
+          test "$(uname -m)" = arm64
+          brew install xcodegen
+          test "$(xcodegen version | awk '{print $2}')" = 2.46.0
+      - name: Build normal simulator executable with separate payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd experiments/native-social-guest
+          xcodegen generate
+          cd "$GITHUB_WORKSPACE"
+          xcodebuild build \
+            -project experiments/native-social-guest/SyntheticNativeGuest.xcodeproj \
+            -scheme SyntheticNativeGuest -configuration Release \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/synthetic-dual-derived" \
+            CODE_SIGNING_ALLOWED=NO ARCHS=arm64 ONLY_ACTIVE_ARCH=YES
+          guest="$RUNNER_TEMP/synthetic-dual-derived/Build/Products/Release-iphonesimulator/SyntheticNativeGuest.app"
+          test -f "$guest/SyntheticNativeGuest"
+          test ! -f "$guest/SyntheticNativeGuest.debug.dylib"
+          xcrun otool -hv "$guest/SyntheticNativeGuest" | grep -q EXECUTE
+          mkdir -p "$guest/Frameworks"
+          cp "$guest/SyntheticNativeGuest" "$guest/Frameworks/SyntheticNativeGuestPayload.dylib"
+      - name: Build disposable research host
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch 3.8.0 --recurse-submodules \
+            https://github.com/LiveContainer/LiveContainer.git "$RUNNER_TEMP/livecontainer-dual-host"
+          test "$(git -C "$RUNNER_TEMP/livecontainer-dual-host" rev-parse HEAD)" = \
+            e370a92dfc03ce109ebce00ed4a7cfc64ad1c801
+          git -C "$RUNNER_TEMP/livecontainer-dual-host" apply \
+            "$GITHUB_WORKSPACE/experiments/native-social-guest/livecontainer-dual-binary-simulator.patch"
+          xcodebuild build \
+            -project "$RUNNER_TEMP/livecontainer-dual-host/LiveContainer.xcodeproj" \
+            -scheme LiveContainer -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/livecontainer-dual-derived" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES
+      - name: Stage and load separate payload in simulator host
+        shell: bash
+        run: |
+          set -euo pipefail
+          device="$(xcrun simctl list devices available -j | jq -r '[.devices[][] | select(.name | startswith("iPhone")) | .udid][0] // empty')"
+          test -n "$device"
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          sleep 150
+          host="$RUNNER_TEMP/livecontainer-dual-derived/Build/Products/Debug-iphonesimulator/LiveContainer.app"
+          bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$host/Info.plist")"
+          codesign --force --deep --sign - "$host"
+          codesign --force --sign - \
+            --entitlements experiments/native-social-guest/simulator-host.entitlements "$host"
+          codesign --verify --deep "$host"
+          xcrun simctl install "$device" "$host"
+          data_container="$(xcrun simctl get_app_container "$device" "$bundle_id" data)"
+          guest_target="$data_container/Documents/Applications/org.example.syntheticnativeguest.app"
+          mkdir -p "$data_container/Documents/Applications"
+          mkdir -p "$data_container/Documents/Data/Application/synthetic-fixture-container"
+          ditto "$RUNNER_TEMP/synthetic-dual-derived/Build/Products/Release-iphonesimulator/SyntheticNativeGuest.app" "$guest_target"
+          plutil -create xml1 "$guest_target/LCAppInfo.plist"
+          plutil -insert LCDataUUID -string synthetic-fixture-container "$guest_target/LCAppInfo.plist"
+          plutil -insert LCSyntheticGuestExecutable -string Frameworks/SyntheticNativeGuestPayload.dylib "$guest_target/LCAppInfo.plist"
+          SIMCTL_CHILD_LC_SYNTHETIC_DUAL_BINARY_TEST=1 xcrun simctl launch "$device" "$bundle_id"
+          swiftc experiments/native-social-guest/verify-host-screenshot.swift -o "$RUNNER_TEMP/verify-host-screenshot"
+          verified=0
+          for attempt in {1..3}; do
+            sleep 25
+            xcrun simctl io "$device" screenshot "$RUNNER_TEMP/synthetic-dual-binary-host.png"
+            if "$RUNNER_TEMP/verify-host-screenshot" "$RUNNER_TEMP/synthetic-dual-binary-host.png"; then
+              verified=1
+              break
+            fi
+          done
+          test -f "$guest_target/synthetic-dual-binary-patched.txt"
+          xcrun otool -hv "$guest_target/SyntheticNativeGuest" | grep -q EXECUTE
+          xcrun otool -hv "$guest_target/Frameworks/SyntheticNativeGuestPayload.dylib" | grep -q DYLIB
+          if test "$verified" != 1; then
+            xcrun simctl spawn "$device" log show --last 6m --style compact \
+              --predicate 'process == "LiveContainer" OR eventMessage CONTAINS "SYNTHETIC_DUAL_BINARY"' \
+              | tail -n 100 || true
+            exit 1
+          fi
+          echo 'dual_binary_host_load=PASS; simulator_only=true; same_process_isolation=FAIL_PREVIOUSLY; production_app_unchanged=true' >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve synthetic screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-dual-binary-host-screenshot
+          path: ${{ runner.temp }}/synthetic-dual-binary-host.png
+          if-no-files-found: ignore
