@@ -58,7 +58,8 @@ jobs:
             -scheme LiveContainer -configuration Debug \
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath "$RUNNER_TEMP/livecontainer-derived" \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES
           test -d "$RUNNER_TEMP/livecontainer-derived/Build/Products/Debug-iphonesimulator/LiveContainer.app"
       - name: Launch prepared guest in simulator host
         shell: bash
