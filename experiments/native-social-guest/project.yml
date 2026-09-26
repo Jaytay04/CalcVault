@@ -26,6 +26,18 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: Synthetic Native Guest
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
+  SyntheticNativeGuestUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: SyntheticNativeGuest
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.example.syntheticnativeguest.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: SyntheticNativeGuest
 
 schemes:
   SyntheticNativeGuest:
@@ -34,3 +46,7 @@ schemes:
         SyntheticNativeGuest: all
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - SyntheticNativeGuestUITests

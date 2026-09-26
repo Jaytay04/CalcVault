@@ -81,6 +81,8 @@ jobs:
           guest_target="$data_container/Documents/Applications/org.example.syntheticnativeguest.app"
           mkdir -p "$data_container/Documents/Applications"
           mkdir -p "$data_container/Documents/Data/Application/synthetic-fixture-container"
+          mkdir -p "$data_container/Library/Application Support"
+          printf '%s' 'Synthetic host-only sentinel' > "$data_container/Library/Application Support/synthetic-host-sentinel.txt"
           ditto "$RUNNER_TEMP/synthetic-guest-derived/Build/Products/Debug-iphonesimulator/SyntheticNativeGuest.app" "$guest_target"
           plutil -create xml1 "$guest_target/LCAppInfo.plist"
           plutil -insert LCDataUUID -string synthetic-fixture-container "$guest_target/LCAppInfo.plist"
@@ -107,6 +109,18 @@ jobs:
             exit 1
           fi
           echo 'synthetic_guest_host_launch=PASS; simulator_only=true; production_app_unchanged=true' >> "$GITHUB_STEP_SUMMARY"
+          echo "SYNTHETIC_SIMULATOR_DEVICE=$device" >> "$GITHUB_ENV"
+      - name: Exercise native controls and synthetic host-file boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild test \
+            -project experiments/native-social-guest/SyntheticNativeGuest.xcodeproj \
+            -scheme SyntheticNativeGuest -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SYNTHETIC_SIMULATOR_DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/synthetic-guest-derived" \
+            -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=NO
       - name: Preserve synthetic screenshot
         if: always()
         uses: actions/upload-artifact@v4
