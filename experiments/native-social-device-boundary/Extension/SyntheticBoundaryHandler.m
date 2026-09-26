@@ -5,15 +5,34 @@
 @interface SyntheticBoundaryHandler : NSObject <NSExtensionRequestHandling>
 @end
 
+static OSStatus QuerySyntheticItem(NSString *service, NSString *account, NSString *group) {
+    NSMutableDictionary *query = [@{
+        (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+        (__bridge id)kSecAttrService: service,
+        (__bridge id)kSecAttrAccount: account,
+        (__bridge id)kSecReturnData: @YES,
+        (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitOne
+    } mutableCopy];
+    if (group.length > 0) {
+        query[(__bridge id)kSecAttrAccessGroup] = group;
+    }
+    CFTypeRef value = NULL;
+    OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &value);
+    if (value != NULL) { CFRelease(value); }
+    return status;
+}
+
 @implementation SyntheticBoundaryHandler
 
 - (void)beginRequestWithExtensionContext:(NSExtensionContext *)context {
     NSDictionary *input = [context.inputItems.firstObject userInfo];
     NSString *hostFile = input[@"hostFile"];
+    NSData *guestBookmark = input[@"guestBookmark"];
     NSString *keychainService = input[@"keychainService"];
     NSString *sharedGroup = input[@"sharedGroup"];
     NSString *hostOnlyGroup = input[@"hostOnlyGroup"];
     if (![hostFile isKindOfClass:NSString.class] ||
+        ![guestBookmark isKindOfClass:NSData.class] ||
         ![keychainService isKindOfClass:NSString.class] ||
         ![sharedGroup isKindOfClass:NSString.class] ||
         ![hostOnlyGroup isKindOfClass:NSString.class]) {
@@ -21,43 +40,45 @@
         return;
     }
 
-    NSError *fileError = nil;
-    NSData *hostData = [NSData dataWithContentsOfFile:hostFile options:0 error:&fileError];
-    BOOL fileReadable = hostData != nil;
+    NSError *beforeError = nil;
+    NSData *beforeData = [NSData dataWithContentsOfFile:hostFile options:0 error:&beforeError];
+    OSStatus hostOnlyBefore = hostOnlyGroup.length > 0
+        ? QuerySyntheticItem(keychainService, @"synthetic-host-explicit-group", hostOnlyGroup)
+        : errSecItemNotFound;
 
-    NSMutableDictionary *query = [@{
-        (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
-        (__bridge id)kSecAttrService: keychainService,
-        (__bridge id)kSecAttrAccount: @"synthetic-host-only",
-        (__bridge id)kSecReturnData: @YES,
-        (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitOne
-    } mutableCopy];
-    if (sharedGroup.length > 0) {
-        query[(__bridge id)kSecAttrAccessGroup] = sharedGroup;
-    }
-    CFTypeRef keychainValue = NULL;
-    OSStatus keychainStatus = SecItemCopyMatching((__bridge CFDictionaryRef)query, &keychainValue);
-    if (keychainValue != NULL) {
-        CFRelease(keychainValue);
-    }
+    BOOL isStale = NO;
+    NSError *bookmarkError = nil;
+    NSURL *guestURL = [NSURL URLByResolvingBookmarkData:guestBookmark options:0 relativeToURL:nil
+                              bookmarkDataIsStale:&isStale error:&bookmarkError];
+    BOOL bookmarkActive = guestURL != nil && !isStale && [guestURL startAccessingSecurityScopedResource];
+    NSURL *guestMarkerURL = [guestURL URLByAppendingPathComponent:@"guest-marker.txt"];
+    NSData *guestData = bookmarkActive
+        ? [NSData dataWithContentsOfURL:guestMarkerURL options:0 error:nil] : nil;
+    NSString *guestValue = guestData == nil ? nil : [[NSString alloc] initWithData:guestData encoding:NSUTF8StringEncoding];
+    BOOL guestMarkerReadable = [guestValue isEqualToString:@"Synthetic guest bookmark fixture"];
 
-    OSStatus hostOnlyStatus = errSecItemNotFound;
-    if (hostOnlyGroup.length > 0) {
-        NSMutableDictionary *hostOnlyQuery = [query mutableCopy];
-        hostOnlyQuery[(__bridge id)kSecAttrAccount] = @"synthetic-host-explicit-group";
-        hostOnlyQuery[(__bridge id)kSecAttrAccessGroup] = hostOnlyGroup;
-        CFTypeRef hostOnlyValue = NULL;
-        hostOnlyStatus = SecItemCopyMatching((__bridge CFDictionaryRef)hostOnlyQuery, &hostOnlyValue);
-        if (hostOnlyValue != NULL) { CFRelease(hostOnlyValue); }
-
-    }
+    NSError *afterError = nil;
+    NSData *afterData = [NSData dataWithContentsOfFile:hostFile options:0 error:&afterError];
+    OSStatus sharedAfter = QuerySyntheticItem(keychainService, @"synthetic-host-only", sharedGroup);
+    OSStatus hostOnlyAfter = hostOnlyGroup.length > 0
+        ? QuerySyntheticItem(keychainService, @"synthetic-host-explicit-group", hostOnlyGroup)
+        : errSecItemNotFound;
+    NSData *mutation = [@"Synthetic extension write attempt" dataUsingEncoding:NSUTF8StringEncoding];
+    BOOL hostWriteSucceeded = bookmarkActive && [mutation writeToFile:hostFile options:NSDataWritingAtomic error:nil];
+    if (bookmarkActive) { [guestURL stopAccessingSecurityScopedResource]; }
 
     NSExtensionItem *result = [NSExtensionItem new];
     result.userInfo = @{
-        @"fileReadable": @(fileReadable),
-        @"fileErrorCode": @(fileError == nil ? 0 : fileError.code),
-        @"keychainStatus": @(keychainStatus),
-        @"hostOnlyStatus": @(hostOnlyStatus),
+        @"bookmarkActive": @(bookmarkActive),
+        @"guestMarkerReadable": @(guestMarkerReadable),
+        @"fileReadableBefore": @(beforeData != nil),
+        @"fileErrorBefore": @(beforeError == nil ? 0 : beforeError.code),
+        @"fileReadableAfter": @(afterData != nil),
+        @"fileErrorAfter": @(afterError == nil ? 0 : afterError.code),
+        @"fileWriteSucceeded": @(hostWriteSucceeded),
+        @"sharedStatusAfter": @(sharedAfter),
+        @"hostOnlyStatusBefore": @(hostOnlyBefore),
+        @"hostOnlyStatusAfter": @(hostOnlyAfter),
         @"extensionPID": @(getpid())
     };
     [context completeRequestReturningItems:@[result] completionHandler:nil];

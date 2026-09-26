@@ -19,6 +19,7 @@
 @property (nonatomic, strong) UIButton *runButton;
 @property (nonatomic, strong) NSExtension *extension;
 @property (nonatomic, strong) NSURL *syntheticFileURL;
+@property (nonatomic, strong) NSURL *syntheticGuestFolderURL;
 @property (nonatomic, strong) NSTimer *timeoutTimer;
 @property (nonatomic, assign) BOOL probePending;
 @property (nonatomic, assign) BOOL keychainFixtureCreated;
@@ -40,18 +41,18 @@ static NSString *const HostOnlyGroupSuffix = @".com.jaylintaylor.calcvault.hosto
     controller.view.backgroundColor = UIColor.systemBackgroundColor;
 
     UILabel *title = [UILabel new];
-    title.text = @"Synthetic isolation test";
+    title.text = @"Synthetic bookmark test";
     title.font = [UIFont preferredFontForTextStyle:UIFontTextStyleTitle1];
     title.numberOfLines = 0;
 
     UILabel *explanation = [UILabel new];
-    explanation.text = @"This disposable app tests whether its extension can read a synthetic host file and Keychain item. It does not open CalcVault data.";
-    explanation.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+    explanation.text = @"This disposable app grants its extension a synthetic guest-folder bookmark, then checks host file and Keychain isolation. It does not open CalcVault data.";
+    explanation.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
     explanation.numberOfLines = 0;
 
     self.statusLabel = [UILabel new];
     self.statusLabel.text = @"Starting test…";
-    self.statusLabel.font = [UIFont monospacedSystemFontOfSize:17 weight:UIFontWeightRegular];
+    self.statusLabel.font = [UIFont monospacedSystemFontOfSize:14 weight:UIFontWeightRegular];
     self.statusLabel.numberOfLines = 0;
     self.statusLabel.accessibilityIdentifier = @"syntheticProbeStatus";
 
@@ -61,7 +62,7 @@ static NSString *const HostOnlyGroupSuffix = @".com.jaylintaylor.calcvault.hosto
 
     UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[title, explanation, self.statusLabel, self.runButton]];
     stack.axis = UILayoutConstraintAxisVertical;
-    stack.spacing = 24;
+    stack.spacing = 18;
     stack.translatesAutoresizingMaskIntoConstraints = NO;
     [controller.view addSubview:stack];
     [NSLayoutConstraint activateConstraints:@[
@@ -151,6 +152,32 @@ static NSString *const HostOnlyGroupSuffix = @".com.jaylintaylor.calcvault.hosto
     NSData *fixture = [@"Synthetic host-only fixture" dataUsingEncoding:NSUTF8StringEncoding];
     if (![fixture writeToURL:self.syntheticFileURL options:NSDataWritingAtomic error:&error]) {
         [self failWithMessage:@"Host file setup failed."];
+        return;
+    }
+
+    NSURL *documentsURL = [[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory
+                                                                 inDomains:NSUserDomainMask].firstObject;
+    if (documentsURL == nil) {
+        [self failWithMessage:@"Synthetic guest folder setup failed."];
+        return;
+    }
+    self.syntheticGuestFolderURL = [documentsURL URLByAppendingPathComponent:
+        [NSString stringWithFormat:@"synthetic-guest-%@", NSUUID.UUID.UUIDString] isDirectory:YES];
+    if (![[NSFileManager defaultManager] createDirectoryAtURL:self.syntheticGuestFolderURL
+                                  withIntermediateDirectories:YES attributes:nil error:&error]) {
+        [self failWithMessage:@"Synthetic guest folder setup failed."];
+        return;
+    }
+    NSURL *guestMarkerURL = [self.syntheticGuestFolderURL URLByAppendingPathComponent:@"guest-marker.txt"];
+    NSData *guestMarker = [@"Synthetic guest bookmark fixture" dataUsingEncoding:NSUTF8StringEncoding];
+    if (![guestMarker writeToURL:guestMarkerURL options:NSDataWritingAtomic error:&error]) {
+        [self failWithMessage:@"Synthetic guest folder setup failed."];
+        return;
+    }
+    NSData *guestBookmark = [self.syntheticGuestFolderURL bookmarkDataWithOptions:(NSURLBookmarkCreationOptions)(1 << 11)
+                                  includingResourceValuesForKeys:nil relativeToURL:nil error:&error];
+    if (guestBookmark.length == 0) {
+        [self failWithMessage:@"Guest-folder bookmark creation failed. No isolation conclusion."];
         return;
     }
 
@@ -250,6 +277,7 @@ static NSString *const HostOnlyGroupSuffix = @".com.jaylintaylor.calcvault.hosto
     NSExtensionItem *request = [NSExtensionItem new];
     request.userInfo = @{
         @"hostFile": self.syntheticFileURL.path,
+        @"guestBookmark": guestBookmark,
         @"keychainService": SyntheticKeychainService,
         @"sharedGroup": self.sharedAppAccessGroup ?: @"",
         @"hostOnlyGroup": self.hostOnlyAccessGroup ?: @""
@@ -290,41 +318,73 @@ static NSString *const HostOnlyGroupSuffix = @".com.jaylintaylor.calcvault.hosto
 - (void)handleExtensionItems:(NSArray<NSExtensionItem *> *)items {
     if (!self.probePending) { return; }
     NSDictionary *report = items.firstObject.userInfo;
-    NSNumber *fileReadableValue = report[@"fileReadable"];
-    NSNumber *fileErrorCodeValue = report[@"fileErrorCode"];
-    NSNumber *keychainStatusValue = report[@"keychainStatus"];
-    NSNumber *hostOnlyStatusValue = report[@"hostOnlyStatus"];
+    NSNumber *bookmarkActiveValue = report[@"bookmarkActive"];
+    NSNumber *guestMarkerValue = report[@"guestMarkerReadable"];
+    NSNumber *fileBeforeValue = report[@"fileReadableBefore"];
+    NSNumber *fileBeforeErrorValue = report[@"fileErrorBefore"];
+    NSNumber *fileAfterValue = report[@"fileReadableAfter"];
+    NSNumber *fileAfterErrorValue = report[@"fileErrorAfter"];
+    NSNumber *fileWriteValue = report[@"fileWriteSucceeded"];
+    NSNumber *sharedStatusValue = report[@"sharedStatusAfter"];
+    NSNumber *hostOnlyBeforeValue = report[@"hostOnlyStatusBefore"];
+    NSNumber *hostOnlyAfterValue = report[@"hostOnlyStatusAfter"];
     NSNumber *extensionPIDValue = report[@"extensionPID"];
-    if (![fileReadableValue isKindOfClass:NSNumber.class] ||
-        ![fileErrorCodeValue isKindOfClass:NSNumber.class] ||
-        ![keychainStatusValue isKindOfClass:NSNumber.class] ||
-        ![hostOnlyStatusValue isKindOfClass:NSNumber.class] ||
+    if (![bookmarkActiveValue isKindOfClass:NSNumber.class] ||
+        ![guestMarkerValue isKindOfClass:NSNumber.class] ||
+        ![fileBeforeValue isKindOfClass:NSNumber.class] ||
+        ![fileBeforeErrorValue isKindOfClass:NSNumber.class] ||
+        ![fileAfterValue isKindOfClass:NSNumber.class] ||
+        ![fileAfterErrorValue isKindOfClass:NSNumber.class] ||
+        ![fileWriteValue isKindOfClass:NSNumber.class] ||
+        ![sharedStatusValue isKindOfClass:NSNumber.class] ||
+        ![hostOnlyBeforeValue isKindOfClass:NSNumber.class] ||
+        ![hostOnlyAfterValue isKindOfClass:NSNumber.class] ||
         ![extensionPIDValue isKindOfClass:NSNumber.class]) {
         [self failWithMessage:@"Extension returned an invalid report."];
         return;
     }
-    BOOL fileReadable = fileReadableValue.boolValue;
-    NSInteger fileErrorCode = fileErrorCodeValue.integerValue;
-    NSInteger keychainStatus = keychainStatusValue.integerValue;
-    NSInteger hostOnlyStatus = hostOnlyStatusValue.integerValue;
+    BOOL bookmarkActive = bookmarkActiveValue.boolValue;
+    BOOL guestMarkerReadable = guestMarkerValue.boolValue;
+    BOOL fileBefore = fileBeforeValue.boolValue;
+    BOOL fileAfter = fileAfterValue.boolValue;
+    BOOL fileWrite = fileWriteValue.boolValue;
+    NSInteger sharedStatus = sharedStatusValue.integerValue;
+    NSInteger hostOnlyBefore = hostOnlyBeforeValue.integerValue;
+    NSInteger hostOnlyAfter = hostOnlyAfterValue.integerValue;
     int extensionPID = extensionPIDValue.intValue;
     if (extensionPID <= 0 || extensionPID == getpid()) {
         [self failWithMessage:@"Separate extension process was not verified."];
         return;
     }
-    NSString *fileResult = fileReadable ? @"READABLE" : @"NOT READABLE";
-    NSString *keychainResult = self.keychainFixtureCreated
-        ? (keychainStatus == errSecSuccess ? @"READABLE" : @"NOT READABLE")
+    NSData *currentHostData = [NSData dataWithContentsOfURL:self.syntheticFileURL];
+    NSString *currentHostValue = currentHostData == nil ? nil
+        : [[NSString alloc] initWithData:currentHostData encoding:NSUTF8StringEncoding];
+    BOOL hostFileUnchanged = [currentHostValue isEqualToString:@"Synthetic host-only fixture"];
+    NSString *sharedResult = self.keychainFixtureCreated
+        ? (sharedStatus == errSecSuccess ? @"READABLE" : @"NOT READABLE")
         : @"NOT TESTED (host fixture unavailable)";
-    NSString *hostOnlyResult = self.hostOnlyFixtureCreated
-        ? (hostOnlyStatus == errSecSuccess ? @"READABLE" : @"NOT READABLE")
+    NSString *hostOnlyBeforeResult = self.hostOnlyFixtureCreated
+        ? (hostOnlyBefore == errSecSuccess ? @"READABLE" : @"NOT READABLE")
+        : @"NOT TESTED (host fixture unavailable)";
+    NSString *hostOnlyAfterResult = self.hostOnlyFixtureCreated
+        ? (hostOnlyAfter == errSecSuccess ? @"READABLE" : @"NOT READABLE")
         : @"NOT TESTED (host fixture unavailable)";
     self.statusLabel.text = [NSString stringWithFormat:
-        @"Host PID: %d\nExtension PID: %d\nHost file: %@ (error %ld)\nShared app-ID Keychain: %@ (status %ld)\nHost-only Keychain: %@ (status %ld)",
-        getpid(), extensionPID, fileResult, (long)fileErrorCode, keychainResult, (long)keychainStatus,
-        hostOnlyResult, (long)hostOnlyStatus];
-    NSLog(@"SYNTHETIC_DEVICE_BOUNDARY_RESULT hostPID=%d extensionPID=%d file=%@ sharedKeychain=%@ hostOnlyKeychain=%@",
-          getpid(), extensionPID, fileResult, keychainResult, hostOnlyResult);
+        @"Host PID: %d\nExtension PID: %d\nGuest bookmark: %@\nGuest marker: %@\nHost file before: %@ (%ld)\nHost file after: %@ (%ld)\nHost write after: %@\nHost file unchanged: %@\nShared Keychain after: %@ (%ld)\nHost-only before: %@ (%ld)\nHost-only after: %@ (%ld)",
+        getpid(), extensionPID,
+        bookmarkActive ? @"ACTIVE" : @"NOT ACTIVE",
+        guestMarkerReadable ? @"READABLE" : @"NOT READABLE",
+        fileBefore ? @"READABLE" : @"NOT READABLE", (long)fileBeforeErrorValue.integerValue,
+        fileAfter ? @"READABLE" : @"NOT READABLE", (long)fileAfterErrorValue.integerValue,
+        fileWrite ? @"SUCCEEDED" : @"DENIED", hostFileUnchanged ? @"YES" : @"NO",
+        sharedResult, (long)sharedStatus, hostOnlyBeforeResult, (long)hostOnlyBefore,
+        hostOnlyAfterResult, (long)hostOnlyAfter];
+    NSLog(@"SYNTHETIC_DEVICE_BOUNDARY_RESULT hostPID=%d extensionPID=%d bookmark=%@ guest=%@ fileBefore=%@ fileAfter=%@ write=%@ unchanged=%@ sharedKeychain=%@ hostOnlyBefore=%@ hostOnlyAfter=%@",
+          getpid(), extensionPID, bookmarkActive ? @"ACTIVE" : @"NOT_ACTIVE",
+          guestMarkerReadable ? @"READABLE" : @"NOT_READABLE",
+          fileBefore ? @"READABLE" : @"NOT_READABLE", fileAfter ? @"READABLE" : @"NOT_READABLE",
+          fileWrite ? @"SUCCEEDED" : @"DENIED", hostFileUnchanged ? @"YES" : @"NO",
+          sharedResult, hostOnlyBeforeResult, hostOnlyAfterResult);
     [self finishProbe];
 }
 
@@ -356,6 +416,10 @@ static NSString *const HostOnlyGroupSuffix = @".com.jaylintaylor.calcvault.hosto
     if (self.syntheticFileURL != nil) {
         [[NSFileManager defaultManager] removeItemAtURL:self.syntheticFileURL error:nil];
         self.syntheticFileURL = nil;
+    }
+    if (self.syntheticGuestFolderURL != nil) {
+        [[NSFileManager defaultManager] removeItemAtURL:self.syntheticGuestFolderURL error:nil];
+        self.syntheticGuestFolderURL = nil;
     }
 }
 
