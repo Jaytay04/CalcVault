@@ -1,0 +1,9 @@
+.DS_Store
+.build-tools/
+build/
+DerivedData/
+CalcVault.xcodeproj/
+*.xcuserstate
+xcuserdata/
+*.ipa
+*.dSYM

@@ -1,0 +1,87 @@
+name: CalcVault
+
+options:
+  minimumXcodeGenVersion: 2.46.0
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+
+configs:
+  Debug: debug
+  Release: release
+  RecoveryTest: debug
+
+packages:
+  Sodium:
+    url: https://github.com/jedisct1/swift-sodium.git
+    exactVersion: 0.11.0
+
+settings:
+  base:
+    IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+    SWIFT_VERSION: "6.0"
+    TARGETED_DEVICE_FAMILY: "1"
+    CODE_SIGN_STYLE: Automatic
+
+targets:
+  CalcVault:
+    type: application
+    platform: iOS
+    sources:
+      - path: CalcVault
+    dependencies:
+      - package: Sodium
+        product: Sodium
+    settings:
+      base:
+        PRODUCT_NAME: CalcVault
+        PRODUCT_BUNDLE_IDENTIFIER: com.jaylintaylor.calcvault
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Calculator
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
+        INFOPLIST_KEY_NSFaceIDUsageDescription: Face ID verifies access to biometric-protected CalcVault key material.
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        SUPPORTS_MACCATALYST: NO
+      configs:
+        RecoveryTest:
+          PRODUCT_BUNDLE_IDENTIFIER: com.jaylintaylor.calcvault.recoverytest
+          PRODUCT_NAME: CalcVaultRecoveryTest
+
+  CalcVaultTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: CalcVaultTests
+    dependencies:
+      - target: CalcVault
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.jaylintaylor.calcvault.tests
+        CODE_SIGNING_ALLOWED: NO
+
+schemes:
+  CalcVault:
+    build:
+      targets:
+        CalcVault: all
+        CalcVaultTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: true
+      targets:
+        - CalcVaultTests
+    archive:
+      config: Release
+
+  CalcVault-RecoveryTest:
+    build:
+      targets:
+        CalcVault: all
+    run:
+      config: RecoveryTest
+    archive:
+      config: RecoveryTest

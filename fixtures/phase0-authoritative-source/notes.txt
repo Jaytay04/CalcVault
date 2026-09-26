@@ -1,0 +1,1 @@
+Synthetic archive entry used to verify read-only TAR listing and missing-file behavior.

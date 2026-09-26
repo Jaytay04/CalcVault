@@ -1,0 +1,266 @@
+name: Native social isolation iOS 26 SDK probe (manual)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sdk-probe:
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Select Xcode 26.6
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+          test "$(xcodebuild -version | tr '\n' ' ')" = "Xcode 26.6 Build version 17F113 "
+          xcrun --sdk iphonesimulator --show-sdk-version
+      - name: Check iOS 18 and iOS 26 API availability
+        shell: bash
+        run: |
+          set +e
+          sdk="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+          ios26_failures=0
+          for target in arm64-apple-ios18.0-simulator arm64-apple-ios26.0-simulator; do
+            for source in experiments/native-social-isolation/probe-*.swift; do
+              echo "::group::$target $source"
+              xcrun swiftc -typecheck -swift-version 6 -target "$target" -sdk "$sdk" "$source"
+              result=$?
+              echo "probe_exit_code=$result"
+              echo "$target $source exit=$result" >> "$GITHUB_STEP_SUMMARY"
+              echo "::endgroup::"
+              if [ "$target" = arm64-apple-ios26.0-simulator ] && [ "$result" -ne 0 ]; then
+                ios26_failures=$((ios26_failures + 1))
+              fi
+            done
+          done
+          exit "$ios26_failures"
+
+  synthetic-build:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - name: Select Xcode and generate disposable project
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+          brew install xcodegen
+          test "$(xcodegen version | awk '{print $2}')" = "2.46.0"
+          cd experiments/native-social-isolation
+          xcodegen generate
+      - name: Build unsigned synthetic iOS app
+        run: |
+          xcodebuild build \
+            -project experiments/native-social-isolation/SyntheticIsolation.xcodeproj \
+            -scheme SyntheticHost \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/synthetic-isolation-build" \
+            CODE_SIGNING_ALLOWED=NO
+      - name: Inspect app and extension bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/synthetic-isolation-build/Build/Products/Debug-iphonesimulator/SyntheticHost.app"
+          test -d "$app"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist"
+          find "$app" -type d -name '*.appex' -print
+          test "$(find "$app" -type d -name '*.appex' | wc -l | tr -d ' ')" = 1
+          echo "synthetic_app_build=PASS; embedded_extension_count=1; signing=DISABLED" >> "$GITHUB_STEP_SUMMARY"
+      - name: Launch synthetic host in iOS 26 simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          device="$(xcrun simctl list -j devices available | jq -r '.devices | to_entries[] | select(.key | contains("iOS-26")) | .value[] | select(.name == "iPhone 17 Pro") | .udid' | head -n 1)"
+          test -n "$device"
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          app="$RUNNER_TEMP/synthetic-isolation-build/Build/Products/Debug-iphonesimulator/SyntheticHost.app"
+          echo "Synthetic host Info.plist:"
+          plutil -p "$app/Info.plist"
+          echo "Synthetic extension Info.plist:"
+          plutil -p "$app/Extensions/SyntheticVaultUI.appex/Info.plist"
+          echo "Generated extension point files:"
+          find "$app" -name '*.appexpt' -print
+          test "$(find "$app" -name '*.appexpt' | wc -l | tr -d ' ')" = 1
+          xcrun simctl install "$device" "$app"
+          container="$(xcrun simctl get_app_container "$device" org.example.syntheticisolation data)"
+          simulator_data="$(dirname "$(dirname "$(dirname "$(dirname "$container")")")")"
+          mkdir -p "$simulator_data/Documents"
+          printf '%s' 'Synthetic host sentinel' > "$container/Documents/synthetic-host-sentinel.txt"
+          printf '%s' "$container/Documents/synthetic-host-sentinel.txt" > "$simulator_data/Documents/synthetic-host-target-path.txt"
+          xcrun simctl launch "$device" org.example.syntheticisolation
+          for attempt in {1..20}; do
+            if [ -f "$container/Documents/synthetic-discovery.txt" ]; then
+              break
+            fi
+            sleep 1
+          done
+          test -f "$container/Documents/synthetic-discovery.txt"
+          status="$(cat "$container/Documents/synthetic-discovery.txt")"
+          echo "synthetic_host_runtime_status=$status" >> "$GITHUB_STEP_SUMMARY"
+          echo "Synthetic host: $status"
+          test "$status" = "Extension discovered"
+          extension_marker="$simulator_data/Documents/synthetic-extension.txt"
+          for attempt in {1..20}; do
+            if [ -f "$extension_marker" ]; then
+              break
+            fi
+            sleep 1
+          done
+          if [ -f "$container/Documents/synthetic-activation.txt" ]; then
+            activation_status="$(cat "$container/Documents/synthetic-activation.txt")"
+            echo "synthetic_host_view_status=$activation_status" >> "$GITHUB_STEP_SUMMARY"
+            echo "Synthetic host view: $activation_status"
+          else
+            echo "synthetic_host_view_status=NO_CALLBACK" >> "$GITHUB_STEP_SUMMARY"
+            echo "Synthetic host view: NO_CALLBACK"
+          fi
+          if [ ! -f "$extension_marker" ]; then
+            xcrun simctl spawn "$device" log show --last 1m --style compact --predicate 'process == "SyntheticVaultUI" AND eventMessage CONTAINS "Synthetic extension marker"' | tail -n 10 || true
+          fi
+          test -f "$extension_marker"
+          test "$(cat "$extension_marker")" = "Extension scene appeared"
+          test ! -e "$container/Documents/synthetic-extension.txt"
+          for attempt in {1..20}; do
+            if [ -f "$simulator_data/Documents/synthetic-extension-read.txt" ]; then
+              break
+            fi
+            sleep 1
+          done
+          test -f "$simulator_data/Documents/synthetic-extension-read.txt"
+          extension_read="$(cat "$simulator_data/Documents/synthetic-extension-read.txt")"
+          echo "Synthetic extension read of host sentinel: $extension_read"
+          echo "synthetic_extension_read_host_sentinel=$extension_read" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s' "$extension_marker" > "$container/Documents/synthetic-target-path.txt"
+          for attempt in {1..20}; do
+            if [ -f "$container/Documents/synthetic-host-read.txt" ]; then
+              break
+            fi
+            sleep 1
+          done
+          test -f "$container/Documents/synthetic-host-read.txt"
+          host_read="$(cat "$container/Documents/synthetic-host-read.txt")"
+          echo "Synthetic host read of extension marker: $host_read"
+          echo "synthetic_host_read_extension_marker=$host_read" >> "$GITHUB_STEP_SUMMARY"
+          test "$host_read" = "NOT_READABLE"
+          echo "synthetic_extension_scene=APPEARED; host_cross_read=NOT_READABLE" >> "$GITHUB_STEP_SUMMARY"
+      - name: Probe PlugIns placement recognized by current SideStore signer
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          device="$(xcrun simctl list -j devices booted | jq -r '.devices[][] | select(.name == "iPhone 17 Pro") | .udid' | head -n 1)"
+          app="$RUNNER_TEMP/synthetic-isolation-build/Build/Products/Debug-iphonesimulator/SyntheticHost.app"
+          if [ -z "$device" ] || [ ! -d "$app/Extensions/SyntheticVaultUI.appex" ]; then
+            echo "plugin_placement_probe=NOT_RUN" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          variant="$RUNNER_TEMP/synthetic-plugin-variant.app"
+          ditto "$app" "$variant"
+          mkdir -p "$variant/PlugIns"
+          mv "$variant/Extensions/SyntheticVaultUI.appex" "$variant/PlugIns/SyntheticVaultUI.appex"
+          xcrun simctl terminate "$device" org.example.syntheticisolation || true
+          xcrun simctl uninstall "$device" org.example.syntheticisolation
+          if ! xcrun simctl install "$device" "$variant"; then
+            echo "plugin_placement_probe=INSTALL_FAILED" >> "$GITHUB_STEP_SUMMARY"
+            echo "PlugIns placement: INSTALL_FAILED"
+            exit 0
+          fi
+          xcrun simctl launch "$device" org.example.syntheticisolation
+          container="$(xcrun simctl get_app_container "$device" org.example.syntheticisolation data)"
+          for attempt in {1..20}; do
+            if [ -f "$container/Documents/synthetic-discovery.txt" ]; then
+              break
+            fi
+            sleep 1
+          done
+          if [ -f "$container/Documents/synthetic-discovery.txt" ]; then
+            status="$(cat "$container/Documents/synthetic-discovery.txt")"
+            echo "plugin_placement_probe=$status" >> "$GITHUB_STEP_SUMMARY"
+            echo "PlugIns placement: $status"
+          else
+            echo "plugin_placement_probe=NO_HOST_STATUS" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Probe ad-hoc-signed reverse boundary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild build \
+            -project experiments/native-social-isolation/SyntheticIsolation.xcodeproj \
+            -scheme SyntheticHost \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/synthetic-isolation-signed-build" \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual
+          app="$RUNNER_TEMP/synthetic-isolation-signed-build/Build/Products/Debug-iphonesimulator/SyntheticHost.app"
+          codesign --verify --strict "$app/Extensions/SyntheticVaultUI.appex"
+          codesign --verify --strict "$app"
+          device="$(xcrun simctl list -j devices booted | jq -r '.devices[][] | select(.name == "iPhone 17 Pro") | .udid' | head -n 1)"
+          test -n "$device"
+          xcrun simctl uninstall "$device" org.example.syntheticisolation || true
+          simulator_data="$(xcrun simctl getenv "$device" HOME)"
+          case "$simulator_data" in
+            */Library/Developer/CoreSimulator/Devices/*/data) ;;
+            *) echo "Unexpected simulator data path"; exit 1 ;;
+          esac
+          rm -f "$simulator_data/Documents/synthetic-extension.txt"
+          rm -f "$simulator_data/Documents/synthetic-extension-read.txt"
+          xcrun simctl install "$device" "$app"
+          container="$(xcrun simctl get_app_container "$device" org.example.syntheticisolation data)"
+          printf '%s' 'Synthetic host sentinel' > "$container/Documents/synthetic-host-sentinel.txt"
+          printf '%s' "$container/Documents/synthetic-host-sentinel.txt" > "$simulator_data/Documents/synthetic-host-target-path.txt"
+          xcrun simctl launch "$device" org.example.syntheticisolation
+          for attempt in {1..30}; do
+            extension_marker="$(find "$simulator_data" -name synthetic-extension.txt -print -quit)"
+            if [ -n "$extension_marker" ] && [ -f "$container/Documents/synthetic-discovery.txt" ]; then
+              break
+            fi
+            sleep 1
+          done
+          test -n "$extension_marker"
+          test "$(cat "$extension_marker")" = "Extension scene appeared"
+          test "$(cat "$container/Documents/synthetic-discovery.txt")" = "Extension discovered"
+          extension_read_path="$(dirname "$extension_marker")/synthetic-extension-read.txt"
+          for attempt in {1..20}; do
+            if [ -f "$extension_read_path" ]; then
+              break
+            fi
+            sleep 1
+          done
+          test -f "$extension_read_path"
+          extension_read="$(cat "$extension_read_path")"
+          echo "Ad-hoc signed extension read of host sentinel: $extension_read"
+          echo "adhoc_signed_extension_read_host_sentinel=$extension_read" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s' "$extension_marker" > "$container/Documents/synthetic-target-path.txt"
+          for attempt in {1..20}; do
+            if [ -f "$container/Documents/synthetic-host-read.txt" ]; then
+              break
+            fi
+            sleep 1
+          done
+          test -f "$container/Documents/synthetic-host-read.txt"
+          host_read="$(cat "$container/Documents/synthetic-host-read.txt")"
+          echo "Ad-hoc signed host read of extension marker: $host_read"
+          echo "adhoc_signed_host_read_extension_marker=$host_read" >> "$GITHUB_STEP_SUMMARY"
+          test "$extension_read" = "NOT_READABLE"
+      - name: Build unsigned synthetic device target
+        if: always()
+        run: |
+          xcodebuild build \
+            -project experiments/native-social-isolation/SyntheticIsolation.xcodeproj \
+            -scheme SyntheticHost \
+            -configuration Debug \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/synthetic-isolation-device-build" \
+            CODE_SIGNING_ALLOWED=NO
+          app="$RUNNER_TEMP/synthetic-isolation-device-build/Build/Products/Debug-iphoneos/SyntheticHost.app"
+          test -d "$app"
+          test "$(find "$app" -type d -name '*.appex' | wc -l | tr -d ' ')" = 1
+          echo "unsigned_device_target_build=PASS; signed_install=NOT_RUN" >> "$GITHUB_STEP_SUMMARY"

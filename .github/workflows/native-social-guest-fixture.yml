@@ -1,0 +1,53 @@
+name: Synthetic native guest fixture (manual)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-fixture:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - name: Select Xcode and generate disposable project
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+          xcodebuild -version
+          brew install xcodegen
+          test "$(xcodegen version | awk '{print $2}')" = "2.46.0"
+          cd experiments/native-social-guest
+          xcodegen generate
+      - name: Build simulator fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild build \
+            -project experiments/native-social-guest/SyntheticNativeGuest.xcodeproj \
+            -scheme SyntheticNativeGuest \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/synthetic-native-guest-simulator" \
+            CODE_SIGNING_ALLOWED=NO
+      - name: Build unsigned device fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild build \
+            -project experiments/native-social-guest/SyntheticNativeGuest.xcodeproj \
+            -scheme SyntheticNativeGuest \
+            -configuration Debug \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/synthetic-native-guest-device" \
+            CODE_SIGNING_ALLOWED=NO
+          app="$RUNNER_TEMP/synthetic-native-guest-device/Build/Products/Debug-iphoneos/SyntheticNativeGuest.app"
+          test -d "$app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")" = 'org.example.syntheticnativeguest'
+          test "$(find "$app" -type d -name '*.appex' | wc -l | tr -d ' ')" = 0
+          echo "synthetic_guest_device_compile=PASS; signing=DISABLED; live_guest_launch=NOT_RUN" >> "$GITHUB_STEP_SUMMARY"
