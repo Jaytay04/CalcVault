@@ -69,6 +69,7 @@ jobs:
           test -n "$device"
           xcrun simctl boot "$device"
           xcrun simctl bootstatus "$device" -b
+          sleep 150
           host="$RUNNER_TEMP/livecontainer-derived/Build/Products/Debug-iphonesimulator/LiveContainer.app"
           bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$host/Info.plist")"
           xcrun simctl install "$device" "$host"
@@ -80,9 +81,22 @@ jobs:
           plutil -create xml1 "$guest_target/LCAppInfo.plist"
           plutil -insert LCDataUUID -string synthetic-fixture-container "$guest_target/LCAppInfo.plist"
           SIMCTL_CHILD_LC_SYNTHETIC_GUEST_TEST=1 xcrun simctl launch "$device" "$bundle_id"
-          sleep 8
-          xcrun simctl io "$device" screenshot "$RUNNER_TEMP/synthetic-guest-host.png"
-          swift experiments/native-social-guest/verify-host-screenshot.swift "$RUNNER_TEMP/synthetic-guest-host.png"
+          swiftc experiments/native-social-guest/verify-host-screenshot.swift -o "$RUNNER_TEMP/verify-host-screenshot"
+          verified=0
+          for attempt in {1..8}; do
+            sleep 25
+            xcrun simctl io "$device" screenshot "$RUNNER_TEMP/synthetic-guest-host.png"
+            if "$RUNNER_TEMP/verify-host-screenshot" "$RUNNER_TEMP/synthetic-guest-host.png"; then
+              verified=1
+              break
+            fi
+          done
+          if test "$verified" != 1; then
+            xcrun simctl spawn "$device" log show --last 8m --style compact \
+              --predicate 'eventMessage CONTAINS "SYNTHETIC_GUEST" OR eventMessage CONTAINS "[LCBootstrap]"' \
+              | tail -n 80 || true
+            exit 1
+          fi
           echo 'synthetic_guest_host_launch=PASS; simulator_only=true; production_app_unchanged=true' >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve synthetic screenshot
         if: always()

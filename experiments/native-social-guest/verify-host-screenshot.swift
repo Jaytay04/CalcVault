@@ -5,7 +5,8 @@ guard CommandLine.arguments.count == 2,
       let image = NSImage(contentsOfFile: CommandLine.arguments[1]),
       let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
 else {
-    fatalError("Expected a simulator screenshot")
+    fputs("Expected a simulator screenshot\n", stderr)
+    exit(2)
 }
 
 let request = VNRecognizeTextRequest()
@@ -16,5 +17,6 @@ let text = (request.results ?? [])
     .joined(separator: "\n")
 print("Synthetic screenshot OCR:\n\(text)")
 guard text.localizedCaseInsensitiveContains("Synthetic native guest") else {
-    fatalError("The synthetic guest was not visible in the host")
+    fputs("The synthetic guest was not visible in the host\n", stderr)
+    exit(1)
 }
