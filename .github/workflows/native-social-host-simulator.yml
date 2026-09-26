@@ -73,6 +73,8 @@ jobs:
           host="$RUNNER_TEMP/livecontainer-derived/Build/Products/Debug-iphonesimulator/LiveContainer.app"
           bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$host/Info.plist")"
           codesign --force --deep --sign - "$host"
+          codesign --force --sign - \
+            --entitlements experiments/native-social-guest/simulator-host.entitlements "$host"
           codesign --verify --deep "$host"
           xcrun simctl install "$device" "$host"
           data_container="$(xcrun simctl get_app_container "$device" "$bundle_id" data)"

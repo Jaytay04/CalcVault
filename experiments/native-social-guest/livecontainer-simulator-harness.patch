@@ -1,3 +1,18 @@
+diff --git a/LiveContainer/LCSharedUtils.m b/LiveContainer/LCSharedUtils.m
+--- a/LiveContainer/LCSharedUtils.m
++++ b/LiveContainer/LCSharedUtils.m
+@@ -4,2 +4,3 @@
+ #import "utils.h"
++#include <stdlib.h>
+ @import MachO;
+@@ -15,2 +15,7 @@
+ + (NSString*) teamIdentifier {
++#if TARGET_OS_SIMULATOR
++    if (getenv("LC_SYNTHETIC_GUEST_TEST")) {
++        return @"AAAAA11111";
++    }
++#endif
+     static NSString* ans = nil;
 diff --git a/LiveContainer/LCBootstrap.m b/LiveContainer/LCBootstrap.m
 --- a/LiveContainer/LCBootstrap.m
 +++ b/LiveContainer/LCBootstrap.m
