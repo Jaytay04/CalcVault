@@ -1,0 +1,104 @@
+name: Synthetic LiveProcess sandbox probe (manual)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  liveprocess-file-boundary:
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+      - name: Select pinned toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+          xcodebuild -version
+          test "$(uname -m)" = arm64
+          brew install xcodegen
+          test "$(xcodegen version | awk '{print $2}')" = 2.46.0
+      - name: Fetch pinned disposable host
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch 3.8.0 --recurse-submodules \
+            https://github.com/LiveContainer/LiveContainer.git "$RUNNER_TEMP/livecontainer-host"
+          test "$(git -C "$RUNNER_TEMP/livecontainer-host" rev-parse HEAD)" = \
+            e370a92dfc03ce109ebce00ed4a7cfc64ad1c801
+          git -C "$RUNNER_TEMP/livecontainer-host" apply \
+            "$GITHUB_WORKSPACE/experiments/native-social-guest/liveprocess-sandbox-probe.patch"
+      - name: Build synthetic guest and disposable host
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd experiments/native-social-guest
+          xcodegen generate
+          cd "$GITHUB_WORKSPACE"
+          xcodebuild build \
+            -project experiments/native-social-guest/SyntheticNativeGuest.xcodeproj \
+            -scheme SyntheticNativeGuest -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/synthetic-guest-derived" \
+            CODE_SIGNING_ALLOWED=NO
+          xcodebuild build \
+            -project "$RUNNER_TEMP/livecontainer-host/LiveContainer.xcodeproj" \
+            -scheme LiveContainer -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/livecontainer-derived" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES
+          test -d "$RUNNER_TEMP/livecontainer-derived/Build/Products/Debug-iphonesimulator/LiveContainer.app/PlugIns/LiveProcess.appex"
+      - name: Launch extension and probe synthetic host file
+        shell: bash
+        run: |
+          set -euo pipefail
+          device="$(xcrun simctl list devices available -j | jq -r '[.devices[][] | select(.name | startswith("iPhone")) | .udid][0] // empty')"
+          test -n "$device"
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          sleep 150
+          host="$RUNNER_TEMP/livecontainer-derived/Build/Products/Debug-iphonesimulator/LiveContainer.app"
+          extension="$host/PlugIns/LiveProcess.appex"
+          bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$host/Info.plist")"
+          codesign --force --deep --sign - "$host"
+          codesign --force --sign - \
+            --entitlements experiments/native-social-guest/simulator-host.entitlements "$extension"
+          codesign --force --sign - \
+            --entitlements experiments/native-social-guest/simulator-host.entitlements "$host"
+          codesign --verify --deep "$host"
+          codesign -d --entitlements - "$host"
+          codesign -d --entitlements - "$extension"
+          xcrun simctl install "$device" "$host"
+          data_container="$(xcrun simctl get_app_container "$device" "$bundle_id" data)"
+          guest_target="$data_container/Documents/Applications/org.example.syntheticnativeguest.app"
+          mkdir -p "$data_container/Documents/Applications"
+          mkdir -p "$data_container/Documents/Data/Application/synthetic-fixture-container"
+          mkdir -p "$data_container/Library/Application Support"
+          printf '%s' 'Synthetic host-only sentinel' > "$data_container/Library/Application Support/synthetic-host-sentinel.txt"
+          ditto "$RUNNER_TEMP/synthetic-guest-derived/Build/Products/Debug-iphonesimulator/SyntheticNativeGuest.app" "$guest_target"
+          plutil -create xml1 "$guest_target/LCAppInfo.plist"
+          plutil -insert LCDataUUID -string synthetic-fixture-container "$guest_target/LCAppInfo.plist"
+          SIMCTL_CHILD_LC_SYNTHETIC_LIVEPROCESS_PROBE=1 xcrun simctl launch "$device" "$bundle_id"
+          found=0
+          for attempt in {1..5}; do
+            sleep 20
+            xcrun simctl spawn "$device" log show --last 5m --style compact \
+              --predicate 'eventMessage CONTAINS "SYNTHETIC_LIVEPROCESS"' \
+              > "$RUNNER_TEMP/liveprocess-probe.log"
+            if grep -q 'SYNTHETIC_LIVEPROCESS_FILE_PROBE' "$RUNNER_TEMP/liveprocess-probe.log"; then
+              found=1
+              break
+            fi
+          done
+          sed -n '/SYNTHETIC_LIVEPROCESS/p' "$RUNNER_TEMP/liveprocess-probe.log" | tail -n 30
+          test "$found" = 1
+          if grep -q 'SYNTHETIC_LIVEPROCESS_FILE_PROBE.*result=READABLE' "$RUNNER_TEMP/liveprocess-probe.log"; then
+            echo 'Synthetic LiveProcess read the host-only file: isolation FAIL' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          grep -q 'SYNTHETIC_LIVEPROCESS_FILE_PROBE.*result=DENIED' "$RUNNER_TEMP/liveprocess-probe.log"
+          echo 'Synthetic LiveProcess host-file read denied in simulator; guest execution and device boundary untested' >> "$GITHUB_STEP_SUMMARY"

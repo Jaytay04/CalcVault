@@ -1,0 +1,69 @@
+diff --git a/LiveContainer/LCSharedUtils.m b/LiveContainer/LCSharedUtils.m
+--- a/LiveContainer/LCSharedUtils.m
++++ b/LiveContainer/LCSharedUtils.m
+@@ -4,2 +4,3 @@
+ #import "utils.h"
++#include <stdlib.h>
+ @import MachO;
+@@ -13,2 +14,7 @@
+ + (NSString*) teamIdentifier {
++#if TARGET_OS_SIMULATOR
++    if (getenv("LC_SYNTHETIC_LIVEPROCESS_PROBE")) {
++        return @"AAAAA11111";
++    }
++#endif
+     static NSString* ans = nil;
+diff --git a/LiveContainerSwiftUI/App/LiveContainerSwiftUIApp.swift b/LiveContainerSwiftUI/App/LiveContainerSwiftUIApp.swift
+--- a/LiveContainerSwiftUI/App/LiveContainerSwiftUIApp.swift
++++ b/LiveContainerSwiftUI/App/LiveContainerSwiftUIApp.swift
+@@ -99,5 +99,17 @@
+             LCTabView(appDataFolderNames: $appDataFolderNames, tweakFolderNames: $tweakFolderNames)
+                 .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
+                 .environmentObject(DataManager.shared.model)
+                 .environmentObject(LCAppSortManager.shared)
++#if targetEnvironment(simulator)
++                .onAppear {
++                    guard ProcessInfo.processInfo.environment["LC_SYNTHETIC_LIVEPROCESS_PROBE"] == "1" else { return }
++                    UserDefaults.standard.set("org.example.syntheticnativeguest.app", forKey: "selected")
++                    UserDefaults.standard.set("synthetic-fixture-container", forKey: "selectedContainer")
++                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
++                        LCUtils.launchMultitaskGuestApp("Synthetic probe") { pid, error in
++                            NSLog("SYNTHETIC_LIVEPROCESS_REQUEST pid=\(String(describing: pid)) error=\(String(describing: error))")
++                        }
++                    }
++                }
++#endif
+         }
+diff --git a/MultitaskSupport/AppSceneViewController.m b/MultitaskSupport/AppSceneViewController.m
+--- a/MultitaskSupport/AppSceneViewController.m
++++ b/MultitaskSupport/AppSceneViewController.m
+@@ -63,6 +63,11 @@
+         @"selectedContainer": _dataUUID,
+         @"bookmarks": bookmarks,
+         @"lcHomePath": NSHomeDirectory(),
+     }.mutableCopy;
++#if TARGET_OS_SIMULATOR
++    if (getenv("LC_SYNTHETIC_LIVEPROCESS_PROBE")) {
++        userInfo[@"syntheticProbe"] = @YES;
++    }
++#endif
+     
+     NSString* launchAppUrlScheme = [NSUserDefaults.standardUserDefaults stringForKey:@"launchAppUrlScheme"];
+diff --git a/LiveProcess/main.m b/LiveProcess/main.m
+--- a/LiveProcess/main.m
++++ b/LiveProcess/main.m
+@@ -76,4 +76,14 @@
+         access = [bookmarkedUrls[i] startAccessingSecurityScopedResource];
+     }
+     
++#if TARGET_OS_SIMULATOR
++    if ([appInfo[@"syntheticProbe"] boolValue]) {
++        NSString *hostFile = [appInfo[@"lcHomePath"] stringByAppendingPathComponent:@"Library/Application Support/synthetic-host-sentinel.txt"];
++        NSString *observed = [NSString stringWithContentsOfFile:hostFile encoding:NSUTF8StringEncoding error:nil];
++        NSString *result = [observed isEqualToString:@"Synthetic host-only sentinel"] ? @"READABLE" : @"DENIED";
++        NSLog(@"SYNTHETIC_LIVEPROCESS_FILE_PROBE pid=%d result=%@", getpid(), result);
++        return 0;
++    }
++#endif
++
+     if ([appInfo[@"selected"] isEqualToString:@"builtinSideStore"]) {
