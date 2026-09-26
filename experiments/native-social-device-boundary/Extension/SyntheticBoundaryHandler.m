@@ -50,10 +50,12 @@ static OSStatus QuerySyntheticItem(NSString *service, NSString *account, NSStrin
     NSError *bookmarkError = nil;
     NSURL *guestURL = [NSURL URLByResolvingBookmarkData:guestBookmark options:0 relativeToURL:nil
                               bookmarkDataIsStale:&isStale error:&bookmarkError];
-    BOOL bookmarkActive = guestURL != nil && !isStale && [guestURL startAccessingSecurityScopedResource];
+    BOOL bookmarkResolved = guestURL != nil;
+    BOOL bookmarkActive = bookmarkResolved && !isStale && [guestURL startAccessingSecurityScopedResource];
     NSURL *guestMarkerURL = [guestURL URLByAppendingPathComponent:@"guest-marker.txt"];
-    NSData *guestData = bookmarkActive
-        ? [NSData dataWithContentsOfURL:guestMarkerURL options:0 error:nil] : nil;
+    NSError *guestReadError = nil;
+    NSData *guestData = bookmarkResolved
+        ? [NSData dataWithContentsOfURL:guestMarkerURL options:0 error:&guestReadError] : nil;
     NSString *guestValue = guestData == nil ? nil : [[NSString alloc] initWithData:guestData encoding:NSUTF8StringEncoding];
     BOOL guestMarkerReadable = [guestValue isEqualToString:@"Synthetic guest bookmark fixture"];
 
@@ -70,7 +72,11 @@ static OSStatus QuerySyntheticItem(NSString *service, NSString *account, NSStrin
     NSExtensionItem *result = [NSExtensionItem new];
     result.userInfo = @{
         @"bookmarkActive": @(bookmarkActive),
+        @"bookmarkResolved": @(bookmarkResolved),
+        @"bookmarkStale": @(isStale),
+        @"bookmarkError": @(bookmarkError == nil ? 0 : bookmarkError.code),
         @"guestMarkerReadable": @(guestMarkerReadable),
+        @"guestReadError": @(guestReadError == nil ? 0 : guestReadError.code),
         @"fileReadableBefore": @(beforeData != nil),
         @"fileErrorBefore": @(beforeError == nil ? 0 : beforeError.code),
         @"fileReadableAfter": @(afterData != nil),

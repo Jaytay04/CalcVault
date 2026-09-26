@@ -319,7 +319,11 @@ static NSString *const HostOnlyGroupSuffix = @".com.jaylintaylor.calcvault.hosto
     if (!self.probePending) { return; }
     NSDictionary *report = items.firstObject.userInfo;
     NSNumber *bookmarkActiveValue = report[@"bookmarkActive"];
+    NSNumber *bookmarkResolvedValue = report[@"bookmarkResolved"];
+    NSNumber *bookmarkStaleValue = report[@"bookmarkStale"];
+    NSNumber *bookmarkErrorValue = report[@"bookmarkError"];
     NSNumber *guestMarkerValue = report[@"guestMarkerReadable"];
+    NSNumber *guestReadErrorValue = report[@"guestReadError"];
     NSNumber *fileBeforeValue = report[@"fileReadableBefore"];
     NSNumber *fileBeforeErrorValue = report[@"fileErrorBefore"];
     NSNumber *fileAfterValue = report[@"fileReadableAfter"];
@@ -330,7 +334,11 @@ static NSString *const HostOnlyGroupSuffix = @".com.jaylintaylor.calcvault.hosto
     NSNumber *hostOnlyAfterValue = report[@"hostOnlyStatusAfter"];
     NSNumber *extensionPIDValue = report[@"extensionPID"];
     if (![bookmarkActiveValue isKindOfClass:NSNumber.class] ||
+        ![bookmarkResolvedValue isKindOfClass:NSNumber.class] ||
+        ![bookmarkStaleValue isKindOfClass:NSNumber.class] ||
+        ![bookmarkErrorValue isKindOfClass:NSNumber.class] ||
         ![guestMarkerValue isKindOfClass:NSNumber.class] ||
+        ![guestReadErrorValue isKindOfClass:NSNumber.class] ||
         ![fileBeforeValue isKindOfClass:NSNumber.class] ||
         ![fileBeforeErrorValue isKindOfClass:NSNumber.class] ||
         ![fileAfterValue isKindOfClass:NSNumber.class] ||
@@ -344,6 +352,8 @@ static NSString *const HostOnlyGroupSuffix = @".com.jaylintaylor.calcvault.hosto
         return;
     }
     BOOL bookmarkActive = bookmarkActiveValue.boolValue;
+    BOOL bookmarkResolved = bookmarkResolvedValue.boolValue;
+    BOOL bookmarkStale = bookmarkStaleValue.boolValue;
     BOOL guestMarkerReadable = guestMarkerValue.boolValue;
     BOOL fileBefore = fileBeforeValue.boolValue;
     BOOL fileAfter = fileAfterValue.boolValue;
@@ -370,18 +380,21 @@ static NSString *const HostOnlyGroupSuffix = @".com.jaylintaylor.calcvault.hosto
         ? (hostOnlyAfter == errSecSuccess ? @"READABLE" : @"NOT READABLE")
         : @"NOT TESTED (host fixture unavailable)";
     self.statusLabel.text = [NSString stringWithFormat:
-        @"Host PID: %d\nExtension PID: %d\nGuest bookmark: %@\nGuest marker: %@\nHost file before: %@ (%ld)\nHost file after: %@ (%ld)\nHost write after: %@\nHost file unchanged: %@\nShared Keychain after: %@ (%ld)\nHost-only before: %@ (%ld)\nHost-only after: %@ (%ld)",
+        @"Host PID: %d\nExtension PID: %d\nBookmark resolved: %@ (%ld)\nBookmark stale: %@\nBookmark access: %@\nGuest marker: %@ (%ld)\nHost file before: %@ (%ld)\nHost file after: %@ (%ld)\nHost write after: %@\nHost file unchanged: %@\nShared Keychain after: %@ (%ld)\nHost-only before: %@ (%ld)\nHost-only after: %@ (%ld)",
         getpid(), extensionPID,
+        bookmarkResolved ? @"YES" : @"NO", (long)bookmarkErrorValue.integerValue,
+        bookmarkStale ? @"YES" : @"NO",
         bookmarkActive ? @"ACTIVE" : @"NOT ACTIVE",
-        guestMarkerReadable ? @"READABLE" : @"NOT READABLE",
+        guestMarkerReadable ? @"READABLE" : @"NOT READABLE", (long)guestReadErrorValue.integerValue,
         fileBefore ? @"READABLE" : @"NOT READABLE", (long)fileBeforeErrorValue.integerValue,
         fileAfter ? @"READABLE" : @"NOT READABLE", (long)fileAfterErrorValue.integerValue,
         fileWrite ? @"SUCCEEDED" : @"DENIED", hostFileUnchanged ? @"YES" : @"NO",
         sharedResult, (long)sharedStatus, hostOnlyBeforeResult, (long)hostOnlyBefore,
         hostOnlyAfterResult, (long)hostOnlyAfter];
-    NSLog(@"SYNTHETIC_DEVICE_BOUNDARY_RESULT hostPID=%d extensionPID=%d bookmark=%@ guest=%@ fileBefore=%@ fileAfter=%@ write=%@ unchanged=%@ sharedKeychain=%@ hostOnlyBefore=%@ hostOnlyAfter=%@",
-          getpid(), extensionPID, bookmarkActive ? @"ACTIVE" : @"NOT_ACTIVE",
-          guestMarkerReadable ? @"READABLE" : @"NOT_READABLE",
+    NSLog(@"SYNTHETIC_DEVICE_BOUNDARY_RESULT hostPID=%d extensionPID=%d bookmarkResolved=%@ bookmarkError=%ld bookmarkStale=%@ bookmark=%@ guest=%@ guestError=%ld fileBefore=%@ fileAfter=%@ write=%@ unchanged=%@ sharedKeychain=%@ hostOnlyBefore=%@ hostOnlyAfter=%@",
+          getpid(), extensionPID, bookmarkResolved ? @"YES" : @"NO", (long)bookmarkErrorValue.integerValue,
+          bookmarkStale ? @"YES" : @"NO", bookmarkActive ? @"ACTIVE" : @"NOT_ACTIVE",
+          guestMarkerReadable ? @"READABLE" : @"NOT_READABLE", (long)guestReadErrorValue.integerValue,
           fileBefore ? @"READABLE" : @"NOT_READABLE", fileAfter ? @"READABLE" : @"NOT_READABLE",
           fileWrite ? @"SUCCEEDED" : @"DENIED", hostFileUnchanged ? @"YES" : @"NO",
           sharedResult, hostOnlyBeforeResult, hostOnlyAfterResult);
