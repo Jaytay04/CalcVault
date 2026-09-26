@@ -50,7 +50,7 @@ jobs:
           lipo -archs "$device_app/SyntheticDeviceBoundary" | grep -qw arm64
           codesign --force --sign - "$device_app/PlugIns/SyntheticBoundaryExtension.appex"
           codesign --force --sign - \
-            --entitlements experiments/native-social-device-boundary/Host/SyntheticHost.entitlements "$device_app"
+            --entitlements Host/SyntheticHost.entitlements "$device_app"
           codesign --verify --deep "$device_app"
           codesign -d --entitlements - "$device_app" 2>/dev/null \
             | grep -q 'FAKETEAMID.com.jaylintaylor.calcvault.hostonly'
