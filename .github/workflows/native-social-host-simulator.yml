@@ -1,0 +1,92 @@
+name: Synthetic native guest host launch (manual)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-launch:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - name: Select pinned toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+          xcodebuild -version
+          test "$(uname -m)" = arm64
+          brew install xcodegen
+          test "$(xcodegen version | awk '{print $2}')" = 2.46.0
+      - name: Fetch pinned disposable host
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch 3.8.0 --recurse-submodules \
+            https://github.com/LiveContainer/LiveContainer.git "$RUNNER_TEMP/livecontainer-host"
+          test "$(git -C "$RUNNER_TEMP/livecontainer-host" rev-parse HEAD)" = \
+            e370a92dfc03ce109ebce00ed4a7cfc64ad1c801
+          test "$(git -C "$RUNNER_TEMP/livecontainer-host" diff --submodule=short --exit-code)" = ''
+          git -C "$RUNNER_TEMP/livecontainer-host" apply \
+            "$GITHUB_WORKSPACE/experiments/native-social-guest/livecontainer-simulator-harness.patch"
+      - name: Build synthetic guest for simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd experiments/native-social-guest
+          xcodegen generate
+          cd "$GITHUB_WORKSPACE"
+          xcodebuild build \
+            -project experiments/native-social-guest/SyntheticNativeGuest.xcodeproj \
+            -scheme SyntheticNativeGuest -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/synthetic-guest-derived" \
+            CODE_SIGNING_ALLOWED=NO
+          guest="$RUNNER_TEMP/synthetic-guest-derived/Build/Products/Debug-iphonesimulator/SyntheticNativeGuest.app"
+          test -d "$guest"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$guest/Info.plist")" = org.example.syntheticnativeguest
+          lipo -archs "$guest/SyntheticNativeGuest"
+      - name: Build disposable host for simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild build \
+            -project "$RUNNER_TEMP/livecontainer-host/LiveContainer.xcodeproj" \
+            -scheme LiveContainer -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/livecontainer-derived" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+          test -d "$RUNNER_TEMP/livecontainer-derived/Build/Products/Debug-iphonesimulator/LiveContainer.app"
+      - name: Launch prepared guest in simulator host
+        shell: bash
+        run: |
+          set -euo pipefail
+          device="$(xcrun simctl list devices available -j | jq -r '[.devices[][] | select(.name | startswith("iPhone")) | .udid][0] // empty')"
+          test -n "$device"
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          host="$RUNNER_TEMP/livecontainer-derived/Build/Products/Debug-iphonesimulator/LiveContainer.app"
+          bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$host/Info.plist")"
+          xcrun simctl install "$device" "$host"
+          data_container="$(xcrun simctl get_app_container "$device" "$bundle_id" data)"
+          guest_target="$data_container/Documents/Applications/org.example.syntheticnativeguest.app"
+          mkdir -p "$data_container/Documents/Applications"
+          mkdir -p "$data_container/Documents/Data/Application/synthetic-fixture-container"
+          ditto "$RUNNER_TEMP/synthetic-guest-derived/Build/Products/Debug-iphonesimulator/SyntheticNativeGuest.app" "$guest_target"
+          plutil -create xml1 "$guest_target/LCAppInfo.plist"
+          plutil -insert LCDataUUID -string synthetic-fixture-container "$guest_target/LCAppInfo.plist"
+          SIMCTL_CHILD_LC_SYNTHETIC_GUEST_TEST=1 xcrun simctl launch "$device" "$bundle_id"
+          sleep 8
+          xcrun simctl io "$device" screenshot "$RUNNER_TEMP/synthetic-guest-host.png"
+          swift experiments/native-social-guest/verify-host-screenshot.swift "$RUNNER_TEMP/synthetic-guest-host.png"
+          echo 'synthetic_guest_host_launch=PASS; simulator_only=true; production_app_unchanged=true' >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve synthetic screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-guest-host-screenshot
+          path: ${{ runner.temp }}/synthetic-guest-host.png
+          if-no-files-found: ignore

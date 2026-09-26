@@ -1,0 +1,30 @@
+diff --git a/LiveContainer/LCBootstrap.m b/LiveContainer/LCBootstrap.m
+--- a/LiveContainer/LCBootstrap.m
++++ b/LiveContainer/LCBootstrap.m
+@@ -680,3 +680,26 @@ int LiveContainerMain(int argc, char *argv[]) {
+     NSString *selectedApp = [lcUserDefaults stringForKey:@"selected"];
+     NSString *selectedContainer = [lcUserDefaults stringForKey:@"selectedContainer"];
++#if TARGET_OS_SIMULATOR
++    if (getenv("LC_SYNTHETIC_GUEST_TEST")) {
++        NSString *guestName = @"org.example.syntheticnativeguest.app";
++        NSString *guestPath = [NSString stringWithFormat:@"%s/Documents/Applications/%@", getenv("LC_HOME_PATH"), guestName];
++        NSString *guestExecutable = [guestPath stringByAppendingPathComponent:@"SyntheticNativeGuest"];
++        NSString *patchMarker = [guestPath stringByAppendingPathComponent:@"synthetic-patched.txt"];
++        if (![[NSFileManager defaultManager] fileExistsAtPath:patchMarker]) {
++            NSString *patchError = LCParseMachO(guestExecutable.UTF8String, false, ^(const char *path, struct mach_header_64 *header, int fd, void *filePtr) {
++                if (header->cputype == CPU_TYPE_ARM64) {
++                    LCPatchExecSlice(path, header, false);
++                }
++            });
++            if (patchError) {
++                NSLog(@"SYNTHETIC_GUEST_PATCH_FAILED: %@", patchError);
++            } else {
++                [@"patched" writeToFile:patchMarker atomically:YES encoding:NSUTF8StringEncoding error:nil];
++                NSLog(@"SYNTHETIC_GUEST_PATCH_PASSED");
++            }
++        }
++        selectedApp = guestName;
++        selectedContainer = @"synthetic-fixture-container";
++    }
++#endif
+     NSString *launchUrl = nil;
