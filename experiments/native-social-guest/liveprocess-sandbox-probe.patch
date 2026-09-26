@@ -54,7 +54,21 @@ diff --git a/MultitaskSupport/AppSceneViewController.m b/MultitaskSupport/AppSce
 diff --git a/LiveProcess/main.m b/LiveProcess/main.m
 --- a/LiveProcess/main.m
 +++ b/LiveProcess/main.m
-@@ -76,4 +76,14 @@
+@@ -66,4 +66,13 @@
+     [lcUserDefaults setObject:appInfo[@"selected"] forKey:@"selected"];
+     [lcUserDefaults setObject:appInfo[@"selectedContainer"] forKey:@"selectedContainer"];
+     
++#if TARGET_OS_SIMULATOR
++    if ([appInfo[@"syntheticProbe"] boolValue]) {
++        NSString *hostFile = [appInfo[@"lcHomePath"] stringByAppendingPathComponent:@"Library/Application Support/synthetic-host-sentinel.txt"];
++        NSString *observed = [NSString stringWithContentsOfFile:hostFile encoding:NSUTF8StringEncoding error:nil];
++        NSString *result = [observed isEqualToString:@"Synthetic host-only sentinel"] ? @"READABLE" : @"DENIED";
++        NSLog(@"SYNTHETIC_LIVEPROCESS_PREBOOKMARK_FILE_PROBE pid=%d result=%@", getpid(), result);
++    }
++#endif
++
+     bool access = false;
+@@ -76,4 +85,14 @@
          access = [bookmarkedUrls[i] startAccessingSecurityScopedResource];
      }
      

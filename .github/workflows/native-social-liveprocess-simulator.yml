@@ -107,6 +107,7 @@ jobs:
           done
           sed -n '/SYNTHETIC_LIVEPROCESS/p' "$RUNNER_TEMP/liveprocess-probe.log" | tail -n 30
           test "$found" = 1
+          grep -q 'SYNTHETIC_LIVEPROCESS_PREBOOKMARK_FILE_PROBE' "$RUNNER_TEMP/liveprocess-probe.log"
           if grep -q 'SYNTHETIC_LIVEPROCESS_FILE_PROBE.*result=READABLE' "$RUNNER_TEMP/liveprocess-probe.log"; then
             echo 'Synthetic LiveProcess read the host-only file: isolation FAIL' >> "$GITHUB_STEP_SUMMARY"
             exit 1
