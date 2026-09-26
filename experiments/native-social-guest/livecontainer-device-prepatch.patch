@@ -1,0 +1,23 @@
+diff --git a/LiveContainer/LCBootstrap.m b/LiveContainer/LCBootstrap.m
+--- a/LiveContainer/LCBootstrap.m
++++ b/LiveContainer/LCBootstrap.m
+@@ -680,3 +680,19 @@ int LiveContainerMain(int argc, char *argv[]) {
+     NSString *selectedApp = [lcUserDefaults stringForKey:@"selected"];
+     NSString *selectedContainer = [lcUserDefaults stringForKey:@"selectedContainer"];
++#if TARGET_OS_SIMULATOR
++    const char *syntheticExecutable = getenv("LC_SYNTHETIC_PREPATCH_EXECUTABLE");
++    if (syntheticExecutable && syntheticExecutable[0]) {
++        __block BOOL patchedARM64 = NO;
++        __block int patchResult = -1;
++        NSString *patchError = LCParseMachO(syntheticExecutable, false, ^(const char *path, struct mach_header_64 *header, int fd, void *filePtr) {
++            if (header->cputype == CPU_TYPE_ARM64) {
++                patchResult = LCPatchExecSlice(path, header, false);
++                patchedARM64 = YES;
++            }
++        });
++        NSString *result = patchedARM64 && !patchError && patchResult == 0 ? @"PATCHED" : @"FAILED";
++        [result writeToFile:[NSString stringWithFormat:@"%s.prepatch-result", syntheticExecutable] atomically:YES encoding:NSUTF8StringEncoding error:nil];
++        NSLog(@"SYNTHETIC_DEVICE_PREPATCH result=%@ flags=%d error=%@", result, patchResult, patchError ?: @"none");
++    }
++#endif
+     NSString *launchUrl = nil;
