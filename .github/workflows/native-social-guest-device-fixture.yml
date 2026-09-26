@@ -1,4 +1,4 @@
-name: Synthetic native guest device fixture (manual)
+name: Synthetic native guest dual-binary fixture (manual)
 
 on:
   workflow_dispatch:
@@ -21,7 +21,7 @@ jobs:
           test "$(uname -m)" = arm64
           brew install xcodegen
           test "$(xcodegen version | awk '{print $2}')" = 2.46.0
-      - name: Build unsigned, disposable iPhone guest
+      - name: Build normal executable and stage unsigned guest payload
         shell: bash
         run: |
           set -euo pipefail
@@ -34,14 +34,18 @@ jobs:
             -sdk iphoneos -destination 'generic/platform=iOS' \
             -derivedDataPath "$RUNNER_TEMP/synthetic-device-derived" \
             PRODUCT_BUNDLE_IDENTIFIER=com.jaylintaylor.calcvault \
+            CURRENT_PROJECT_VERSION=2 MARKETING_VERSION=1.0.1 \
             CODE_SIGNING_ALLOWED=NO
           guest="$RUNNER_TEMP/synthetic-device-derived/Build/Products/Release-iphoneos/SyntheticNativeGuest.app"
           test -f "$guest/SyntheticNativeGuest"
           test ! -f "$guest/SyntheticNativeGuest.debug.dylib"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$guest/Info.plist")" = com.jaylintaylor.calcvault
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$guest/Info.plist")" = 2
           test "$(find "$guest" -type d -name '*.appex' | wc -l | tr -d ' ')" = 0
           xcrun vtool -show-build "$guest/SyntheticNativeGuest" | grep -q 'platform IOS'
           xcrun otool -hv "$guest/SyntheticNativeGuest" | grep -q EXECUTE
+          mkdir -p "$guest/Frameworks"
+          cp "$guest/SyntheticNativeGuest" "$guest/Frameworks/SyntheticNativeGuestPayload.dylib"
           echo "guest=$guest" >> "$GITHUB_ENV"
       - name: Fetch pinned, disposable prepatch host
         shell: bash
@@ -60,7 +64,7 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/livecontainer-prepatch-derived" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
             ARCHS=arm64 ONLY_ACTIVE_ARCH=YES
-      - name: Prepatch iPhone executable as an untrusted file
+      - name: Prepatch only the embedded payload and preserve launchable main
         shell: bash
         run: |
           set -euo pipefail
@@ -79,39 +83,43 @@ jobs:
           data_container="$(xcrun simctl get_app_container "$device" "$bundle_id" data)"
           staged="$data_container/Documents/SyntheticNativeGuest.app"
           ditto "$guest" "$staged"
-          before="$(shasum -a 256 "$staged/SyntheticNativeGuest" | awk '{print $1}')"
-          SIMCTL_CHILD_LC_SYNTHETIC_PREPATCH_EXECUTABLE="$staged/SyntheticNativeGuest" \
+          payload="$staged/Frameworks/SyntheticNativeGuestPayload.dylib"
+          before="$(shasum -a 256 "$payload" | awk '{print $1}')"
+          SIMCTL_CHILD_LC_SYNTHETIC_PREPATCH_EXECUTABLE="$payload" \
             xcrun simctl launch "$device" "$bundle_id"
           patched=0
           for attempt in {1..20}; do
-            if test -f "$staged/SyntheticNativeGuest.prepatch-result"; then
+            if test -f "$payload.prepatch-result"; then
               patched=1
               break
             fi
             sleep 3
           done
           test "$patched" = 1
-          test "$(cat "$staged/SyntheticNativeGuest.prepatch-result")" = PATCHED
-          xcrun otool -hv "$staged/SyntheticNativeGuest" | grep -q DYLIB
-          after="$(shasum -a 256 "$staged/SyntheticNativeGuest" | awk '{print $1}')"
+          test "$(cat "$payload.prepatch-result")" = PATCHED
+          xcrun otool -hv "$staged/SyntheticNativeGuest" | grep -q EXECUTE
+          xcrun otool -hv "$payload" | grep -q DYLIB
+          xcrun otool -l "$payload" | grep -q 'cmd LC_ID_DYLIB'
+          after="$(shasum -a 256 "$payload" | awk '{print $1}')"
           test "$before" != "$after"
-          xcrun vtool -show-build "$staged/SyntheticNativeGuest" | grep -q 'platform IOS'
-          xcrun otool -L "$staged/SyntheticNativeGuest" | grep -q SyntheticNativeGuest
+          xcrun vtool -show-build "$payload" | grep -q 'platform IOS'
           mkdir -p "$RUNNER_TEMP/guest-package/Payload"
           ditto "$staged" "$RUNNER_TEMP/guest-package/Payload/SyntheticNativeGuest.app"
           app="$RUNNER_TEMP/guest-package/Payload/SyntheticNativeGuest.app"
-          rm "$app/SyntheticNativeGuest.prepatch-result"
+          rm "$app/Frameworks/SyntheticNativeGuestPayload.dylib.prepatch-result"
           plutil -create xml1 "$app/LCAppInfo.plist"
           plutil -insert LCPatchRevision -integer 7 "$app/LCAppInfo.plist"
+          plutil -insert LCSyntheticGuestExecutable -string Frameworks/SyntheticNativeGuestPayload.dylib "$app/LCAppInfo.plist"
           test "$(/usr/libexec/PlistBuddy -c 'Print :LCPatchRevision' "$app/LCAppInfo.plist")" = 7
+          test "$(/usr/libexec/PlistBuddy -c 'Print :LCSyntheticGuestExecutable' "$app/LCAppInfo.plist")" = Frameworks/SyntheticNativeGuestPayload.dylib
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")" = com.jaylintaylor.calcvault
           cd "$RUNNER_TEMP/guest-package"
-          zip -qry "$RUNNER_TEMP/SyntheticNativeGuest-prepatched-unsigned.ipa" Payload
-          shasum -a 256 "$RUNNER_TEMP/SyntheticNativeGuest-prepatched-unsigned.ipa"
-          echo 'synthetic_device_prepatch=PASS; signing=DISABLED; SideStore_install=NOT_RUN; live_guest_launch=NOT_RUN' >> "$GITHUB_STEP_SUMMARY"
+          zip -qry "$RUNNER_TEMP/SyntheticNativeGuest-dual-binary-unsigned.ipa" Payload
+          shasum -a 256 "$RUNNER_TEMP/SyntheticNativeGuest-dual-binary-unsigned.ipa"
+          echo 'normal_main=EXECUTE; embedded_payload=DYLIB; signing=DISABLED; SideStore_install=NOT_RUN; live_guest_launch=NOT_RUN' >> "$GITHUB_STEP_SUMMARY"
       - name: Upload disposable unsigned fixture
         uses: actions/upload-artifact@v4
         with:
-          name: synthetic-native-guest-prepatched-unsigned
-          path: ${{ runner.temp }}/SyntheticNativeGuest-prepatched-unsigned.ipa
+          name: synthetic-native-guest-dual-binary-unsigned
+          path: ${{ runner.temp }}/SyntheticNativeGuest-dual-binary-unsigned.ipa
           if-no-files-found: error
