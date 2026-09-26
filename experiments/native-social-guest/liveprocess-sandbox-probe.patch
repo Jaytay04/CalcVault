@@ -16,7 +16,7 @@ diff --git a/LiveContainer/LCSharedUtils.m b/LiveContainer/LCSharedUtils.m
 diff --git a/LiveContainerSwiftUI/App/LiveContainerSwiftUIApp.swift b/LiveContainerSwiftUI/App/LiveContainerSwiftUIApp.swift
 --- a/LiveContainerSwiftUI/App/LiveContainerSwiftUIApp.swift
 +++ b/LiveContainerSwiftUI/App/LiveContainerSwiftUIApp.swift
-@@ -99,5 +99,17 @@
+@@ -99,5 +99,19 @@
              LCTabView(appDataFolderNames: $appDataFolderNames, tweakFolderNames: $tweakFolderNames)
                  .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
                  .environmentObject(DataManager.shared.model)
@@ -27,8 +27,10 @@ diff --git a/LiveContainerSwiftUI/App/LiveContainerSwiftUIApp.swift b/LiveContai
 +                    UserDefaults.standard.set("org.example.syntheticnativeguest.app", forKey: "selected")
 +                    UserDefaults.standard.set("synthetic-fixture-container", forKey: "selectedContainer")
 +                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-+                        LCUtils.launchMultitaskGuestApp("Synthetic probe") { pid, error in
-+                            NSLog("SYNTHETIC_LIVEPROCESS_REQUEST pid=\(String(describing: pid)) error=\(String(describing: error))")
++                        if #available(iOS 16.0, *) {
++                            LCUtils.launchMultitaskGuestApp("Synthetic probe") { pid, error in
++                                NSLog("SYNTHETIC_LIVEPROCESS_REQUEST pid=\(String(describing: pid)) error=\(String(describing: error))")
++                            }
 +                        }
 +                    }
 +                }
