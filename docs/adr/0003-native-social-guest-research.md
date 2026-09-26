@@ -26,3 +26,7 @@ The SideStore `PlugIns` discovery issue is different from the earlier `Extension
 4. SideStore in-place refresh and App ID/entitlement effects are measured using only disposable data. TikTok IPA compatibility and owner-operated login are later, separately consented tests.
 
 Any failed security criterion blocks production integration; a workaround must address the boundary rather than hiding the failure. X and Instagram remain future guests under the same gates, not automatic additions.
+
+## Simulator finding: same-process launch
+
+Run [36217778382](https://github.com/Jaytay04/CalcVault/actions/runs/36217778382) verified native guest button interaction and a synthetic canary round trip, then observed the guest read a synthetic host-only Application Support file. The test's isolation assertion failed. This rules out treating the tested same-process LiveContainer launch as an isolated vault/social boundary. It does not prove or disprove a separately sandboxed `LiveProcess` extension, which still requires its own file, Keychain, and effective-entitlement probes before any production consideration. No real vault data or TikTok code was involved.
