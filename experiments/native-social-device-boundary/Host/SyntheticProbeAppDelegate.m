@@ -3,20 +3,20 @@
 #import <Security/Security.h>
 #import <TargetConditionals.h>
 #import <unistd.h>
-#import "../Shared/SyntheticProbeReport.h"
 
 @interface NSExtension : NSObject
 + (instancetype)extensionWithIdentifier:(NSString *)identifier error:(NSError **)error;
 - (void)beginExtensionRequestWithInputItems:(NSArray<NSExtensionItem *> *)items
                                 completion:(void (^)(NSUUID *identifier))completion;
+- (void)setRequestCompletionBlock:(void (^)(NSUUID *identifier, NSArray<NSExtensionItem *> *items))completion;
+- (void)setRequestCancellationBlock:(void (^)(NSUUID *identifier, NSError *error))cancellation;
+- (void)setRequestInterruptionBlock:(void (^)(NSUUID *identifier))interruption;
 @end
 
-@interface SyntheticProbeAppDelegate : UIResponder <UIApplicationDelegate, NSXPCListenerDelegate, SyntheticProbeReport>
+@interface SyntheticProbeAppDelegate : UIResponder <UIApplicationDelegate>
 @property (nonatomic, strong) UIWindow *window;
 @property (nonatomic, strong) UILabel *statusLabel;
 @property (nonatomic, strong) UIButton *runButton;
-@property (nonatomic, strong) NSXPCListener *listener;
-@property (nonatomic, strong) NSXPCConnection *reportConnection;
 @property (nonatomic, strong) NSExtension *extension;
 @property (nonatomic, strong) NSURL *syntheticFileURL;
 @property (nonatomic, strong) NSTimer *timeoutTimer;
@@ -133,9 +133,6 @@ static NSString *const SyntheticKeychainAccount = @"synthetic-host-only";
         self.keychainFixtureCreated = YES;
     }
 
-    self.listener = [NSXPCListener anonymousListener];
-    self.listener.delegate = self;
-    [self.listener resume];
     NSBundle *extensionBundle = [NSBundle bundleWithPath:[NSBundle.mainBundle.builtInPlugInsPath stringByAppendingPathComponent:@"SyntheticBoundaryExtension.appex"]];
     if (extensionBundle.bundleIdentifier.length == 0) {
         [self failWithMessage:@"Extension missing after signing. Stop the test."];
@@ -150,9 +147,26 @@ static NSString *const SyntheticKeychainAccount = @"synthetic-host-only";
     NSExtensionItem *request = [NSExtensionItem new];
     request.userInfo = @{
         @"hostFile": self.syntheticFileURL.path,
-        @"keychainService": SyntheticKeychainService,
-        @"reportEndpoint": self.listener.endpoint
+        @"keychainService": SyntheticKeychainService
     };
+    __weak typeof(self) weakSelf = self;
+    [self.extension setRequestCompletionBlock:^(NSUUID *identifier, NSArray<NSExtensionItem *> *items) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [weakSelf handleExtensionItems:items];
+        });
+    }];
+    [self.extension setRequestCancellationBlock:^(NSUUID *identifier, NSError *requestError) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (weakSelf.probePending) {
+                [weakSelf failWithMessage:[NSString stringWithFormat:@"Extension cancelled (%ld).", (long)requestError.code]];
+            }
+        });
+    }];
+    [self.extension setRequestInterruptionBlock:^(NSUUID *identifier) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (weakSelf.probePending) { [weakSelf failWithMessage:@"Extension process interrupted."]; }
+        });
+    }];
     self.statusLabel.text = @"Waiting for the separate extension process…";
     self.timeoutTimer = [NSTimer scheduledTimerWithTimeInterval:45
                                                         target:self
@@ -168,33 +182,38 @@ static NSString *const SyntheticKeychainAccount = @"synthetic-host-only";
     }];
 }
 
-- (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConnection *)connection {
-    connection.exportedInterface = [NSXPCInterface interfaceWithProtocol:@protocol(SyntheticProbeReport)];
-    connection.exportedObject = self;
-    self.reportConnection = connection;
-    [connection activate];
-    return YES;
-}
-
-- (void)reportFileReadable:(BOOL)fileReadable
-             fileErrorCode:(NSInteger)fileErrorCode
-            keychainStatus:(NSInteger)keychainStatus
-             extensionPID:(int)extensionPID
-                    reply:(void (^)(void))reply {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (!self.probePending) { reply(); return; }
-        NSString *fileResult = fileReadable ? @"READABLE" : @"NOT READABLE";
-        NSString *keychainResult = self.keychainFixtureCreated
-            ? (keychainStatus == errSecSuccess ? @"READABLE" : @"NOT READABLE")
-            : @"NOT TESTED (host fixture unavailable)";
-        self.statusLabel.text = [NSString stringWithFormat:
-            @"Host PID: %d\nExtension PID: %d\nHost file: %@ (error %ld)\nHost Keychain item: %@ (status %ld)",
-            getpid(), extensionPID, fileResult, (long)fileErrorCode, keychainResult, (long)keychainStatus];
-        NSLog(@"SYNTHETIC_DEVICE_BOUNDARY_RESULT hostPID=%d extensionPID=%d file=%@ keychain=%@ keychainStatus=%ld",
-              getpid(), extensionPID, fileResult, keychainResult, (long)keychainStatus);
-        reply();
-        [self finishProbe];
-    });
+- (void)handleExtensionItems:(NSArray<NSExtensionItem *> *)items {
+    if (!self.probePending) { return; }
+    NSDictionary *report = items.firstObject.userInfo;
+    NSNumber *fileReadableValue = report[@"fileReadable"];
+    NSNumber *fileErrorCodeValue = report[@"fileErrorCode"];
+    NSNumber *keychainStatusValue = report[@"keychainStatus"];
+    NSNumber *extensionPIDValue = report[@"extensionPID"];
+    if (![fileReadableValue isKindOfClass:NSNumber.class] ||
+        ![fileErrorCodeValue isKindOfClass:NSNumber.class] ||
+        ![keychainStatusValue isKindOfClass:NSNumber.class] ||
+        ![extensionPIDValue isKindOfClass:NSNumber.class]) {
+        [self failWithMessage:@"Extension returned an invalid report."];
+        return;
+    }
+    BOOL fileReadable = fileReadableValue.boolValue;
+    NSInteger fileErrorCode = fileErrorCodeValue.integerValue;
+    NSInteger keychainStatus = keychainStatusValue.integerValue;
+    int extensionPID = extensionPIDValue.intValue;
+    if (extensionPID <= 0 || extensionPID == getpid()) {
+        [self failWithMessage:@"Separate extension process was not verified."];
+        return;
+    }
+    NSString *fileResult = fileReadable ? @"READABLE" : @"NOT READABLE";
+    NSString *keychainResult = self.keychainFixtureCreated
+        ? (keychainStatus == errSecSuccess ? @"READABLE" : @"NOT READABLE")
+        : @"NOT TESTED (host fixture unavailable)";
+    self.statusLabel.text = [NSString stringWithFormat:
+        @"Host PID: %d\nExtension PID: %d\nHost file: %@ (error %ld)\nHost Keychain item: %@ (status %ld)",
+        getpid(), extensionPID, fileResult, (long)fileErrorCode, keychainResult, (long)keychainStatus];
+    NSLog(@"SYNTHETIC_DEVICE_BOUNDARY_RESULT hostPID=%d extensionPID=%d file=%@ keychain=%@ keychainStatus=%ld",
+          getpid(), extensionPID, fileResult, keychainResult, (long)keychainStatus);
+    [self finishProbe];
 }
 
 - (void)probeTimedOut {
@@ -212,10 +231,6 @@ static NSString *const SyntheticKeychainAccount = @"synthetic-host-only";
     self.runButton.enabled = YES;
     [self.timeoutTimer invalidate];
     self.timeoutTimer = nil;
-    [self.listener invalidate];
-    self.listener = nil;
-    [self.reportConnection invalidate];
-    self.reportConnection = nil;
     if (self.keychainFixtureCreated) {
         SecItemDelete((__bridge CFDictionaryRef)[self syntheticKeychainQuery]);
         self.keychainFixtureCreated = NO;

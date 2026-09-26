@@ -8,7 +8,7 @@ The extension is invoked using the same nonpublic `NSExtension` class and `com.a
 
 ## Evidence gates
 
-1. Manual CI builds the separate simulator host and unsigned `iphoneos` host plus embedded extension, smoke-tests that a separate extension process reports results, and uploads an unsigned IPA with SHA-256. Ad-hoc simulator signing may lack the Keychain entitlement; that check is explicitly **NOT TESTED** in this case. A simulator read is **not** an isolation pass.
+1. Manual CI builds the separate simulator host and unsigned `iphoneos` host plus embedded extension, smoke-tests that a separate extension process returns a result item, and uploads an unsigned IPA with SHA-256. Ad-hoc simulator signing may lack the Keychain entitlement; that check is explicitly **NOT TESTED** in this case. A simulator read is **not** an isolation pass.
 2. Before phone installation, verify the IPA's base bundle ID and embedded extension, download/hash, and preserve any CalcVault data or sessions the owner wants. The probe does not export or recover them.
 3. In SideStore, select **Keep All Extensions (Use Main Profile)**. Stop if it proposes another App ID, another active app, removal of Spotify, or deletion of CalcVault. Do not use an extension-stripping option: that makes the test inconclusive.
 4. Open **CalcVault Boundary Probe**. It runs once automatically; **Run test again** retries. A result must show distinct host and extension PIDs plus both access statuses. A screenshot of this synthetic-only screen is sufficient for the first device observation.

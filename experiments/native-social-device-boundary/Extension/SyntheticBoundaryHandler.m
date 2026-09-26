@@ -1,23 +1,18 @@
 #import <Foundation/Foundation.h>
 #import <Security/Security.h>
 #import <unistd.h>
-#import "../Shared/SyntheticProbeReport.h"
 
 @interface SyntheticBoundaryHandler : NSObject <NSExtensionRequestHandling>
 @end
 
 @implementation SyntheticBoundaryHandler
 
-static NSXPCConnection *activeConnection;
-
 - (void)beginRequestWithExtensionContext:(NSExtensionContext *)context {
     NSDictionary *input = [context.inputItems.firstObject userInfo];
     NSString *hostFile = input[@"hostFile"];
     NSString *keychainService = input[@"keychainService"];
-    NSXPCListenerEndpoint *endpoint = input[@"reportEndpoint"];
     if (![hostFile isKindOfClass:NSString.class] ||
-        ![keychainService isKindOfClass:NSString.class] ||
-        ![endpoint isKindOfClass:NSXPCListenerEndpoint.class]) {
+        ![keychainService isKindOfClass:NSString.class]) {
         [context cancelRequestWithError:[NSError errorWithDomain:@"SyntheticBoundaryProbe" code:1 userInfo:nil]];
         return;
     }
@@ -39,21 +34,14 @@ static NSXPCConnection *activeConnection;
         CFRelease(keychainValue);
     }
 
-    activeConnection = [[NSXPCConnection alloc] initWithListenerEndpoint:endpoint];
-    activeConnection.remoteObjectInterface = [NSXPCInterface interfaceWithProtocol:@protocol(SyntheticProbeReport)];
-    [activeConnection activate];
-    id<SyntheticProbeReport> reporter = [activeConnection remoteObjectProxyWithErrorHandler:^(NSError *error) {
-        NSLog(@"SYNTHETIC_DEVICE_PROBE_XPC_ERROR code=%ld", (long)error.code);
-    }];
-    [reporter reportFileReadable:fileReadable
-                   fileErrorCode:fileError == nil ? 0 : fileError.code
-                  keychainStatus:keychainStatus
-                   extensionPID:getpid()
-                          reply:^{
-        [context completeRequestReturningItems:@[] completionHandler:nil];
-        [activeConnection invalidate];
-        activeConnection = nil;
-    }];
+    NSExtensionItem *result = [NSExtensionItem new];
+    result.userInfo = @{
+        @"fileReadable": @(fileReadable),
+        @"fileErrorCode": @(fileError == nil ? 0 : fileError.code),
+        @"keychainStatus": @(keychainStatus),
+        @"extensionPID": @(getpid())
+    };
+    [context completeRequestReturningItems:@[result] completionHandler:nil];
 }
 
 @end
