@@ -45,7 +45,6 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
-            -arch arm64 \
             -derivedDataPath "$RUNNER_TEMP/livecontainer-derived-data" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
