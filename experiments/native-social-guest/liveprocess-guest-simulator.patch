@@ -1,0 +1,174 @@
+diff --git a/LiveContainer/LCSharedUtils.m b/LiveContainer/LCSharedUtils.m
+--- a/LiveContainer/LCSharedUtils.m
++++ b/LiveContainer/LCSharedUtils.m
+@@ -4,2 +4,3 @@
+ #import "utils.h"
++#include <stdlib.h>
+ @import MachO;
+@@ -13,2 +14,7 @@
+ + (NSString*) teamIdentifier {
++#if TARGET_OS_SIMULATOR
++    if (getenv("LC_SYNTHETIC_LIVEPROCESS_GUEST")) {
++        return @"AAAAA11111";
++    }
++#endif
+     static NSString* ans = nil;
+diff --git a/LiveContainerSwiftUI/App/LiveContainerSwiftUIApp.swift b/LiveContainerSwiftUI/App/LiveContainerSwiftUIApp.swift
+--- a/LiveContainerSwiftUI/App/LiveContainerSwiftUIApp.swift
++++ b/LiveContainerSwiftUI/App/LiveContainerSwiftUIApp.swift
+@@ -99,5 +99,22 @@
+             LCTabView(appDataFolderNames: $appDataFolderNames, tweakFolderNames: $tweakFolderNames)
+                 .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
+                 .environmentObject(DataManager.shared.model)
+                 .environmentObject(LCAppSortManager.shared)
++#if targetEnvironment(simulator)
++                .onAppear {
++                    let environment = ProcessInfo.processInfo.environment
++                    guard environment["LC_SYNTHETIC_LIVEPROCESS_GUEST"] == "1",
++                          !UserDefaults.standard.bool(forKey: "LCSyntheticLiveProcessLaunchStarted") else { return }
++                    UserDefaults.standard.set(true, forKey: "LCSyntheticLiveProcessLaunchStarted")
++                    UserDefaults.standard.set("org.example.syntheticnativeguest.app", forKey: "selected")
++                    UserDefaults.standard.set("synthetic-liveprocess-container", forKey: "selectedContainer")
++                    UserDefaults.standard.set(Int(ProcessInfo.processInfo.processIdentifier), forKey: "LCSyntheticLiveProcessHostPID")
++                    NSLog("SYNTHETIC_LIVEPROCESS_HOST_UI pid=\(ProcessInfo.processInfo.processIdentifier)")
++                    DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
++                        LCUtils.launchMultitaskGuestApp("Synthetic LiveProcess Guest") { pid, error in
++                            NSLog("SYNTHETIC_LIVEPROCESS_LAUNCH pid=\(String(describing: pid)) error=\(String(describing: error))")
++                        }
++                    }
++                }
++#endif
+         }
+     }
+ }
+diff --git a/MultitaskSupport/AppSceneViewController.m b/MultitaskSupport/AppSceneViewController.m
+--- a/MultitaskSupport/AppSceneViewController.m
++++ b/MultitaskSupport/AppSceneViewController.m
+@@ -4,5 +4,6 @@
+ //
+ //  Created by s s on 2025/5/17.
+ //
++#import <stdlib.h>
+ #import "AppSceneViewController.h"
+ #import "DecoratedAppSceneViewController.h"
+@@ -63,5 +63,11 @@
+         @"bookmarks": bookmarks,
+         @"lcHomePath": NSHomeDirectory(),
+     }.mutableCopy;
++#if TARGET_OS_SIMULATOR
++    if (getenv("LC_SYNTHETIC_LIVEPROCESS_GUEST")) {
++        userInfo[@"syntheticGuestLaunch"] = @YES;
++        userInfo[@"syntheticHostPID"] = [NSUserDefaults.standardUserDefaults objectForKey:@"LCSyntheticLiveProcessHostPID"] ?: @0;
++    }
++#endif
+     
+     NSString* launchAppUrlScheme = [NSUserDefaults.standardUserDefaults stringForKey:@"launchAppUrlScheme"];
+diff --git a/LiveProcess/main.m b/LiveProcess/main.m
+--- a/LiveProcess/main.m
++++ b/LiveProcess/main.m
+@@ -6,5 +6,7 @@
+ 
+ #import <dlfcn.h>
++#import <stdlib.h>
++#import <unistd.h>
+ #import <UIKit/UIKit.h>
+ #import <mach-o/dyld.h>
+ #import "../LiveContainer/utils.h"
+@@ -49,6 +51,22 @@ int LiveProcessMain(int argc, char *argv[]) {
+     // Ensure app info is delivered
+     NSDictionary *appInfo = LiveProcessHandler.retrievedAppInfo;
+     NSCAssert(appInfo, @"Failed to retrieve app info");
++#if TARGET_OS_SIMULATOR
++    if ([appInfo[@"syntheticGuestLaunch"] boolValue]) {
++        pid_t hostPID = [appInfo[@"syntheticHostPID"] intValue];
++        pid_t extensionPID = getpid();
++        NSLog(@"SYNTHETIC_LIVEPROCESS_PIDS host=%d extension=%d", hostPID, extensionPID);
++        if (hostPID <= 0 || hostPID == extensionPID) {
++            NSLog(@"SYNTHETIC_LIVEPROCESS_DISTINCT_PID_FAIL");
++            return 91;
++        }
++        setenv("LC_SYNTHETIC_LIVEPROCESS_GUEST", "1", 1);
++        NSString *hostFile = [[appInfo[@"lcHomePath"] stringByAppendingPathComponent:@"Library/Application Support"] stringByAppendingPathComponent:@"synthetic-host-sentinel.txt"];
++        NSString *hostValue = [NSString stringWithContentsOfFile:hostFile encoding:NSUTF8StringEncoding error:nil];
++        NSString *hostResult = [hostValue isEqualToString:@"Synthetic host-only sentinel"] ? @"READABLE" : @"DENIED";
++        NSLog(@"SYNTHETIC_LIVEPROCESS_HOST_FILE_PREBOOKMARK pid=%d result=%@", extensionPID, hostResult);
++    }
++#endif
+     
+     // Check if we received a request to execute a custom payload
+     NSString *customPayloadDylib = appInfo[@"customPayloadDylib"];
+@@ -89,4 +105,13 @@ int LiveProcessMain(int argc, char *argv[]) {
+         access = [bookmarkedUrls[i] startAccessingSecurityScopedResource];
+     }
+     
++#if TARGET_OS_SIMULATOR
++    if ([appInfo[@"syntheticGuestLaunch"] boolValue]) {
++        NSString *hostFile = [[appInfo[@"lcHomePath"] stringByAppendingPathComponent:@"Library/Application Support"] stringByAppendingPathComponent:@"synthetic-host-sentinel.txt"];
++        NSString *hostValue = [NSString stringWithContentsOfFile:hostFile encoding:NSUTF8StringEncoding error:nil];
++        NSString *hostResult = [hostValue isEqualToString:@"Synthetic host-only sentinel"] ? @"READABLE" : @"DENIED";
++        NSLog(@"SYNTHETIC_LIVEPROCESS_HOST_FILE_POSTBOOKMARK pid=%d result=%@", getpid(), hostResult);
++    }
++#endif
++
+     if ([appInfo[@"selected"] isEqualToString:@"builtinSideStore"]) {
+diff --git a/LiveContainer/LCBootstrap.m b/LiveContainer/LCBootstrap.m
+--- a/LiveContainer/LCBootstrap.m
++++ b/LiveContainer/LCBootstrap.m
+@@ -380,4 +380,21 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContainer, int argc, char *argv[]) {
+     // Overwrite @executable_path
+     const char *appExecPath = appBundle.executablePath.fileSystemRepresentation;
++    BOOL syntheticPayloadOverride = NO;
++#if TARGET_OS_SIMULATOR
++    if (getenv("LC_SYNTHETIC_LIVEPROCESS_GUEST") &&
++        [selectedApp isEqualToString:@"org.example.syntheticnativeguest.app"]) {
++        NSString *relativePath = guestAppInfo[@"LCSyntheticGuestExecutable"];
++        if (![relativePath isEqualToString:@"Frameworks/SyntheticNativeGuestPayload.dylib"]) {
++            return @"Synthetic payload path is not allowlisted.";
++        }
++        NSString *payloadPath = [bundlePath stringByAppendingPathComponent:relativePath];
++        if (![fm fileExistsAtPath:payloadPath]) {
++            return @"Synthetic payload is missing.";
++        }
++        appExecPath = strdup(payloadPath.fileSystemRepresentation);
++        syntheticPayloadOverride = YES;
++        NSLog(@"SYNTHETIC_LIVEPROCESS_GUEST_EXEC pid=%d payload=%@", getpid(), relativePath);
++    }
++#endif
+     *path = appExecPath;
+     overwriteExecPath(appExecPath);
+@@ -622,7 +639,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContainer, int argc, char *argv[]) {
+ #if is32BitSupported
+         !is32bit &&
+ #endif
+-        ![appBundle loadAndReturnError:&error]
++        !syntheticPayloadOverride && ![appBundle loadAndReturnError:&error]
+         ) {
+         appError = error.localizedDescription;
+         NSLog(@"[LCBootstrap] loading bundle failed: %@", error);
+@@ -680,3 +697,24 @@ int LiveContainerMain(int argc, char *argv[]) {
+     NSString *selectedApp = [lcUserDefaults stringForKey:@"selected"];
+     NSString *selectedContainer = [lcUserDefaults stringForKey:@"selectedContainer"];
++#if TARGET_OS_SIMULATOR
++    if (getenv("LC_SYNTHETIC_LIVEPROCESS_GUEST") &&
++        [selectedApp isEqualToString:@"org.example.syntheticnativeguest.app"]) {
++        NSString *guestPath = [NSString stringWithFormat:@"%s/Documents/Applications/%@", getenv("LC_HOME_PATH"), selectedApp];
++        NSString *payload = [guestPath stringByAppendingPathComponent:@"Frameworks/SyntheticNativeGuestPayload.dylib"];
++        NSString *patchMarker = [guestPath stringByAppendingPathComponent:@"synthetic-liveprocess-patched.txt"];
++        if (![[NSFileManager defaultManager] fileExistsAtPath:patchMarker]) {
++            NSString *patchError = LCParseMachO(payload.UTF8String, false, ^(const char *path, struct mach_header_64 *header, int fd, void *filePtr) {
++                if (header->cputype == CPU_TYPE_ARM64) {
++                    LCPatchExecSlice(path, header, false);
++                }
++            });
++            if (patchError) {
++                NSLog(@"SYNTHETIC_LIVEPROCESS_PATCH_FAIL: %@", patchError);
++                return 1;
++            }
++            [@"patched" writeToFile:patchMarker atomically:YES encoding:NSUTF8StringEncoding error:nil];
++            NSLog(@"SYNTHETIC_LIVEPROCESS_PATCH_PASS");
++        }
++    }
++#endif
+     NSString *launchUrl = nil;
+     do {
+         if(selectedApp) {
