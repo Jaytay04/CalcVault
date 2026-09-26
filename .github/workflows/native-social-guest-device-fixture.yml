@@ -30,13 +30,14 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           xcodebuild build \
             -project experiments/native-social-guest/SyntheticNativeGuest.xcodeproj \
-            -scheme SyntheticNativeGuest -configuration Debug \
+            -scheme SyntheticNativeGuest -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' \
             -derivedDataPath "$RUNNER_TEMP/synthetic-device-derived" \
             PRODUCT_BUNDLE_IDENTIFIER=com.jaylintaylor.calcvault \
             CODE_SIGNING_ALLOWED=NO
-          guest="$RUNNER_TEMP/synthetic-device-derived/Build/Products/Debug-iphoneos/SyntheticNativeGuest.app"
+          guest="$RUNNER_TEMP/synthetic-device-derived/Build/Products/Release-iphoneos/SyntheticNativeGuest.app"
           test -f "$guest/SyntheticNativeGuest"
+          test ! -f "$guest/SyntheticNativeGuest.debug.dylib"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$guest/Info.plist")" = com.jaylintaylor.calcvault
           test "$(find "$guest" -type d -name '*.appex' | wc -l | tr -d ' ')" = 0
           xcrun vtool -show-build "$guest/SyntheticNativeGuest" | grep -q 'platform IOS'
