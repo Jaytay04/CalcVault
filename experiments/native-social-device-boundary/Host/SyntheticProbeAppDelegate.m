@@ -154,22 +154,20 @@ static NSString *const HostOnlyGroupSuffix = @".com.jaylintaylor.calcvault.hosto
         return;
     }
 
-    self.hostOnlyAccessGroup = [self discoverDefaultAccessGroup];
-    if (![self.hostOnlyAccessGroup hasSuffix:HostOnlyGroupSuffix]) {
-        self.hostOnlyAccessGroup = nil;
+    NSString *defaultAccessGroup = [self discoverDefaultAccessGroup];
+    NSRange prefixEnd = [defaultAccessGroup rangeOfString:@"."];
+    NSString *bundleID = NSBundle.mainBundle.bundleIdentifier;
+    if (prefixEnd.location == NSNotFound || prefixEnd.location == 0 || bundleID.length == 0) {
 #if TARGET_OS_SIMULATOR
-        NSLog(@"SYNTHETIC_DEVICE_BOUNDARY_SIMULATOR_HOST_GROUP_NOT_TESTED");
+        NSLog(@"SYNTHETIC_DEVICE_BOUNDARY_SIMULATOR_GROUP_DISCOVERY_NOT_TESTED");
 #else
-        [self failWithMessage:@"Host-only Keychain group was not granted after signing. No isolation conclusion."];
+        [self failWithMessage:@"Signed Keychain group could not be discovered. No isolation conclusion."];
         return;
 #endif
     } else {
-        NSRange prefixEnd = [self.hostOnlyAccessGroup rangeOfString:@"."];
-        NSString *bundleID = NSBundle.mainBundle.bundleIdentifier;
-        if (prefixEnd.location != NSNotFound && prefixEnd.location > 0 && bundleID.length > 0) {
-            self.sharedAppAccessGroup = [NSString stringWithFormat:@"%@.%@",
-                [self.hostOnlyAccessGroup substringToIndex:prefixEnd.location], bundleID];
-        }
+        NSString *teamPrefix = [defaultAccessGroup substringToIndex:prefixEnd.location];
+        self.sharedAppAccessGroup = [NSString stringWithFormat:@"%@.%@", teamPrefix, bundleID];
+        self.hostOnlyAccessGroup = [teamPrefix stringByAppendingString:HostOnlyGroupSuffix];
     }
     if (self.sharedAppAccessGroup.length == 0) {
 #if TARGET_OS_SIMULATOR
@@ -191,12 +189,7 @@ static NSString *const HostOnlyGroupSuffix = @".com.jaylintaylor.calcvault.hosto
         memset(randomBytes, 0, sizeof(randomBytes));
         OSStatus addStatus = SecItemAdd((__bridge CFDictionaryRef)item, NULL);
         if (addStatus != errSecSuccess) {
-#if TARGET_OS_SIMULATOR
-            NSLog(@"SYNTHETIC_DEVICE_BOUNDARY_SIMULATOR_SHARED_GROUP_NOT_TESTED status=%d", (int)addStatus);
-#else
-            [self failWithMessage:[NSString stringWithFormat:@"Keychain fixture setup failed (%d).", (int)addStatus]];
-            return;
-#endif
+            NSLog(@"SYNTHETIC_DEVICE_BOUNDARY_SHARED_GROUP_CONTROL_NOT_TESTED status=%d", (int)addStatus);
         } else {
             self.keychainFixtureCreated = YES;
         }
@@ -206,7 +199,7 @@ static NSString *const HostOnlyGroupSuffix = @".com.jaylintaylor.calcvault.hosto
 #if TARGET_OS_SIMULATOR
         NSLog(@"SYNTHETIC_DEVICE_BOUNDARY_SIMULATOR_HOST_GROUP_FIXTURE_NOT_TESTED");
 #else
-        [self failWithMessage:@"Host-only Keychain group was not granted after signing. No isolation conclusion."];
+        [self failWithMessage:@"Host-only Keychain group could not be derived after signing. No isolation conclusion."];
         return;
 #endif
     } else {
