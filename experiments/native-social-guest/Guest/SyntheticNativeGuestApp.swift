@@ -43,7 +43,6 @@ private struct SyntheticGuestView: View {
                 .accessibilityIdentifier("syntheticHostFileStatus")
         }
         .padding()
-        .accessibilityIdentifier("syntheticNativeGuest")
     }
 
     private func checkCanary() {

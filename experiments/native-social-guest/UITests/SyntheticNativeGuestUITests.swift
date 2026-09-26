@@ -7,7 +7,10 @@ final class SyntheticNativeGuestUITests: XCTestCase {
         host.launch()
 
         let tapButton = host.buttons["syntheticTapButton"]
-        XCTAssertTrue(tapButton.waitForExistence(timeout: 30))
+        guard tapButton.waitForExistence(timeout: 30) else {
+            XCTFail("Synthetic guest tap button did not appear")
+            return
+        }
         tapButton.tap()
         XCTAssertEqual(host.staticTexts["syntheticTapCount"].label, "Taps: 1")
 
