@@ -13,6 +13,18 @@ diff --git a/LiveContainer/LCSharedUtils.m b/LiveContainer/LCSharedUtils.m
 +    }
 +#endif
      static NSString* ans = nil;
+diff --git a/LiveContainer/Tweaks/Dyld.m b/LiveContainer/Tweaks/Dyld.m
+--- a/LiveContainer/Tweaks/Dyld.m
++++ b/LiveContainer/Tweaks/Dyld.m
+@@ -335,2 +335,8 @@
+ void DyldHookLoadableIntoProcess(void) {
++#if TARGET_OS_SIMULATOR
++    if (getenv("LC_SYNTHETIC_GUEST_TEST")) {
++        NSLog(@"SYNTHETIC_GUEST_SKIPPED_SIMULATOR_DYLD_PATCH");
++        return;
++    }
++#endif
+     uint32_t *patchAddr = (uint32_t *)litehook_find_symbol(getDyldBase(), "__ZNK6mach_o6Header19loadableIntoProcessENS_8PlatformE7CStringb");
 diff --git a/LiveContainer/LCBootstrap.m b/LiveContainer/LCBootstrap.m
 --- a/LiveContainer/LCBootstrap.m
 +++ b/LiveContainer/LCBootstrap.m
