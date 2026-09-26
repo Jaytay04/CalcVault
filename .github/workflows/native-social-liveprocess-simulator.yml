@@ -84,6 +84,13 @@ jobs:
           codesign -d --entitlements - "$extension"
           echo "extension_app_group=${{ inputs.extension_app_group }}" >> "$GITHUB_STEP_SUMMARY"
           xcrun simctl install "$device" "$host"
+          standalone_guest="$RUNNER_TEMP/synthetic-guest-derived/Build/Products/Debug-iphonesimulator/SyntheticNativeGuest.app"
+          codesign --force --deep --sign - "$standalone_guest"
+          xcrun simctl install "$device" "$standalone_guest"
+          foreign_container="$(xcrun simctl get_app_container "$device" org.example.syntheticnativeguest data)"
+          foreign_file="$foreign_container/Library/Application Support/synthetic-foreign-sentinel.txt"
+          mkdir -p "$(dirname "$foreign_file")"
+          printf '%s' 'Synthetic foreign-app sentinel' > "$foreign_file"
           data_container="$(xcrun simctl get_app_container "$device" "$bundle_id" data)"
           guest_target="$data_container/Documents/Applications/org.example.syntheticnativeguest.app"
           mkdir -p "$data_container/Documents/Applications"
@@ -93,7 +100,9 @@ jobs:
           ditto "$RUNNER_TEMP/synthetic-guest-derived/Build/Products/Debug-iphonesimulator/SyntheticNativeGuest.app" "$guest_target"
           plutil -create xml1 "$guest_target/LCAppInfo.plist"
           plutil -insert LCDataUUID -string synthetic-fixture-container "$guest_target/LCAppInfo.plist"
-          SIMCTL_CHILD_LC_SYNTHETIC_LIVEPROCESS_PROBE=1 xcrun simctl launch "$device" "$bundle_id"
+          SIMCTL_CHILD_LC_SYNTHETIC_LIVEPROCESS_PROBE=1 \
+            SIMCTL_CHILD_LC_SYNTHETIC_FOREIGN_SENTINEL_PATH="$foreign_file" \
+            xcrun simctl launch "$device" "$bundle_id"
           found=0
           for attempt in {1..5}; do
             sleep 20
@@ -108,6 +117,7 @@ jobs:
           sed -n '/SYNTHETIC_LIVEPROCESS/p' "$RUNNER_TEMP/liveprocess-probe.log" | tail -n 30
           test "$found" = 1
           grep -q 'SYNTHETIC_LIVEPROCESS_PREBOOKMARK_FILE_PROBE' "$RUNNER_TEMP/liveprocess-probe.log"
+          grep -q 'SYNTHETIC_LIVEPROCESS_FOREIGN_FILE_PROBE' "$RUNNER_TEMP/liveprocess-probe.log"
           if grep -q 'SYNTHETIC_LIVEPROCESS_FILE_PROBE.*result=READABLE' "$RUNNER_TEMP/liveprocess-probe.log"; then
             echo 'Synthetic LiveProcess read the host-only file: isolation FAIL' >> "$GITHUB_STEP_SUMMARY"
             exit 1
