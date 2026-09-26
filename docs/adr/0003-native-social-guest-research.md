@@ -30,3 +30,7 @@ Any failed security criterion blocks production integration; a workaround must a
 ## Simulator finding: same-process launch
 
 Run [36217778382](https://github.com/Jaytay04/CalcVault/actions/runs/36217778382) verified native guest button interaction and a synthetic canary round trip, then observed the guest read a synthetic host-only Application Support file. The test's isolation assertion failed. This rules out treating the tested same-process LiveContainer launch as an isolated vault/social boundary. It does not prove or disprove a separately sandboxed `LiveProcess` extension, which still requires its own file, Keychain, and effective-entitlement probes before any production consideration. No real vault data or TikTok code was involved.
+
+## Simulator finding: `LiveProcess` with shared App Group
+
+Run [36220296477](https://github.com/Jaytay04/CalcVault/actions/runs/36220296477) launched `LiveProcess` in a process distinct from the host, but its synthetic host-file read succeeded after guest bookmark activation. Both ad-hoc-signed simulator bundles carried the same synthetic App Group. This fails the host-file boundary for that configuration; process separation alone is not sufficient evidence of vault isolation. The probe returned before executing guest code. A no-shared-App-Group control and later signed-device/effective-entitlement tests are required before attributing the read to a particular entitlement or generalizing it to physical iOS.

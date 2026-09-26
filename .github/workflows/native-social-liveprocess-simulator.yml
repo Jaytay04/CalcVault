@@ -2,6 +2,12 @@ name: Synthetic LiveProcess sandbox probe (manual)
 
 on:
   workflow_dispatch:
+    inputs:
+      extension_app_group:
+        description: Grant the synthetic host App Group to LiveProcess
+        required: true
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -65,13 +71,18 @@ jobs:
           extension="$host/PlugIns/LiveProcess.appex"
           bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$host/Info.plist")"
           codesign --force --deep --sign - "$host"
+          extension_entitlements=experiments/native-social-guest/simulator-host.entitlements
+          if test '${{ inputs.extension_app_group }}' = false; then
+            extension_entitlements=experiments/native-social-guest/simulator-isolated-extension.entitlements
+          fi
           codesign --force --sign - \
-            --entitlements experiments/native-social-guest/simulator-host.entitlements "$extension"
+            --entitlements "$extension_entitlements" "$extension"
           codesign --force --sign - \
             --entitlements experiments/native-social-guest/simulator-host.entitlements "$host"
           codesign --verify --deep "$host"
           codesign -d --entitlements - "$host"
           codesign -d --entitlements - "$extension"
+          echo "extension_app_group=${{ inputs.extension_app_group }}" >> "$GITHUB_STEP_SUMMARY"
           xcrun simctl install "$device" "$host"
           data_container="$(xcrun simctl get_app_container "$device" "$bundle_id" data)"
           guest_target="$data_container/Documents/Applications/org.example.syntheticnativeguest.app"
