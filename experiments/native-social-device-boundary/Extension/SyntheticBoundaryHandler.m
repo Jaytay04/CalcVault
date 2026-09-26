@@ -51,7 +51,7 @@ static OSStatus QuerySyntheticItem(NSString *service, NSString *account, NSStrin
     NSURL *guestURL = [NSURL URLByResolvingBookmarkData:guestBookmark options:0 relativeToURL:nil
                               bookmarkDataIsStale:&isStale error:&bookmarkError];
     BOOL bookmarkResolved = guestURL != nil;
-    BOOL bookmarkActive = bookmarkResolved && !isStale && [guestURL startAccessingSecurityScopedResource];
+    BOOL bookmarkActive = bookmarkResolved && [guestURL startAccessingSecurityScopedResource];
     NSURL *guestMarkerURL = [guestURL URLByAppendingPathComponent:@"guest-marker.txt"];
     NSError *guestReadError = nil;
     NSData *guestData = bookmarkResolved
