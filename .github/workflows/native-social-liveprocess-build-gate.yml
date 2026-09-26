@@ -1,0 +1,138 @@
+name: LiveContainer LiveProcess build feasibility (manual)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-package-probe:
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      LIVECONTAINER_COMMIT: e370a92dfc03ce109ebce00ed4a7cfc64ad1c801
+      HOST_BUNDLE_ID: com.jaylintaylor.calcvault
+    steps:
+      - name: Select Xcode 26.6
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+          test "$(xcodebuild -version | tr '\n' ' ')" = "Xcode 26.6 Build version 17F113 "
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Checkout pinned LiveContainer source
+        uses: actions/checkout@v6
+        with:
+          repository: LiveContainer/LiveContainer
+          ref: e370a92dfc03ce109ebce00ed4a7cfc64ad1c801
+          path: livecontainer
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Build unsigned iPhoneOS host and extension
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_dir="$GITHUB_WORKSPACE/livecontainer"
+          test "$(git -C "$source_dir" rev-parse HEAD)" = "$LIVECONTAINER_COMMIT"
+          test -d "$source_dir/LiveContainer.xcodeproj"
+
+          xcodebuild build \
+            -project "$source_dir/LiveContainer.xcodeproj" \
+            -scheme LiveContainer \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -arch arm64 \
+            -derivedDataPath "$RUNNER_TEMP/livecontainer-derived-data" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            LIVECONTAINER_BUNDLE_IDENTIFIER="$HOST_BUNDLE_ID"
+
+      - name: Verify bundle identity, platform, architecture, and package layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          products="$RUNNER_TEMP/livecontainer-derived-data/Build/Products/Release-iphoneos"
+          apps=()
+          while IFS= read -r app_path; do
+            apps+=("$app_path")
+          done < <(find "$products" -maxdepth 1 -type d -name '*.app' -print)
+          test "${#apps[@]}" -eq 1
+          app="${apps[0]}"
+          test "$(basename "$app")" = 'LiveContainer.app'
+
+          read_plist_value() {
+            /usr/libexec/PlistBuddy -c "Print :$2" "$1/Info.plist"
+          }
+
+          test "$(read_plist_value "$app" CFBundleIdentifier)" = "$HOST_BUNDLE_ID"
+          test "$(read_plist_value "$app" CFBundleShortVersionString)" = '3.8.0'
+
+          extensions=()
+          while IFS= read -r extension_path; do
+            extensions+=("$extension_path")
+          done < <(find "$app" -type d -name '*.appex' -prune -print)
+          test "${#extensions[@]}" -gt 0
+          liveprocess="$app/PlugIns/LiveProcess.appex"
+          test -d "$liveprocess"
+
+          additional_extension_names=''
+          for extension in "${extensions[@]}"; do
+            extension_name="$(basename "$extension" .appex)"
+            expected_id="$HOST_BUNDLE_ID.$extension_name"
+            test "$(read_plist_value "$extension" CFBundleIdentifier)" = "$expected_id"
+            test "$(read_plist_value "$extension" CFBundlePackageType)" = 'XPC!'
+            if [[ "$extension" != "$liveprocess" ]]; then
+              additional_extension_names="${additional_extension_names:+$additional_extension_names, }${extension_name}.appex"
+            fi
+          done
+          test "$(read_plist_value "$liveprocess" CFBundleIdentifier)" = "$HOST_BUNDLE_ID.LiveProcess"
+          /usr/libexec/PlistBuddy -c 'Print :NSExtension' "$liveprocess/Info.plist" >/dev/null
+
+          check_iphoneos_arm64_bundle() {
+            local bundle_path="$1"
+            local executable
+            executable="$(read_plist_value "$bundle_path" CFBundleExecutable)"
+            local binary="$bundle_path/$executable"
+            test -f "$binary"
+            test "$(xcrun lipo -archs "$binary")" = 'arm64'
+            xcrun vtool -show-build "$binary" | grep -Eq 'platform IOS([[:space:]]|$)'
+          }
+
+          check_iphoneos_arm64_bundle "$app"
+          check_iphoneos_arm64_bundle "$liveprocess"
+          test -z "$(find "$app" -mindepth 1 -type d -name '*.app' -print -quit)"
+
+          package_root="$RUNNER_TEMP/liveprocess-package-probe"
+          mkdir -p "$package_root/Payload"
+          ditto "$app" "$package_root/Payload/LiveContainer.app"
+          package_zip="$RUNNER_TEMP/livecontainer-3.8.0-package-probe.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$package_root/Payload" "$package_zip"
+          zip_entries="$(unzip -Z -1 "$package_zip")"
+          for extension in "${extensions[@]}"; do
+            extension_relative_path="${extension#"$app"}"
+            extension_relative_path="${extension_relative_path#/}"
+            grep -Fx "Payload/LiveContainer.app/$extension_relative_path/Info.plist" <<< "$zip_entries" >/dev/null
+          done
+
+          {
+            echo "## LiveContainer build feasibility"
+            echo "- Pinned source commit: $LIVECONTAINER_COMMIT"
+            echo "- Xcode: $(xcodebuild -version | tr '\n' ' ')"
+            echo "- iPhoneOS SDK: $(xcrun --sdk iphoneos --show-sdk-version)"
+            echo "- Build: PASS (Release, iphoneos, arm64; signing disabled)"
+            echo "- Host bundle identifier: $HOST_BUNDLE_ID (unsigned build setting)"
+            echo "- Embedded LiveProcess bundle identifier: $HOST_BUNDLE_ID.LiveProcess"
+            echo "- Top-level app bundles: ${#apps[@]}"
+            echo "- Embedded app extensions: ${#extensions[@]}"
+            if [ -n "$additional_extension_names" ]; then
+              echo "- Additional embedded app extensions included: $additional_extension_names"
+            else
+              echo "- Additional embedded app extensions included: none"
+            fi
+            echo "- Temporary Payload package: PASS (runner temp only; no IPA created or uploaded)"
+            echo "- Device install, extension launch, signing/profile validation, and runtime isolation: NOT RUN"
+          } >> "$GITHUB_STEP_SUMMARY"
