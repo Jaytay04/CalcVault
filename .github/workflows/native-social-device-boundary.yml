@@ -54,6 +54,26 @@ jobs:
           codesign --verify --deep "$device_app"
           codesign -d --entitlements - "$device_app" 2>/dev/null \
             | grep -q 'FAKETEAMID.com.jaylintaylor.calcvault.hostonly'
+      - name: Package unsigned device IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/boundary-device/Build/Products/Release-iphoneos/SyntheticDeviceBoundary.app"
+          mkdir -p "$RUNNER_TEMP/boundary-ipa/Payload"
+          ditto "$app" "$RUNNER_TEMP/boundary-ipa/Payload/SyntheticDeviceBoundary.app"
+          cd "$RUNNER_TEMP/boundary-ipa"
+          zip -qr SyntheticDeviceBoundary-resignable.ipa Payload
+          unzip -Z -1 SyntheticDeviceBoundary-resignable.ipa | grep -q '^Payload/SyntheticDeviceBoundary.app/PlugIns/SyntheticBoundaryExtension.appex/'
+          shasum -a 256 SyntheticDeviceBoundary-resignable.ipa > SyntheticDeviceBoundary-resignable.ipa.sha256
+          cat SyntheticDeviceBoundary-resignable.ipa.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-device-boundary-resignable
+          path: |
+            ${{ runner.temp }}/boundary-ipa/SyntheticDeviceBoundary-resignable.ipa
+            ${{ runner.temp }}/boundary-ipa/SyntheticDeviceBoundary-resignable.ipa.sha256
+          if-no-files-found: error
+          retention-days: 7
       - name: Smoke-test extension report on simulator
         shell: bash
         run: |
@@ -88,23 +108,3 @@ jobs:
               | tail -n 80
           fi
           test "$found" = 1
-      - name: Package unsigned device IPA
-        shell: bash
-        run: |
-          set -euo pipefail
-          app="$RUNNER_TEMP/boundary-device/Build/Products/Release-iphoneos/SyntheticDeviceBoundary.app"
-          mkdir -p "$RUNNER_TEMP/boundary-ipa/Payload"
-          ditto "$app" "$RUNNER_TEMP/boundary-ipa/Payload/SyntheticDeviceBoundary.app"
-          cd "$RUNNER_TEMP/boundary-ipa"
-          zip -qr SyntheticDeviceBoundary-resignable.ipa Payload
-          unzip -Z -1 SyntheticDeviceBoundary-resignable.ipa | grep -q '^Payload/SyntheticDeviceBoundary.app/PlugIns/SyntheticBoundaryExtension.appex/'
-          shasum -a 256 SyntheticDeviceBoundary-resignable.ipa > SyntheticDeviceBoundary-resignable.ipa.sha256
-          cat SyntheticDeviceBoundary-resignable.ipa.sha256
-      - uses: actions/upload-artifact@v4
-        with:
-          name: synthetic-device-boundary-resignable
-          path: |
-            ${{ runner.temp }}/boundary-ipa/SyntheticDeviceBoundary-resignable.ipa
-            ${{ runner.temp }}/boundary-ipa/SyntheticDeviceBoundary-resignable.ipa.sha256
-          if-no-files-found: error
-          retention-days: 7
