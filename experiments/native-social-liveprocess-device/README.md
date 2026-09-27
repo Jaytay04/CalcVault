@@ -10,6 +10,10 @@ The manual `native-social-liveprocess-device.yml` workflow builds one containing
 
 The host and extension request a dedicated synthetic App Group, the app-ID Keychain control group, and one guest Keychain group. Only the host requests the explicit `.com.jaylintaylor.calcvault.hostonly` group. `FAKETEAMID` in the build entitlement fixture is a placeholder for SideStore to rewrite. Unsupported or absent effective groups must yield an inconclusive setup result, not an isolation pass.
 
+The upstream certificate/JIT prerequisite is skipped only for this exact synthetic selection when the staged dylib matches the immutable embedded copy byte for byte. iOS code-signature validation at `dlopen` remains enabled. This route's compatibility with the actual SideStore signature must be measured on the phone.
+
+Each preparation creates two small random test Keychain items and a uniquely named sentinel, retained for inspection. This fixture does not delete those items, and uninstalling an app must not be assumed to remove its Keychain entries. No real vault item is read or modified. The host also reports whether SideStore embedded a certificate export in its bundle, checking existence only; that finding must be resolved before any real native guest is considered.
+
 ## Phone test
 
 This IPA replaces the current disposable Calculator/CalcVault test app under the same identity. It does not require another Home Screen app or removal of SideStore or Spotify. Keep the LiveProcess extension when SideStore asks. No signed IPA export or import is needed for this fixture.

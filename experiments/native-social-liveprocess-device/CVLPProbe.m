@@ -279,7 +279,7 @@ static NSString *CVLPHostSigningExportObservation(void) {
     }
 
     NSURL *resourceBundleURL = [NSBundle.mainBundle.resourceURL URLByAppendingPathComponent:CVLPGuestResourceBundleName isDirectory:YES];
-    NSURL *resourceInfoURL = [resourceBundleURL URLByAppendingPathComponent:@"Info.plist"];
+    NSURL *resourceInfoURL = [resourceBundleURL URLByAppendingPathComponent:@"GuestInfo.plist"];
     NSData *infoData = [NSData dataWithContentsOfURL:resourceInfoURL options:0 error:&fileError];
     if (infoData == nil) { return @"Synthetic guest staging failed (guest resource metadata unavailable)."; }
     NSPropertyListFormat propertyListFormat = NSPropertyListXMLFormat_v1_0;

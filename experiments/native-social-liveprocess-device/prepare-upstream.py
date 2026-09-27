@@ -137,6 +137,7 @@ struct LiveContainerSwiftUIApp: SwiftUI.App {
     appExecPath = strdup([[bundlePath stringByAppendingPathComponent:@"Frameworks/SyntheticNativeGuestPayload.dylib"] fileSystemRepresentation]);
     *path = appExecPath;''')
     replace(root, "LiveContainer/LCBootstrap.m", '        ![appBundle loadAndReturnError:&error]', '        NO /* The exact signed payload was already loaded by dlopen above. */')
+    replace(root, "LiveContainer/LCBootstrap.m", '    bool isJitEnabled = checkJITEnabled();', '    bool isJitEnabled = false; // This fixture must prove the pre-signed route without JIT/library-validation bypass.')
     replace(root, "LiveContainer/LCBootstrap.m", '    // Go!\n', '    [CVLPProbe recordStage:@"post-loader"];\n\n    // Go!\n')
     replace(root, "LiveContainer/LCBootstrap.m", '    NSString* lastLaunchDataUUID;', '''    if (!isLiveProcess) {
         // A reused disposable install must always show the host test screen.

@@ -40,7 +40,15 @@ def main():
     (host / "Info.plist").write_bytes(plistlib.dumps(host_info))
     resources = host / "SyntheticGuestResources.bundle"
     resources.mkdir(exist_ok=True)
-    shutil.copy2(guest / "Info.plist", resources / "Info.plist")
+    shutil.copy2(guest / "Info.plist", resources / "GuestInfo.plist")
+    resource_info = {
+        "CFBundleIdentifier": "org.example.cvlp.resources",
+        "CFBundleName": "SyntheticGuestResources",
+        "CFBundlePackageType": "BNDL",
+        "CFBundleVersion": "10",
+        "CFBundleShortVersionString": "1.0.0",
+    }
+    (resources / "Info.plist").write_bytes(plistlib.dumps(resource_info))
     (host / "Frameworks").mkdir(exist_ok=True)
     shutil.copy2(args.payload, host / "Frameworks/SyntheticNativeGuestPayload.dylib")
     output.mkdir(parents=True, exist_ok=True)

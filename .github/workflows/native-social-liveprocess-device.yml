@@ -68,7 +68,9 @@ jobs:
             cp "$guest/CVLPGuest" "$payload"
             xcrun otool -hv "$payload" | grep -q EXECUTE
             SIMCTL_CHILD_CVLP_PREPATCH_PATH="$payload" \
-              xcrun simctl launch --terminate-running-process "$device" com.jaylintaylor.calcvault
+              xcrun simctl launch --terminate-running-process "$device" com.jaylintaylor.calcvault || true
+            # The prepatch helper intentionally exits. Its result file and Mach-O
+            # header below are authoritative even when simctl reports that exit.
             patched=0
             for attempt in {1..20}; do
               if test -f "$payload.result"; then patched=1; break; fi
@@ -123,6 +125,9 @@ jobs:
           xcrun simctl io "$CVLP_SIMULATOR" screenshot "$RUNNER_TEMP/cvlp-probe.png"
           cat "$RUNNER_TEMP/cvlp-probe.log"
           test "$found" = 1
+          for stage in pre-bookmark post-bookmark post-loader guest-entry; do
+            grep -q "CVLP_STAGE Stage $stage .*host/extension processes distinct" "$RUNNER_TEMP/cvlp-probe.log"
+          done
           {
             echo '## Synthetic LiveProcess probe'
             echo '- One containing app, one LiveProcess extension, embedded synthetic guest dylib.'
