@@ -26,6 +26,7 @@ static NSMutableArray<NSString *> *CVLPHostObservations;
 static NSMutableArray<NSString *> *CVLPStageObservations;
 static NSData *CVLPHostSentinelContents;
 static NSString *CVLPHostSentinelPath;
+static NSString *CVLPSigningExportPath;
 static CVLPSecItemCopyMatchingFunction CVLPOriginalSecItemCopyMatching;
 static BOOL CVLPGuestBookmarkActivated;
 
@@ -79,6 +80,20 @@ static NSData * _Nullable CVLPReadFile(int descriptor, int *errorCode) {
 
 static NSString *CVLPFileReadOutcome(int errorCode) {
     return (errorCode == EACCES || errorCode == EPERM) ? @"DENIED" : @"INCONCLUSIVE";
+}
+
+static NSString *CVLPSigningExportOpenOutcome(void) {
+    NSString *path = CVLPSigningExportPath;
+    if (path.length == 0) { return @"INCONCLUSIVE (bundle path unavailable)"; }
+    int descriptor = open(path.fileSystemRepresentation, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (descriptor >= 0) {
+        close(descriptor);
+        return @"OPENABLE (no bytes read)";
+    }
+    int openError = errno;
+    if (openError == ENOENT) { return @"ABSENT"; }
+    if (openError == EACCES || openError == EPERM) { return @"DENIED"; }
+    return [NSString stringWithFormat:@"INCONCLUSIVE (open error %d)", openError];
 }
 
 static NSString *CVLPKeychainEntitlementType(CFTypeRef value) {
@@ -297,7 +312,7 @@ static NSString *CVLPSeedObservation(NSString *controlName, NSDictionary<NSStrin
         CVLPHostObservations = [NSMutableArray array];
         CVLPStageObservations = [NSMutableArray array];
     }
-    CVLPAppendHostObservation(@"Build marker: build13.");
+    CVLPAppendHostObservation(@"Build marker: build14.");
     CVLPAppendHostObservation(CVLPHostSigningExportObservation());
 
     NSFileManager *fileManager = NSFileManager.defaultManager;
@@ -510,8 +525,14 @@ static NSString *CVLPSeedObservation(NSString *controlName, NSDictionary<NSStrin
     // The adapter invokes this before LiveProcess installs the guest loader and Security hooks.
     CVLPSecItemCopyMatchingFunction original = (CVLPSecItemCopyMatchingFunction)dlsym(RTLD_DEFAULT, "SecItemCopyMatching");
     if (original == NULL) { original = (CVLPSecItemCopyMatchingFunction)dlsym(RTLD_NEXT, "SecItemCopyMatching"); }
+    NSURL *extensionURL = NSBundle.mainBundle.bundleURL;
+    NSURL *containingAppURL = extensionURL.URLByDeletingLastPathComponent.URLByDeletingLastPathComponent;
+    NSString *signingExportPath = [extensionURL.pathExtension isEqualToString:@"appex"] &&
+        [containingAppURL.pathExtension isEqualToString:@"app"]
+        ? [containingAppURL URLByAppendingPathComponent:@"ALTCertificate.p12"].path : nil;
     @synchronized (self) {
         CVLPOriginalSecItemCopyMatching = original;
+        CVLPSigningExportPath = signingExportPath;
         CVLPRuntimeLaunchInfo = [launchInfo copy];
         CVLPGuestBookmarkActivated = NO;
         CVLPStageObservations = [NSMutableArray array];
@@ -580,10 +601,11 @@ static NSString *CVLPSeedObservation(NSString *controlName, NSDictionary<NSStrin
     NSString *sharedKeychainOutcome = [info[@"appIDFixtureReady"] boolValue]
         ? CVLPKeychainOutcome(service, info[@"appIDControlAccount"], info[@"appIDControlGroup"])
         : @"INCONCLUSIVE (host fixture setup unavailable)";
+    NSString *signingExportOutcome = CVLPSigningExportOpenOutcome();
 
     NSString *observation = [NSString stringWithFormat:
-        @"Stage %@ (pid %d; host/extension processes %@): file read %@; synthetic file write %@; host-only Keychain %@; app-ID control Keychain %@.",
-        stageName, probePID, processObservation, fileReadOutcome, fileWriteOutcome, hostOnlyKeychainOutcome, sharedKeychainOutcome];
+        @"Stage %@ (pid %d; host/extension processes %@): file read %@; synthetic file write %@; host-only Keychain %@; app-ID control Keychain %@; signing-export open %@.",
+        stageName, probePID, processObservation, fileReadOutcome, fileWriteOutcome, hostOnlyKeychainOutcome, sharedKeychainOutcome, signingExportOutcome];
     NSLog(@"CVLP_STAGE %@", observation);
     NSArray<NSString *> *allStageObservations;
     BOOL bookmarkActivated;

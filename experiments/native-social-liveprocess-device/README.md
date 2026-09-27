@@ -24,6 +24,8 @@ Each preparation creates up to two small random test Keychain items and a unique
 
 Build 12 reached all four probe stages on the owner's phone, but its LiveProcess guest panel was black. Build 13 makes the disposable guest scene-aware: UIKit creates its window with the connected `UIWindowScene`, and simulator smoke requires a scene-attachment marker before guest visibility. The scene mismatch is a hypothesis for the black panel, not yet a confirmed phone diagnosis.
 
+Build 14 adds a narrow signing-export access probe. Before the guest loader changes the main-bundle identity, the LiveProcess extension derives the containing app bundle path. At each stage it attempts only `open(O_RDONLY)` on that bundle's `ALTCertificate.p12`, immediately closes any descriptor, and reports `OPENABLE`, `DENIED`, `ABSENT`, or `INCONCLUSIVE`; it never reads certificate bytes, logs the path, or copies the file. An `OPENABLE` result on the signed phone would block placing an untrusted native TikTok guest in this container until the signing-material exposure is resolved. The simulator's ad-hoc fixture should report `ABSENT` and cannot answer the signed-phone question.
+
 ## Phone test
 
 This IPA replaces the current disposable Calculator/CalcVault test app under the same identity. It does not require another Home Screen app or removal of SideStore or Spotify. Keep the LiveProcess extension when SideStore asks. No signed IPA export or import is needed for this fixture.
