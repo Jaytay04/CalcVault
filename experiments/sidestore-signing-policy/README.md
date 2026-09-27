@@ -1,0 +1,9 @@
+# CalcVault certificate omission research
+
+This patch targets SideStore source revision `0dd743f75afc358b0ba4a002feb5f19474492371`. It changes only `EmbedSigningCertOperation`. When the staged app's bundle ID is `com.jaylintaylor.calcvault` or has that ID plus a dot suffix, the operation removes any old `ALTCertificate.p12` or `ALTCertificate.der` from the staged copy and omits the new embedded certificate. All other apps retain SideStore's original behavior. The staged copy is prepared before signing; the installed source app and its data are not edited by this operation.
+
+The policy uses the staged bundle ID because SideStore's re-sign pipeline can stage an already rewritten ID. It does not remove certificates from SideStore itself or from other installed apps. SideStore's reviewed refresh pipeline installs renewed provisioning profiles without running `EmbedSigningCertOperation`, but an in-place install, refresh, and signed-device retest are still required before claiming compatibility.
+
+The manual CI workflow applies the patch to a fresh pinned checkout and builds an unsigned/ad-hoc SideStore IPA using public source and placeholder signing settings. It receives no Apple account, personal certificate, pairing file, or signed IPA. A passing build proves only compilation and packaging, not certificate omission during a real SideStore install. Do not install this experimental SideStore artifact over the working SideStore until its update and recovery path is reviewed.
+
+After a controlled installation, the Build 14 synthetic CalcVault guest should report `signing-export open ABSENT` at every stage and the host should report P12 and DER absent. A failed positive Keychain control or guest launch is inconclusive; an `OPENABLE` result remains a blocker for native TikTok. The probe does not inspect certificate contents. Native TikTok IPA import, lifecycle, and refresh remain separate gates.

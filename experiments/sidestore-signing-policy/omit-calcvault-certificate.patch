@@ -1,0 +1,38 @@
+diff --git a/SideStore/Core/Operations/PipelineOperations/EmbedSigningCertOperation.swift b/SideStore/Core/Operations/PipelineOperations/EmbedSigningCertOperation.swift
+--- a/SideStore/Core/Operations/PipelineOperations/EmbedSigningCertOperation.swift
++++ b/SideStore/Core/Operations/PipelineOperations/EmbedSigningCertOperation.swift
+@@ -25,14 +25,29 @@ final class EmbedSigningCertOperation: BasePipelineOperation<InstallAppOperatio
+             throw OperationError.invalidParameters("EmbedSigningCertOperation: No signing certificate found in context.")
+         }
+         
+-        guard let certData = cert.data else {
+-            debugLog("[EmbedSigningCertOperation] WARNING: Certificate has no data to embed.")
+-            return
+-        }
+-        
+         // 2. Write ALTCertificate.p12 (if p12) or ALTCertificate.der (if der) directly inside the target app bundle
+         guard let appBundle = self.context.targetAppBundle else {
+             throw OperationError.invalidParameters("EmbedSigningCertOperation: targetAppBundle is missing in context.")
+         }
+         
++        // CalcVault runs an untrusted native guest in an extension that can open
++        // the containing app's bundle. Keep signing material out of its staged
++        // bundle, including a certificate carried over during a re-sign.
++        let calcVaultID = "com.jaylintaylor.calcvault"
++        if appBundle.bundleIdentifier == calcVaultID || appBundle.bundleIdentifier.hasPrefix(calcVaultID + ".") {
++            for name in ["ALTCertificate.p12", "ALTCertificate.der"] {
++                let certificateURL = appBundle.fileURL.appendingPathComponent(name)
++                if FileManager.default.fileExists(atPath: certificateURL.path) {
++                    try FileManager.default.removeItem(at: certificateURL)
++                }
++            }
++            debugLog("[EmbedSigningCertOperation] Omitted embedded certificate for CalcVault.")
++            return
++        }
++
++        guard let certData = cert.data else {
++            debugLog("[EmbedSigningCertOperation] WARNING: Certificate has no data to embed.")
++            return
++        }
++
+         let p12Password = CertificateManager.shared.getPassword(for: cert)

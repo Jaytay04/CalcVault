@@ -1,1 +1,2 @@
 *.pdf binary
+experiments/sidestore-signing-policy/*.patch whitespace=-blank-at-eol
