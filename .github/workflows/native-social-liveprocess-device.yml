@@ -98,10 +98,17 @@ jobs:
             package_args=("$host" "$guest" "$RUNNER_TEMP/cvlp-payload-$sdk.dylib" "$RUNNER_TEMP/cvlp-entitlements-$sdk")
             if test "$sdk" = iphonesimulator; then package_args+=(--simulator); fi
             python3 experiments/native-social-liveprocess-device/package-fixture.py "${package_args[@]}"
+            # Mach-O prepatching invalidates any linker-generated signature.
+            # Sign and verify the loose payload explicitly before sealing its host.
+            payload="$host/Frameworks/SyntheticNativeGuestPayload.dylib"
+            codesign --force --sign - "$payload"
+            codesign --verify --strict --verbose=2 "$payload"
             codesign --force --deep --sign - "$host"
             codesign --force --sign - --entitlements "$RUNNER_TEMP/cvlp-entitlements-$sdk/extension.entitlements" "$host/PlugIns/LiveProcess.appex"
             codesign --force --sign - --entitlements "$RUNNER_TEMP/cvlp-entitlements-$sdk/host.entitlements" "$host"
             codesign --verify --deep "$host"
+            codesign --verify --strict --verbose=2 "$payload"
+            codesign -d --verbose=4 "$payload" 2> "$RUNNER_TEMP/cvlp-payload-$sdk.signature"
             codesign -d --entitlements - "$host/PlugIns/LiveProcess.appex" 2>/dev/null > "$RUNNER_TEMP/cvlp-extension-$sdk.plist"
             if grep -q calcvault.hostonly "$RUNNER_TEMP/cvlp-extension-$sdk.plist"; then exit 1; fi
             xcrun otool -hv "$host/Frameworks/SyntheticNativeGuestPayload.dylib" | grep -q DYLIB
@@ -130,6 +137,10 @@ jobs:
             if grep -q CVLP_GUEST_VISIBLE "$RUNNER_TEMP/cvlp-probe.log"; then found=1; break; fi
           done
           xcrun simctl io "$CVLP_SIMULATOR" screenshot "$RUNNER_TEMP/cvlp-probe.png"
+          data="$(xcrun simctl get_app_container "$CVLP_SIMULATOR" com.jaylintaylor.calcvault data)"
+          staged="$data/Documents/Applications/org.example.syntheticnativeguest.app/Frameworks/SyntheticNativeGuestPayload.dylib"
+          codesign --verify --strict --verbose=2 "$staged" > "$RUNNER_TEMP/cvlp-staged-signature.log" 2>&1
+          cmp "$host/Frameworks/SyntheticNativeGuestPayload.dylib" "$staged"
           cat "$RUNNER_TEMP/cvlp-probe.log"
           test "$found" = 1
           for stage in pre-bookmark post-bookmark post-loader guest-entry; do
@@ -180,5 +191,7 @@ jobs:
             ${{ runner.temp }}/cvlp-payload-*.result
             ${{ runner.temp }}/cvlp-payload-*.flags
             ${{ runner.temp }}/cvlp-payload-*.header
+            ${{ runner.temp }}/cvlp-payload-*.signature
+            ${{ runner.temp }}/cvlp-staged-signature.log
           if-no-files-found: ignore
           retention-days: 7
