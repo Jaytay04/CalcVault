@@ -13,19 +13,20 @@ final class CVLPLifecycleModel: NSObject, ObservableObject {
     private var covers: [UIWindow] = []
     private var observations: [String] = []
     private var inactiveTransition = false
+    private var surfaceToken: UInt64?
 
     override init() {
         super.init()
         let center = NotificationCenter.default
         for name in [UIApplication.willResignActiveNotification, UIScene.willDeactivateNotification] {
-            center.addObserver(self, selector: #selector(inactive), name: name, object: nil)
+            center.addObserver(self, selector: #selector(inactive(_:)), name: name, object: nil)
         }
         for name in [UIApplication.didEnterBackgroundNotification, UIScene.didEnterBackgroundNotification,
                      UIApplication.protectedDataWillBecomeUnavailableNotification] {
-            center.addObserver(self, selector: #selector(background), name: name, object: nil)
+            center.addObserver(self, selector: #selector(background(_:)), name: name, object: nil)
         }
         for name in [UIApplication.didBecomeActiveNotification, UIScene.didActivateNotification] {
-            center.addObserver(self, selector: #selector(active), name: name, object: nil)
+            center.addObserver(self, selector: #selector(active(_:)), name: name, object: nil)
         }
     }
 
@@ -76,7 +77,16 @@ final class CVLPLifecycleModel: NSObject, ObservableObject {
             NSLog("CVLP_LIFECYCLE_STALE_LAUNCH_REJECTED"); return
         }
         UserDefaults.lcShared().set(0, forKey: "LCMultitaskMode")
+        surfaceToken = token
         showingGuest = true
+    }
+
+    func surfaceReady() {
+        guard let token = surfaceToken else { return }
+        surfaceToken = nil
+        guard gate.accepts(token: token), !inactiveTransition, UIApplication.shared.applicationState == .active else {
+            observe("Stale surface attachment REJECTED."); refresh(); return
+        }
         guest.start { [self] success in
             guard gate.accepts(token: token), !inactiveTransition, UIApplication.shared.applicationState == .active else {
                 guest.revoke(); observe("Stale extension callback REJECTED."); refresh(); return
@@ -103,6 +113,7 @@ final class CVLPLifecycleModel: NSObject, ObservableObject {
         cover()
         gate.revoke()
         pending = nil
+        surfaceToken = nil
         context?.invalidate(); context = nil
         guest.revoke()
         showingGuest = false
@@ -115,15 +126,15 @@ final class CVLPLifecycleModel: NSObject, ObservableObject {
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { self.refresh() }
         }
     }
-    @objc private func inactive() {
+    @objc private func inactive(_ notification: Notification) {
         inactiveTransition = true
         cover()
         // Only the app-owned biometric preparation may survive inactivity.
         // Genuine backgrounding always revokes, including during Face ID.
         if gate.phase != .preparing { lock(reason: "inactive") }
     }
-    @objc private func background() { inactiveTransition = true; lock(reason: "background or protected-data loss") }
-    @objc private func active() {
+    @objc private func background(_ notification: Notification) { inactiveTransition = true; lock(reason: "background or protected-data loss") }
+    @objc private func active(_ notification: Notification) {
         inactiveTransition = false
         consumePreparationIfActive()
         uncoverAfterTransition()
@@ -179,8 +190,36 @@ struct CVLPCalculatorCover: View {
 
 struct CVLPGuestSurface: UIViewControllerRepresentable {
     let session: CVLPGuestSession
-    func makeUIViewController(context: Context) -> UIViewController { session.viewController }
+    let onReady: () -> Void
+    func makeUIViewController(context: Context) -> UIViewController { CVLPMountController(session: session, onReady: onReady) }
     func updateUIViewController(_ controller: UIViewController, context: Context) {}
+}
+
+final class CVLPMountController: UIViewController {
+    let session: CVLPGuestSession
+    let onReady: () -> Void
+    private var started = false
+    init(session: CVLPGuestSession, onReady: @escaping () -> Void) {
+        self.session = session
+        self.onReady = onReady
+        super.init(nibName: nil, bundle: nil)
+    }
+    required init?(coder: NSCoder) { fatalError("Not used by the synthetic fixture") }
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        let child = session.viewController
+        addChild(child)
+        child.view.frame = view.bounds
+        child.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.addSubview(child.view)
+        child.didMove(toParent: self)
+    }
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard !started, view.window != nil, !view.bounds.isEmpty else { return }
+        started = true
+        onReady()
+    }
 }
 
 struct CVLPHostView: View {
@@ -201,7 +240,7 @@ struct CVLPHostView: View {
                         Spacer()
                         Button("Lock") { reportVisible = false; model.lock() }
                     }.padding()
-                    if model.showingGuest { CVLPGuestSurface(session: model.guest) }
+                    if model.showingGuest { CVLPGuestSurface(session: model.guest, onReady: model.surfaceReady) }
                     else {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 16) {

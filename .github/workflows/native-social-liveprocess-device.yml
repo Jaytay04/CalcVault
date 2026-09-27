@@ -178,6 +178,7 @@ jobs:
           grep -q 'CVLP_UI scene-attached' "$RUNNER_TEMP/cvlp-probe.log"
           grep -q 'CVLP_LIFECYCLE_COVER_INSTALLED' "$RUNNER_TEMP/cvlp-probe.log"
           grep -q 'CVLP_LIFECYCLE_KILL_REQUESTED' "$RUNNER_TEMP/cvlp-probe.log"
+          grep -q 'CVLP_LIFECYCLE_ALIVE_BEFORE_REVOKE' "$RUNNER_TEMP/cvlp-probe.log"
           grep -q 'exit observed (ESRCH); settled' "$RUNNER_TEMP/cvlp-probe.log"
           grep -q 'signing-export open ABSENT' "$RUNNER_TEMP/cvlp-probe.log"
           for stage in pre-bookmark post-bookmark post-loader guest-entry; do

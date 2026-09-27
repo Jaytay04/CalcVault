@@ -38,8 +38,11 @@ def main() -> None:
 @property(nonatomic) BOOL cvlpRevoked;
 @property(nonatomic) BOOL cvlpBeginCompleted;
 @property(nonatomic) int cvlpObservedPID;
+@property(nonatomic) BOOL cvlpAliveBeforeRevoke;
 - (void)cvlpRevoke;
 @property int resizeDebounceToken;''')
+    replace_once(scene, '#import "UIKitPrivate+MultitaskSupport.h"',
+                 '#import "UIKitPrivate+MultitaskSupport.h"\n#import <unistd.h>')
     replace_once(scene, '''    [_extension setRequestCancellationBlock:^(NSUUID *uuid, NSError *error) {
         [weakSelf appTerminationCleanUp];
         [weakSelf.delegate appSceneVC:weakSelf didInitializeWithError:error];
@@ -107,6 +110,17 @@ def main() -> None:
     self.view.hidden = YES;
     self.contentView.hidden = YES;
     self.shouldIgnoreSceneUpdates = YES;
+    // A positive liveness observation must precede this extension-scoped kill.
+    // Missing PID, ESRCH, and EPERM never establish pre-revoke liveness.
+    if (self.cvlpObservedPID > 0 && kill(self.cvlpObservedPID, 0) == 0) {
+        self.cvlpAliveBeforeRevoke = YES;
+        NSLog(@"CVLP_LIFECYCLE_ALIVE_BEFORE_REVOKE");
+    }
+    NSLog(@"CVLP_LIFECYCLE_KILL_REQUESTED");
+    [self.extension _kill:SIGKILL];
+    if (self.identifier && [self.extension respondsToSelector:@selector(cancelExtensionRequestWithIdentifier:)]) {
+        [self.extension cancelExtensionRequestWithIdentifier:self.identifier];
+    }
     if (self.sceneID) {
         [[PrivClass(FBSceneManager) sharedInstance] destroyScene:self.sceneID withTransitionContext:nil];
     }
@@ -114,12 +128,6 @@ def main() -> None:
     [self.presenter deactivate];
     [self.presenter invalidate];
     self.presenter = nil;
-    if (self.identifier && [self.extension respondsToSelector:@selector(cancelExtensionRequestWithIdentifier:)]) {
-        [self.extension cancelExtensionRequestWithIdentifier:self.identifier];
-    }
-    // Only the retained extension instance is targeted, never an arbitrary PID.
-    NSLog(@"CVLP_LIFECYCLE_KILL_REQUESTED");
-    [self.extension _kill:SIGKILL];
 }
 
 - (void)setUpAppPresenter {

@@ -7,6 +7,7 @@
 @interface AppSceneViewController (CVLPLifecycle)
 @property(nonatomic, readonly) BOOL cvlpBeginCompleted;
 @property(nonatomic, readonly) int cvlpObservedPID;
+@property(nonatomic, readonly) BOOL cvlpAliveBeforeRevoke;
 - (void)cvlpRevoke;
 @end
 
@@ -97,7 +98,8 @@
     NSAssert(NSThread.isMainThread, @"Guest session state must be read on main");
     if (!self.started) return YES;
     [self observeExit];
-    return self.revoked && self.sceneController.cvlpBeginCompleted && self.exitObserved;
+    return self.revoked && self.sceneController.cvlpBeginCompleted &&
+        self.sceneController.cvlpAliveBeforeRevoke && self.exitObserved;
 }
 
 - (NSString *)summary {
@@ -107,8 +109,10 @@
     NSString *request = self.sceneController.cvlpBeginCompleted ? @"completed" : @"pending";
     NSString *process = self.exitObserved ? @"exit observed (ESRCH)" :
         (self.observedPID > 0 ? @"exit unproved" : @"PID unavailable; exit unproved");
-    return [NSString stringWithFormat:@"Synthetic guest: %@; %@; extension %@; process %@; %@",
-            self.launchResult, self.revoked ? @"revoked" : @"active", request, process,
+    NSString *prior = self.sceneController.cvlpAliveBeforeRevoke ?
+        @"alive before revoke observed" : @"pre-revoke liveness unproved";
+    return [NSString stringWithFormat:@"Synthetic guest: %@; %@; extension %@; %@; process %@; %@",
+            self.launchResult, self.revoked ? @"revoked" : @"active", request, prior, process,
             self.isSettled ? @"settled" : @"unsettled"];
 }
 
