@@ -2,6 +2,12 @@
 
 Status: experimental authorization only, 2026-09-25. Not approved for the shipping CalcVault target.
 
+## Correction: Simulator does not enforce the application sandbox
+
+On 2026-09-26, investigation located Apple's explicit statement in [Getting the Most Out of Simulator](https://developer.apple.com/videos/play/wwdc2019/418/) that the application sandbox is not enforced. This accounts for our host-file and unrelated-app-container reads before any bookmark activation. Historical simulator observations below remain accurate, but their failed file-read assertions cannot establish failure of the physical-device boundary. The signed-phone classic-extension fixture denied host-only files and the explicit host-only Keychain group; the actual LiveProcess loader must still repeat those tests on the phone.
+
+The new isolated research fixture in `experiments/native-social-liveprocess-device` exercises the normal LiveProcess bootstrap and `LCBootstrap` guest loader with a synthetic payload embedded before SideStore re-signing. Its guest launch only grants bookmarks to the exact synthetic guest bundle and data container; neither the host Documents root nor a general Tweaks folder is granted. The package includes just LiveProcess, with a dedicated synthetic App Group instead of SideStore/AltStore groups. The host-only Keychain group is omitted from the extension's requested entitlements. Effective SideStore entitlements and signed-device enforcement remain measurements, not assumptions. Post-loader Keychain probes call the Security function captured before guest hooks, so query-rewriting hooks cannot manufacture a denial. Prepatching happens in CI before signing; the phone copies the signed dylib without modifying its executable bytes.
+
 ## Context
 
 The owner requires native TikTok inside CalcVault to access features absent from TikTok's desktop website, with X and Instagram possible later. They approved a **separate synthetic prototype** using a LiveContainer-style native guest, even though this research requires runtime hooks and an additional extension outside the original implementation plan. This does not authorize modifying the populated install, importing a real social IPA, signing into a real account, upgrading iOS, changing App IDs on the device, or relaxing the vault's confidentiality gate.

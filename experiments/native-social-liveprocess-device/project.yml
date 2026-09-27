@@ -1,0 +1,35 @@
+name: CVLPGuest
+options:
+  minimumXcodeGenVersion: 2.46.0
+  deploymentTarget:
+    iOS: "18.0"
+settings:
+  base:
+    CLANG_ENABLE_OBJC_ARC: YES
+    CODE_SIGNING_ALLOWED: NO
+    TARGETED_DEVICE_FAMILY: "1"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "10"
+targets:
+  CVLPGuest:
+    type: application
+    platform: iOS
+    sources:
+      - path: Guest.m
+    info:
+      path: GeneratedInfo.plist
+      properties:
+        CFBundleDisplayName: Synthetic native guest
+        LCSyntheticGuestExecutable: Frameworks/SyntheticNativeGuestPayload.dylib
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.example.syntheticnativeguest.app
+        GENERATE_INFOPLIST_FILE: NO
+schemes:
+  CVLPGuest:
+    build:
+      targets:
+        CVLPGuest: all
