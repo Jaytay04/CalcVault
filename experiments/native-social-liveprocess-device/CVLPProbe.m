@@ -342,7 +342,7 @@ static NSString *CVLPHostSigningExportObservation(void) {
         ![lcAppInfoData writeToURL:lcAppInfoURL options:NSDataWritingAtomic error:&fileError] ||
         ![signedPayload writeToURL:embeddedPayloadURL options:NSDataWritingAtomic error:&fileError] ||
         ![signedPayload writeToURL:rootExecutableURL options:NSDataWritingAtomic error:&fileError] ||
-        ![@"synthetic-liveprocess-device" writeToURL:stageMarkerURL options:NSDataWritingAtomic encoding:NSUTF8StringEncoding error:&fileError]) {
+        ![@"synthetic-liveprocess-device" writeToURL:stageMarkerURL atomically:YES encoding:NSUTF8StringEncoding error:&fileError]) {
         return @"Synthetic guest staging failed (fixture resources could not be staged).";
     }
     NSData *embeddedPayloadReadback = [NSData dataWithContentsOfURL:embeddedPayloadURL options:0 error:nil];
