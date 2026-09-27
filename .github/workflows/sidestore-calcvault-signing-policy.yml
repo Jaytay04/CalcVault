@@ -19,7 +19,7 @@ jobs:
           set -euo pipefail
           source_dir="$RUNNER_TEMP/sidestore-source"
           git clone --filter=blob:none --no-checkout https://github.com/SideStore/SideStore.git "$source_dir"
-          git -C "$source_dir" checkout 0dd743f75afc358b0ba4a002feb5f19474492371
+          git -C "$source_dir" checkout 6032424a0e56c1c319762e786099bdd9186a238b
           git -C "$source_dir" submodule update --init --recursive
           git -C "$source_dir" apply --check "$GITHUB_WORKSPACE/experiments/sidestore-signing-policy/omit-calcvault-certificate.patch"
           git -C "$source_dir" apply "$GITHUB_WORKSPACE/experiments/sidestore-signing-policy/omit-calcvault-certificate.patch"
