@@ -152,7 +152,7 @@ static NSString *CVLPDescribeLivenessSample(CVLPLivenessSample sample) {
         CVLPProcessGroupShutdownObserved(self.revoked, self.sceneController.cvlpBeginCompleted,
             self.sceneController.cvlpProcessGroupPresenceSample, self.postcheckLivenessSample);
     NSString *diagnostics = [NSString stringWithFormat:
-        @"; liveness launch={%@}; firstPreRevoke={%@}; latestPreRevoke={%@}; preRevokeAttempts=%lu; postcheck={%@}\nProcess-group shutdown observation: %@ (separate from signal-zero settlement; not a security certification)",
+        @"; liveness launch={%@}; firstPreRevoke={%@}; latestPreRevoke={%@}; preRevokeAttempts=%lu; postcheck={%@}\nPID presence/absence observation (getpgid): %@ (separate from signal-zero settlement; not a security certification)",
         launchSample, firstSample, latestSample,
         (unsigned long)self.sceneController.cvlpPreRevokeAttemptCount, postcheck,
         groupShutdownObserved ? @"observed" : @"unproved"];

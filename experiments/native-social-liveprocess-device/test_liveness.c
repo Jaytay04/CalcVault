@@ -36,10 +36,10 @@ int main(void) {
     CVLPLivenessSample current = CVLPSampleLiveness(getpid());
     assert(current.attempted == 1 && current.result == 0);
     assert(current.errorNumber == 0 && current.classification == CVLPLivenessSuccess);
-    assert(current.groupResult >= 0 && current.groupErrorNumber == 0);
+    assert(current.groupResult > 0 && current.groupErrorNumber == 0);
     assert(current.groupClassification == CVLPLivenessSuccess);
 
-    assert(CVLPProcessGroupClassify(42, 0, EPERM) == CVLPLivenessSuccess);
+    assert(CVLPProcessGroupClassify(42, 0, EPERM) == CVLPLivenessOther);
     assert(CVLPProcessGroupClassify(42, 7, ESRCH) == CVLPLivenessSuccess);
     assert(CVLPProcessGroupClassify(42, -1, EPERM) == CVLPLivenessEPERM);
     assert(CVLPProcessGroupClassify(42, -1, ESRCH) == CVLPLivenessESRCH);
@@ -57,6 +57,7 @@ int main(void) {
     assert(!CVLPProcessPresenceObserved(syntheticSample(42, -1, EPERM, -1, EPERM)));
     assert(!CVLPProcessPresenceObserved(syntheticSample(42, -1, ESRCH, 7, 0)));
     assert(!CVLPProcessPresenceObserved(syntheticSample(42, -1, EINVAL, 7, 0)));
+    assert(!CVLPProcessPresenceObserved(syntheticSample(42, -1, EPERM, 0, 0)));
     assert(!CVLPProcessAbsenceObserved(syntheticSample(42, -1, ESRCH, 7, 0)));
     assert(!CVLPProcessAbsenceObserved(syntheticSample(42, -1, EPERM, -1, ESRCH)));
     assert(!CVLPProcessGroupShutdownObserved(1, 1, before,

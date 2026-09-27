@@ -37,7 +37,10 @@ CVLPLivenessClassify(pid_t pid, int result, int errorNumber) {
 static inline CVLPLivenessClassification
 CVLPProcessGroupClassify(pid_t pid, pid_t result, int errorNumber) {
     if (pid <= 0) return CVLPLivenessAbsentPID;
-    if (result >= 0) return CVLPLivenessSuccess;
+    // The bounded guest fixture accepts only a positive group ID, matching the
+    // pinned host's running check; a zero result remains inconclusive here.
+    if (result > 0) return CVLPLivenessSuccess;
+    if (result == 0) return CVLPLivenessOther;
     return CVLPLivenessClassify(pid, (int)result, errorNumber);
 }
 

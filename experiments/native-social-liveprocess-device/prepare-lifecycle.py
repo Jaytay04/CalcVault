@@ -148,8 +148,8 @@ static void CVLPLogLivenessSample(NSString *phase, CVLPLivenessSample sample) {
     }
     if (firstAttempt) CVLPLogLivenessSample(@"pre-revoke-first", livenessSample);
     CVLPLogLivenessSample(@"pre-revoke-latest", livenessSample);
-    // Liveness uses signal zero and precedes each extension-scoped kill attempt.
-    // Missing PID, ESRCH, and EPERM never establish positive pre-revoke liveness.
+    // Both observations precede the extension-scoped kill. EPERM alone is never
+    // positive proof; the separate PID-presence check requires positive getpgid.
     NSLog(@"CVLP_LIFECYCLE_KILL_REQUESTED");
     [self.extension _kill:SIGKILL];
     if (self.identifier && [self.extension respondsToSelector:@selector(cancelExtensionRequestWithIdentifier:)]) {
