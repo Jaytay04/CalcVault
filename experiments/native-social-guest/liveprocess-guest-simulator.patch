@@ -196,3 +196,16 @@ diff --git a/LiveContainerSwiftUI/Views/LCTabView.swift b/LiveContainerSwiftUI/V
 +#endif
          let task = SecTaskCreateFromSelf(nil)
          guard let value = SecTaskCopyValueForEntitlement(task, "get-task-allow" as CFString, nil), (value.takeRetainedValue() as? NSNumber)?.boolValue ?? false else {
+diff --git a/LiveContainer/Tweaks/Dyld.m b/LiveContainer/Tweaks/Dyld.m
+--- a/LiveContainer/Tweaks/Dyld.m
++++ b/LiveContainer/Tweaks/Dyld.m
+@@ -336,3 +336,9 @@
+ #if TARGET_OS_MACCATALYST || TARGET_OS_SIMULATOR
+ void DyldHookLoadableIntoProcess(void) {
++#if TARGET_OS_SIMULATOR
++    if (getenv("LC_SYNTHETIC_LIVEPROCESS_GUEST")) {
++        NSLog(@"SYNTHETIC_LIVEPROCESS_SKIPPED_SIMULATOR_DYLD_PATCH");
++        return;
++    }
++#endif
+     uint32_t *patchAddr = (uint32_t *)litehook_find_symbol(getDyldBase(), "__ZNK6mach_o6Header19loadableIntoProcessENS_8PlatformE7CStringb");
