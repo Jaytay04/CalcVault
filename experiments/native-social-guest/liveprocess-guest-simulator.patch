@@ -174,3 +174,15 @@ diff --git a/LiveContainer/LCBootstrap.m b/LiveContainer/LCBootstrap.m
      NSString *launchUrl = nil;
      do {
          if(selectedApp) {
+diff --git a/LiveContainerSwiftUI/Views/LCTabView.swift b/LiveContainerSwiftUI/Views/LCTabView.swift
+--- a/LiveContainerSwiftUI/Views/LCTabView.swift
++++ b/LiveContainerSwiftUI/Views/LCTabView.swift
+@@ -292,3 +292,8 @@
+     func checkGetTaskAllow() {
++#if targetEnvironment(simulator)
++        if ProcessInfo.processInfo.environment["LC_SYNTHETIC_LIVEPROCESS_GUEST"] == "1" {
++            return
++        }
++#endif
+         let task = SecTaskCreateFromSelf(nil)
+         guard let value = SecTaskCopyValueForEntitlement(task, "get-task-allow" as CFString, nil), (value.takeRetainedValue() as? NSNumber)?.boolValue ?? false else {
