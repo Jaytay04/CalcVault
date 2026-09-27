@@ -37,7 +37,7 @@ public enum KeychainMigrationOutcome: Equatable, Sendable {
     case moved
 }
 
-public enum KeychainGroupMigrationError: Error, Equatable {
+public enum KeychainGroupMigrationError: Error, Equatable, LocalizedError {
     case invalidGroups
     case conflictingItems
     case destinationVerificationFailed
@@ -46,6 +46,13 @@ public enum KeychainGroupMigrationError: Error, Equatable {
     case unexpectedStatus(Int32)
     case invalidItem
     case accessControlCreationFailed
+
+    public var errorDescription: String? {
+        if case .unexpectedStatus(let status) = self {
+            return "Credential migration could not complete (Keychain status \(status)). No replacement configuration was created."
+        }
+        return "Credential migration could not be verified. Existing credential copies were not overwritten; no replacement configuration was created."
+    }
 }
 
 /// Copies one exact generic-password item between explicit Keychain groups,

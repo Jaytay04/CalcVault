@@ -1,6 +1,5 @@
 import Foundation
 import LocalAuthentication
-import Security
 
 public enum KeychainStoreError: Error, Equatable {
     case accessControlCreationFailed
@@ -10,35 +9,22 @@ public enum KeychainStoreError: Error, Equatable {
     case unexpectedStatus(Int32)
 }
 
-/// A narrow Keychain wrapper for device-only biometric-protected key data.
-///
-/// Callers must opt into this store explicitly. Items are created with
-/// `kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly` and the current biometric
-/// set, so a missing passcode or changed enrollment fails closed.
+/// A narrow wrapper for device-only biometric-protected key data.
 public final class KeychainStore {
     public let service: String
+    private let storage: HostOnlyKeychainStorage
 
-    public init(service: String) {
+    public init(
+        service: String,
+        storage: HostOnlyKeychainStorage = HostOnlyKeychainStorage()
+    ) {
         self.service = service
+        self.storage = storage
     }
 
     public func write(_ data: Data, account: String) throws {
-        guard let accessControl = makeAccessControl() else {
-            throw KeychainStoreError.accessControlCreationFailed
-        }
-
-        var query = baseQuery(account: account)
-        query[kSecAttrAccessControl as String] = accessControl
-        query[kSecValueData as String] = data
-
-        let status = SecItemAdd(query as CFDictionary, nil)
-        switch status {
-        case errSecSuccess:
-            return
-        case errSecDuplicateItem:
-            throw KeychainStoreError.duplicateItem
-        default:
-            throw KeychainStoreError.unexpectedStatus(Int32(status))
+        try mapDuplicateItemError(to: KeychainStoreError.duplicateItem) {
+            try storage.write(data, item: migrationItem(account: account))
         }
     }
 
@@ -46,56 +32,41 @@ public final class KeychainStore {
     /// protected access check. A caller may supply a fresh LAContext for each
     /// unlock attempt.
     public func read(account: String, context: LAContext? = nil) throws -> Data? {
-        var query = baseQuery(account: account)
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-        if let context {
-            query[kSecUseAuthenticationContext as String] = context
-        }
-
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        switch status {
-        case errSecSuccess:
-            guard let data = result as? Data else {
-                throw KeychainStoreError.invalidItem
-            }
-            return data
-        case errSecItemNotFound:
-            return nil
-        default:
-            throw KeychainStoreError.unexpectedStatus(Int32(status))
+        try mapDuplicateItemError(to: KeychainStoreError.duplicateItem) {
+            try storage.read(migrationItem(account: account), context: context)
         }
     }
 
     /// Deletes only the exact service/account item requested by the caller.
     /// Missing items are treated as an idempotent success for cleanup paths.
     public func delete(account: String) throws {
-        let status = SecItemDelete(baseQuery(account: account) as CFDictionary)
-        switch status {
-        case errSecSuccess, errSecItemNotFound:
-            return
-        default:
-            throw KeychainStoreError.unexpectedStatus(Int32(status))
+        try mapDuplicateItemError(to: KeychainStoreError.duplicateItem) {
+            try storage.delete(migrationItem(account: account))
         }
     }
 
-    private func baseQuery(account: String) -> [String: Any] {
-        [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
-    }
-
-    private func makeAccessControl() -> SecAccessControl? {
-        var error: Unmanaged<CFError>?
-        return SecAccessControlCreateWithFlags(
-            kCFAllocatorDefault,
-            kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly,
-            .biometryCurrentSet,
-            &error
+    private func migrationItem(account: String) -> KeychainMigrationItem {
+        KeychainMigrationItem(
+            service: service,
+            account: account,
+            protection: .biometryCurrentSet
         )
+    }
+}
+
+private func mapDuplicateItemError<T>(
+    to duplicateError: Error,
+    operation: () throws -> T
+) throws -> T {
+    do {
+        return try operation()
+    } catch let error as HostOnlyKeychainStorageError {
+        if case .duplicateItem = error {
+            throw duplicateError
+        }
+        throw error
+    } catch {
+        throw error
     }
 }
 

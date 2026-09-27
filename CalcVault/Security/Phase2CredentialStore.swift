@@ -1,6 +1,5 @@
 import Foundation
 import LocalAuthentication
-import Security
 import Sodium
 
 public enum Phase2CredentialStoreError: Error, Equatable {
@@ -20,79 +19,62 @@ public protocol Phase2CredentialPersisting: AnyObject {
 
 public final class UnlockedDeviceKeychainStore: Phase2CredentialPersisting, @unchecked Sendable {
     public let service: String
+    private let storage: HostOnlyKeychainStorage
 
-    public init(service: String) {
+    public init(
+        service: String,
+        storage: HostOnlyKeychainStorage = HostOnlyKeychainStorage()
+    ) {
         self.service = service
+        self.storage = storage
     }
 
     public func read(account: String) throws -> Data? {
-        var query = baseQuery(account: account)
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        switch status {
-        case errSecSuccess:
-            guard let data = result as? Data else {
-                throw Phase2CredentialStoreError.invalidItem
-            }
-            return data
-        case errSecItemNotFound:
-            return nil
-        default:
-            throw Phase2CredentialStoreError.unexpectedStatus(Int32(status))
+        try mapDuplicateItemError(to: Phase2CredentialStoreError.duplicateItem) {
+            try storage.read(migrationItem(account: account))
         }
     }
 
     public func write(_ data: Data, account: String) throws {
-        var query = baseQuery(account: account)
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        query[kSecValueData as String] = data
-
-        let status = SecItemAdd(query as CFDictionary, nil)
-        switch status {
-        case errSecSuccess:
-            return
-        case errSecDuplicateItem:
-            throw Phase2CredentialStoreError.duplicateItem
-        default:
-            throw Phase2CredentialStoreError.unexpectedStatus(Int32(status))
+        try mapDuplicateItemError(to: Phase2CredentialStoreError.duplicateItem) {
+            try storage.write(data, item: migrationItem(account: account))
         }
     }
 
     public func replace(_ data: Data, account: String) throws {
-        let attributes: [String: Any] = [kSecValueData as String: data]
-        let status = SecItemUpdate(
-            baseQuery(account: account) as CFDictionary,
-            attributes as CFDictionary
-        )
-        switch status {
-        case errSecSuccess:
-            return
-        case errSecItemNotFound:
-            throw Phase2CredentialStoreError.invalidItem
-        default:
-            throw Phase2CredentialStoreError.unexpectedStatus(Int32(status))
+        try mapDuplicateItemError(to: Phase2CredentialStoreError.duplicateItem) {
+            try storage.replace(data, item: migrationItem(account: account))
         }
     }
 
     public func delete(account: String) throws {
-        let status = SecItemDelete(baseQuery(account: account) as CFDictionary)
-        switch status {
-        case errSecSuccess, errSecItemNotFound:
-            return
-        default:
-            throw Phase2CredentialStoreError.unexpectedStatus(Int32(status))
+        try mapDuplicateItemError(to: Phase2CredentialStoreError.duplicateItem) {
+            try storage.delete(migrationItem(account: account))
         }
     }
 
-    private func baseQuery(account: String) -> [String: Any] {
-        [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
+    private func migrationItem(account: String) -> KeychainMigrationItem {
+        KeychainMigrationItem(
+            service: service,
+            account: account,
+            protection: .whenUnlockedDeviceOnly
+        )
+    }
+}
+
+private func mapDuplicateItemError<T>(
+    to duplicateError: Error,
+    operation: () throws -> T
+) throws -> T {
+    do {
+        return try operation()
+    } catch let error as HostOnlyKeychainStorageError {
+        if case .duplicateItem = error {
+            throw duplicateError
+        }
+        throw error
+    } catch {
+        throw error
     }
 }
 

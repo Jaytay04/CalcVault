@@ -24,6 +24,8 @@ jobs:
           test "$(xcodegen version | awk '{print $2}')" = "2.46.0"
       - name: Run simulator tests
         run: sh scripts/test-macos.sh
+      - name: Test host credential entitlement template
+        run: python3 -m unittest discover -s scripts -p test_credential_entitlements.py -v
       - name: Build unsigned device IPA
         run: sh scripts/build-unsigned-ipa.sh
       - name: Upload unsigned IPA

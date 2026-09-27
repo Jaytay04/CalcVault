@@ -35,6 +35,7 @@ targets:
     settings:
       base:
         PRODUCT_NAME: CalcVault
+        CURRENT_PROJECT_VERSION: "16"
         PRODUCT_BUNDLE_IDENTIFIER: com.jaylintaylor.calcvault
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: Calculator

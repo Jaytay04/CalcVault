@@ -832,6 +832,7 @@ public final class AppCoordinator: ObservableObject {
             let rootKey = await Task.detached { () -> Data? in
                 let context = LAContext()
                 context.localizedReason = "Unlock the CalcVault private area"
+                defer { context.invalidate() }
                 return try? credentials.unlockWithBiometrics(context: context)
             }.value
             guard let self else { return }

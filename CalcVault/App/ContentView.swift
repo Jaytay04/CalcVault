@@ -264,6 +264,11 @@ private struct PrivateAreaView: View {
                     Section("Phase 2") {
                         Text("Authentication is active. Encrypted storage status appears in Files.")
                     }
+                    Section("Credential storage") {
+                        Text("Host-only Keychain migration is enabled. Existing biometric credentials migrate during Face ID unlock.")
+                        Text("Build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown")")
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .navigationTitle("Security")
                 .navigationBarTitleDisplayMode(.inline)
