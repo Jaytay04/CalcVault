@@ -1,13 +1,17 @@
 #import "CVLPGuestSession.h"
+#import "CVLPLiveness.h"
 #import "../MultitaskSupport/AppSceneViewController.h"
-
-#import <errno.h>
-#import <signal.h>
 
 @interface AppSceneViewController (CVLPLifecycle)
 @property(nonatomic, readonly) BOOL cvlpBeginCompleted;
 @property(nonatomic, readonly) int cvlpObservedPID;
 @property(nonatomic, readonly) BOOL cvlpAliveBeforeRevoke;
+@property(nonatomic, readonly) CVLPLivenessSample cvlpLaunchLivenessSample;
+@property(nonatomic, readonly) BOOL cvlpHasLaunchLivenessSample;
+@property(nonatomic, readonly) CVLPLivenessSample cvlpFirstPreRevokeLivenessSample;
+@property(nonatomic, readonly) BOOL cvlpHasFirstPreRevokeLivenessSample;
+@property(nonatomic, readonly) CVLPLivenessSample cvlpLatestPreRevokeLivenessSample;
+@property(nonatomic, readonly) NSUInteger cvlpPreRevokeAttemptCount;
 - (void)cvlpRevoke;
 @end
 
@@ -21,7 +25,21 @@
 @property(nonatomic) BOOL exitObserved;
 @property(nonatomic) int observedPID;
 @property(nonatomic, copy) NSString *launchResult;
+@property(nonatomic) CVLPLivenessSample postcheckLivenessSample;
+@property(nonatomic) BOOL hasPostcheckLivenessSample;
 @end
+
+static void CVLPLogLivenessSample(NSString *phase, CVLPLivenessSample sample) {
+    NSLog(@"CVLP_LIVENESS phase=%@ pid=%d attempted=%d result=%d errno=%d class=%s",
+          phase, (int)sample.pid, sample.attempted, sample.result, sample.errorNumber,
+          CVLPLivenessClassificationName(sample.classification));
+}
+
+static NSString *CVLPDescribeLivenessSample(CVLPLivenessSample sample) {
+    return [NSString stringWithFormat:@"pid=%d,attempted=%d,result=%d,errno=%d,class=%s",
+            (int)sample.pid, sample.attempted, sample.result, sample.errorNumber,
+            CVLPLivenessClassificationName(sample.classification)];
+}
 
 @implementation CVLPGuestSession
 
@@ -86,9 +104,11 @@
 - (void)observeExit {
     if (!self.revoked || self.exitObserved) return;
     int pid = self.sceneController.cvlpObservedPID;
-    if (pid <= 0) return;
     self.observedPID = pid;
-    if (kill(pid, 0) == -1 && errno == ESRCH) {
+    self.postcheckLivenessSample = CVLPSampleLiveness((pid_t)pid);
+    self.hasPostcheckLivenessSample = YES;
+    CVLPLogLivenessSample(@"postcheck", self.postcheckLivenessSample);
+    if (self.postcheckLivenessSample.classification == CVLPLivenessESRCH) {
         self.exitObserved = YES;
         NSLog(@"CVLP_LIFECYCLE_EXIT_OBSERVED");
     }
@@ -105,15 +125,28 @@
 - (NSString *)summary {
     NSAssert(NSThread.isMainThread, @"Guest session state must be read on main");
     [self observeExit];
-    if (!self.started) return @"Synthetic guest: not started; settled";
+    BOOL settled = self.isSettled;
+    NSString *launchSample = self.sceneController.cvlpHasLaunchLivenessSample ?
+        CVLPDescribeLivenessSample(self.sceneController.cvlpLaunchLivenessSample) : @"not sampled";
+    NSString *firstSample = self.sceneController.cvlpHasFirstPreRevokeLivenessSample ?
+        CVLPDescribeLivenessSample(self.sceneController.cvlpFirstPreRevokeLivenessSample) : @"not sampled";
+    NSString *latestSample = self.sceneController.cvlpPreRevokeAttemptCount > 0 ?
+        CVLPDescribeLivenessSample(self.sceneController.cvlpLatestPreRevokeLivenessSample) : @"not sampled";
+    NSString *postcheck = self.hasPostcheckLivenessSample ?
+        CVLPDescribeLivenessSample(self.postcheckLivenessSample) : @"not sampled";
+    NSString *diagnostics = [NSString stringWithFormat:
+        @"; liveness launch={%@}; firstPreRevoke={%@}; latestPreRevoke={%@}; preRevokeAttempts=%lu; postcheck={%@}",
+        launchSample, firstSample, latestSample,
+        (unsigned long)self.sceneController.cvlpPreRevokeAttemptCount, postcheck];
+    if (!self.started) return [@"Synthetic guest: not started; settled" stringByAppendingString:diagnostics];
     NSString *request = self.sceneController.cvlpBeginCompleted ? @"completed" : @"pending";
     NSString *process = self.exitObserved ? @"exit observed (ESRCH)" :
         (self.observedPID > 0 ? @"exit unproved" : @"PID unavailable; exit unproved");
     NSString *prior = self.sceneController.cvlpAliveBeforeRevoke ?
         @"alive before revoke observed" : @"pre-revoke liveness unproved";
-    return [NSString stringWithFormat:@"Synthetic guest: %@; %@; extension %@; %@; process %@; %@",
+    return [[NSString stringWithFormat:@"Synthetic guest: %@; %@; extension %@; %@; process %@; %@",
             self.launchResult, self.revoked ? @"revoked" : @"active", request, prior, process,
-            self.isSettled ? @"settled" : @"unsettled"];
+            settled ? @"settled" : @"unsettled"] stringByAppendingString:diagnostics];
 }
 
 - (void)appSceneVC:(AppSceneViewController *)vc didInitializeWithError:(NSError *)error {

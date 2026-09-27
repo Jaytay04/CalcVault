@@ -29,6 +29,15 @@ jobs:
           cd experiments/native-social-liveprocess-device
           xcodegen generate
 
+      - name: Test liveness diagnostic classification
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun clang -std=c11 -Wall -Wextra -Werror \
+            experiments/native-social-liveprocess-device/test_liveness.c \
+            -o "$RUNNER_TEMP/cvlp-liveness-tests"
+          "$RUNNER_TEMP/cvlp-liveness-tests"
+
       - name: Test signed Keychain identity selection
         shell: bash
         run: |
@@ -180,6 +189,9 @@ jobs:
           grep -q 'CVLP_LIFECYCLE_KILL_REQUESTED' "$RUNNER_TEMP/cvlp-probe.log"
           grep -q 'CVLP_LIFECYCLE_ALIVE_BEFORE_REVOKE' "$RUNNER_TEMP/cvlp-probe.log"
           grep -q 'exit observed (ESRCH); settled' "$RUNNER_TEMP/cvlp-probe.log"
+          grep -q 'CVLP_LIVENESS phase=launch ' "$RUNNER_TEMP/cvlp-probe.log"
+          grep -q 'firstPreRevoke={pid=' "$RUNNER_TEMP/cvlp-probe.log"
+          grep -q 'postcheck={pid=' "$RUNNER_TEMP/cvlp-probe.log"
           grep -q 'signing-export open ABSENT' "$RUNNER_TEMP/cvlp-probe.log"
           for stage in pre-bookmark post-bookmark post-loader guest-entry; do
             grep -q "CVLP_STAGE Stage $stage .*host/extension processes distinct" "$RUNNER_TEMP/cvlp-probe.log"
@@ -207,6 +219,8 @@ jobs:
           cat "$RUNNER_TEMP/cvlp-lifecycle-race.log"
           grep -q CVLP_LIFECYCLE_KILL_REQUESTED "$RUNNER_TEMP/cvlp-lifecycle-race.log"
           grep -q CVLP_LIFECYCLE_LATE_COMPLETION_REJECTED "$RUNNER_TEMP/cvlp-lifecycle-race.log"
+          grep -q 'firstPreRevoke={pid=' "$RUNNER_TEMP/cvlp-lifecycle-race.log"
+          grep -q 'latestPreRevoke={pid=' "$RUNNER_TEMP/cvlp-lifecycle-race.log"
           if grep -q CVLP_GUEST_VISIBLE "$RUNNER_TEMP/cvlp-lifecycle-race.log"; then
             echo 'Revoked pending launch incorrectly displayed a guest'; exit 1
           fi

@@ -1,5 +1,7 @@
 # Synthetic LiveProcess device probe
 
+Build 18 adds bounded liveness diagnostics after the Build 17 phone report observed ESRCH but could not prove pre-revoke liveness. It retains the launch sample, first/latest pre-revoke samples and latest post-revoke sample, including immediate error values and unavailable PID states. Repeated revocation cannot erase the first sample. Permission denial is diagnostic evidence only, never a passing liveness result. No termination, authentication, entitlement or production-vault policy is relaxed. Repeat explicit Lock and app-switcher/background tests in separate fresh launches and capture each Test report.
+
 Shutdown settlement requires a positive PID-liveness observation immediately before the extension-scoped kill and a later `ESRCH`, not just a missing process after hiding UI. This is bounded observation, not an OS termination acknowledgment or proof against PID reuse. Missing/denied liveness remains inconclusive. Notification callbacks use Foundation's one-argument selector contract; the guest request begins only after its host surface has appeared with a window and nonempty bounds.
 
 Build 17 adds an isolated lifecycle test around the Build 15 disposable migration gate. Production CalcVault (Build 16) remains separate. This fixture replaces the calculator UI temporarily but does not access production credential services or vault files. It contains no TikTok binary.

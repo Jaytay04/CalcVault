@@ -18,7 +18,7 @@ def main() -> None:
     scene = root / "MultitaskSupport/AppSceneViewController.m"
     host_utils = root / "LiveContainerSwiftUI/Utilities/LCUtils.m"
     shared = root / "LiveContainer/LCSharedUtils.m"
-    for required in (scene, host_utils, shared, root / "LiveContainer/CVLPGuestSession.m"):
+    for required in (scene, host_utils, shared, root / "LiveContainer/CVLPGuestSession.m", root / "LiveContainer/CVLPLiveness.h"):
         if not required.is_file():
             raise SystemExit(f"Prepared source missing: {required}")
     if '#import "CVLPGuestSession.m"' in shared.read_text(encoding="utf-8"):
@@ -39,10 +39,16 @@ def main() -> None:
 @property(nonatomic) BOOL cvlpBeginCompleted;
 @property(nonatomic) int cvlpObservedPID;
 @property(nonatomic) BOOL cvlpAliveBeforeRevoke;
+@property(nonatomic) CVLPLivenessSample cvlpLaunchLivenessSample;
+@property(nonatomic) BOOL cvlpHasLaunchLivenessSample;
+@property(nonatomic) CVLPLivenessSample cvlpFirstPreRevokeLivenessSample;
+@property(nonatomic) BOOL cvlpHasFirstPreRevokeLivenessSample;
+@property(nonatomic) CVLPLivenessSample cvlpLatestPreRevokeLivenessSample;
+@property(nonatomic) NSUInteger cvlpPreRevokeAttemptCount;
 - (void)cvlpRevoke;
 @property int resizeDebounceToken;''')
     replace_once(scene, '#import "UIKitPrivate+MultitaskSupport.h"',
-                 '#import "UIKitPrivate+MultitaskSupport.h"\n#import <unistd.h>')
+                 '#import "UIKitPrivate+MultitaskSupport.h"\n#import "../LiveContainer/CVLPLiveness.h"\n\nstatic void CVLPLogLivenessSample(NSString *phase, CVLPLivenessSample sample) {\n    NSLog(@"CVLP_LIVENESS phase=%@ pid=%d attempted=%d result=%d errno=%d class=%s", phase, (int)sample.pid, sample.attempted, sample.result, sample.errorNumber, CVLPLivenessClassificationName(sample.classification));\n}')
     replace_once(scene, '''    [_extension setRequestCancellationBlock:^(NSUUID *uuid, NSError *error) {
         [weakSelf appTerminationCleanUp];
         [weakSelf.delegate appSceneVC:weakSelf didInitializeWithError:error];
@@ -78,6 +84,11 @@ def main() -> None:
                 self.identifier = identifier;
                 self.pid = [self.extension pidForRequestIdentifier:identifier];
                 self.cvlpObservedPID = self.pid;
+                if (!self.cvlpHasLaunchLivenessSample) {
+                    self.cvlpLaunchLivenessSample = CVLPSampleLiveness((pid_t)self.pid);
+                    self.cvlpHasLaunchLivenessSample = YES;
+                    CVLPLogLivenessSample(@"launch", self.cvlpLaunchLivenessSample);
+                }
             }
             dispatch_block_t handleCompletion = ^{
                 self.cvlpBeginCompleted = YES;
@@ -110,12 +121,22 @@ def main() -> None:
     self.view.hidden = YES;
     self.contentView.hidden = YES;
     self.shouldIgnoreSceneUpdates = YES;
-    // A positive liveness observation must precede this extension-scoped kill.
-    // Missing PID, ESRCH, and EPERM never establish pre-revoke liveness.
-    if (self.cvlpObservedPID > 0 && kill(self.cvlpObservedPID, 0) == 0) {
+    CVLPLivenessSample livenessSample = CVLPSampleLiveness((pid_t)self.cvlpObservedPID);
+    BOOL firstAttempt = self.cvlpPreRevokeAttemptCount == 0;
+    if (firstAttempt) {
+        self.cvlpFirstPreRevokeLivenessSample = livenessSample;
+        self.cvlpHasFirstPreRevokeLivenessSample = YES;
+    }
+    self.cvlpLatestPreRevokeLivenessSample = livenessSample;
+    self.cvlpPreRevokeAttemptCount += 1;
+    if (livenessSample.classification == CVLPLivenessSuccess) {
         self.cvlpAliveBeforeRevoke = YES;
         NSLog(@"CVLP_LIFECYCLE_ALIVE_BEFORE_REVOKE");
     }
+    if (firstAttempt) CVLPLogLivenessSample(@"pre-revoke-first", livenessSample);
+    CVLPLogLivenessSample(@"pre-revoke-latest", livenessSample);
+    // Liveness uses signal zero and precedes each extension-scoped kill attempt.
+    // Missing PID, ESRCH, and EPERM never establish positive pre-revoke liveness.
     NSLog(@"CVLP_LIFECYCLE_KILL_REQUESTED");
     [self.extension _kill:SIGKILL];
     if (self.identifier && [self.extension respondsToSelector:@selector(cancelExtensionRequestWithIdentifier:)]) {

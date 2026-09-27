@@ -328,7 +328,7 @@ static NSString *CVLPSeedObservation(NSString *controlName, NSDictionary<NSStrin
         CVLPHostObservations = [NSMutableArray array];
         CVLPStageObservations = [NSMutableArray array];
     }
-    CVLPAppendHostObservation(@"Build marker: build17.");
+    CVLPAppendHostObservation(@"Build marker: build18.");
     CVLPAppendHostObservation(CVLPHostSigningExportObservation());
     CVLPAppendHostObservation(CVLPMigrationFixture[@"summary"] ?: @"Synthetic migration: NOT RUN.");
 #if !TARGET_OS_SIMULATOR

@@ -2,7 +2,7 @@ import LocalAuthentication
 
 @MainActor
 final class CVLPLifecycleModel: NSObject, ObservableObject {
-    @Published var report = "Build 17. Ready for a disposable lifecycle test."
+    @Published var report = "Build 18. Ready for a disposable lifecycle test."
     @Published var showingGuest = false
     @Published var locked = false
     @Published var attempted = false
@@ -164,7 +164,7 @@ final class CVLPLifecycleModel: NSObject, ObservableObject {
         observations = Array(observations.suffix(30))
     }
     func refresh() {
-        report = "Build 17 lifecycle observations (not a security certification)\n\n"
+        report = "Build 18 lifecycle observations (not a security certification)\n\n"
             + observations.joined(separator: "\n") + "\n\n" + guest.summary + "\n\n" + CVLPProbe.hostSummary()
         NSLog("CVLP_LIFECYCLE_STATUS %@", guest.summary)
     }
@@ -236,7 +236,7 @@ struct CVLPHostView: View {
             } else {
                 VStack {
                     HStack {
-                        Text("Native lifecycle test · 17").font(.headline)
+                        Text("Native lifecycle test · 18").font(.headline)
                         Spacer()
                         Button("Lock") { reportVisible = false; model.lock() }
                     }.padding()
