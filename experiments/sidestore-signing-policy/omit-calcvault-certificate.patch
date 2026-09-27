@@ -1,7 +1,7 @@
 diff --git a/SideStore/Core/Operations/PipelineOperations/EmbedSigningCertOperation.swift b/SideStore/Core/Operations/PipelineOperations/EmbedSigningCertOperation.swift
 --- a/SideStore/Core/Operations/PipelineOperations/EmbedSigningCertOperation.swift
 +++ b/SideStore/Core/Operations/PipelineOperations/EmbedSigningCertOperation.swift
-@@ -25,14 +25,29 @@ final class EmbedSigningCertOperation: BasePipelineOperation<InstallAppOperatio
+@@ -25,14 +25,33 @@ final class EmbedSigningCertOperation: BasePipelineOperation<InstallAppOperatio
              throw OperationError.invalidParameters("EmbedSigningCertOperation: No signing certificate found in context.")
          }
          
@@ -19,7 +19,11 @@ diff --git a/SideStore/Core/Operations/PipelineOperations/EmbedSigningCertOperat
 +        // the containing app's bundle. Keep signing material out of its staged
 +        // bundle, including a certificate carried over during a re-sign.
 +        let calcVaultID = "com.jaylintaylor.calcvault"
-+        if appBundle.bundleIdentifier == calcVaultID || appBundle.bundleIdentifier.hasPrefix(calcVaultID + ".") {
++        let originalID = self.context.bundleIdentifier
++        let stagedID = appBundle.bundleIdentifier
++        let originalIsCalcVault = originalID == calcVaultID || originalID.hasPrefix(calcVaultID + ".")
++        let stagedIsCalcVault = stagedID == calcVaultID || stagedID.hasPrefix(calcVaultID + ".")
++        if originalIsCalcVault || stagedIsCalcVault {
 +            for name in ["ALTCertificate.p12", "ALTCertificate.der"] {
 +                let certificateURL = appBundle.fileURL.appendingPathComponent(name)
 +                if FileManager.default.fileExists(atPath: certificateURL.path) {
