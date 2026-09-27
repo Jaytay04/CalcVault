@@ -113,6 +113,7 @@ struct LiveContainerSwiftUIApp: SwiftUI.App {
         }''')
     replace(root, "LiveProcess/main.m", '    if ([appInfo[@"selected"] isEqualToString:@"builtinSideStore"]) {', '''    if (bookmarks.count != 2) return 93;
     [CVLPProbe recordStage:@"post-bookmark"];
+    NSLog(@"CVLP_LOADER bookmarks active; entering bootstrap");
     if ([appInfo[@"selected"] isEqualToString:@"builtinSideStore"]) {''')
     replace(root, "LiveContainer/LCBootstrap.m", '    if (!LCSharedUtils.certificatePassword && !isSideStore) {', '''    BOOL syntheticPresignedGuest = NO;
     if (isLiveProcess && [selectedApp isEqualToString:@"org.example.syntheticnativeguest.app"]) {
@@ -123,6 +124,7 @@ struct LiveContainerSwiftUIApp: SwiftUI.App {
         NSData *stagedBytes = [NSData dataWithContentsOfFile:staged options:NSDataReadingMappedIfSafe error:nil];
         syntheticPresignedGuest = embeddedBytes.length > 0 && [embeddedBytes isEqualToData:stagedBytes];
         if (!syntheticPresignedGuest) return @"Synthetic payload differs from the embedded signed copy.";
+        NSLog(@"CVLP_LOADER embedded and staged payload bytes match");
     }
     // This exact embedded library was already signed by SideStore with the host.
     // OS code-signature validation at dlopen remains enabled; no JIT/signing keys are needed here.
@@ -136,6 +138,11 @@ struct LiveContainerSwiftUIApp: SwiftUI.App {
     // This copy was patched before SideStore signed the host. Never patch it on device.
     appExecPath = strdup([[bundlePath stringByAppendingPathComponent:@"Frameworks/SyntheticNativeGuestPayload.dylib"] fileSystemRepresentation]);
     *path = appExecPath;''')
+    replace(root, "LiveContainer/LCBootstrap.m", '    NUDGuestHooksInit();', '    NSLog(@"CVLP_LOADER installing guest hooks");\n    NUDGuestHooksInit();')
+    replace(root, "LiveContainer/LCBootstrap.m", '        appHandle = dlopen_nolock(appExecPath, RTLD_LAZY|RTLD_GLOBAL|RTLD_FIRST);', '''        NSLog(@"CVLP_LOADER entering dlopen");
+        appHandle = dlopen_nolock(appExecPath, RTLD_LAZY|RTLD_GLOBAL|RTLD_FIRST);
+        NSLog(@"CVLP_LOADER dlopen returned handle=%d", appHandle != NULL);''')
+    replace(root, "LiveContainer/LCBootstrap.m", 'static void exceptionHandler(NSException *exception) {', 'static void exceptionHandler(NSException *exception) {\n    NSLog(@"CVLP_EXCEPTION %@", exception.reason);')
     replace(root, "LiveContainer/LCBootstrap.m", '        ![appBundle loadAndReturnError:&error]', '        NO /* The exact signed payload was already loaded by dlopen above. */')
     replace(root, "LiveContainer/LCBootstrap.m", '    bool isJitEnabled = checkJITEnabled();', '    bool isJitEnabled = false; // This fixture must prove the pre-signed route without JIT/library-validation bypass.')
     replace(root, "LiveContainer/LCBootstrap.m", '    // Go!\n', '    [CVLPProbe recordStage:@"post-loader"];\n\n    // Go!\n')

@@ -12,6 +12,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
+      - name: Test synthetic packaging rules
+        run: python3 -m unittest discover -s experiments/native-social-liveprocess-device -p test_package_fixture.py -v
       - name: Select pinned toolchain and source
         shell: bash
         run: |
@@ -146,10 +148,14 @@ jobs:
         if: failure() && env.CVLP_SIMULATOR != ''
         shell: bash
         run: |
-          xcrun simctl spawn "$CVLP_SIMULATOR" log show --last 2m --style compact \
+          xcrun simctl spawn "$CVLP_SIMULATOR" log show --last 10m --style compact \
             --predicate 'process == "LiveContainer" OR process == "LiveProcess" OR process == "runningboardd" OR process == "SpringBoard" OR process == "amfid" OR eventMessage CONTAINS "CVLP_"' \
             > "$RUNNER_TEMP/cvlp-failure.log" || true
           xcrun simctl io "$CVLP_SIMULATOR" screenshot "$RUNNER_TEMP/cvlp-failure.png" || true
+          mkdir -p "$RUNNER_TEMP/cvlp-crashes"
+          for report in "$HOME"/Library/Logs/DiagnosticReports/LiveProcess*.ips "$HOME"/Library/Logs/DiagnosticReports/LiveContainer*.ips "$HOME"/Library/Logs/DiagnosticReports/CVLPGuest*.ips; do
+            if test -f "$report"; then cp "$report" "$RUNNER_TEMP/cvlp-crashes/"; fi
+          done
 
       - uses: actions/upload-artifact@v4
         with:
@@ -168,6 +174,7 @@ jobs:
             ${{ runner.temp }}/cvlp-probe.png
             ${{ runner.temp }}/cvlp-failure.log
             ${{ runner.temp }}/cvlp-failure.png
+            ${{ runner.temp }}/cvlp-crashes/
             ${{ runner.temp }}/cvlp-host-*.log
             ${{ runner.temp }}/cvlp-guest-*.log
             ${{ runner.temp }}/cvlp-payload-*.result
