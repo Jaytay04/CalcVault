@@ -58,6 +58,10 @@ def main():
     base = {"com.apple.security.application-groups": [group], "get-task-allow": True}
     for name, groups in (("host", common + [prefix + "com.jaylintaylor.calcvault.hostonly"]), ("extension", common)):
         entitlements = dict(base, **{"keychain-access-groups": groups})
+        if args.simulator:
+            # Match the earlier successful simulator loader fixture. Placeholder
+            # phone Keychain/debug entitlements are not a simulator signing test.
+            entitlements = {"com.apple.security.application-groups": [group]}
         (output / f"{name}.entitlements").write_bytes(plistlib.dumps(entitlements))
     print("One host, one LiveProcess extension, one embedded synthetic dylib; no signing credentials")
 

@@ -118,6 +118,7 @@ jobs:
           set -euo pipefail
           host="$RUNNER_TEMP/cvlp-host-iphonesimulator/Build/Products/Debug-iphonesimulator/LiveContainer.app"
           xcrun simctl install "$CVLP_SIMULATOR" "$host"
+          sleep 10
           SIMCTL_CHILD_CVLP_AUTORUN=1 xcrun simctl launch --terminate-running-process "$CVLP_SIMULATOR" com.jaylintaylor.calcvault
           found=0
           for attempt in {1..8}; do
@@ -145,8 +146,8 @@ jobs:
         if: failure() && env.CVLP_SIMULATOR != ''
         shell: bash
         run: |
-          xcrun simctl spawn "$CVLP_SIMULATOR" log show --last 5m --style compact \
-            --predicate 'process == "LiveContainer" OR process == "LiveProcess" OR eventMessage CONTAINS "CVLP_"' \
+          xcrun simctl spawn "$CVLP_SIMULATOR" log show --last 2m --style compact \
+            --predicate 'process == "LiveContainer" OR process == "LiveProcess" OR process == "runningboardd" OR process == "SpringBoard" OR process == "amfid" OR eventMessage CONTAINS "CVLP_"' \
             > "$RUNNER_TEMP/cvlp-failure.log" || true
           xcrun simctl io "$CVLP_SIMULATOR" screenshot "$RUNNER_TEMP/cvlp-failure.png" || true
 
