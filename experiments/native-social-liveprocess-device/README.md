@@ -18,6 +18,8 @@ The upstream certificate/JIT prerequisite is skipped only for this exact synthet
 
 The patched loose dylib must be signed explicitly before signing its containing app. Run `36289781996` passed outer-package checks but was killed with `CODESIGNING / Invalid Page` at guest `dlopen`. Run `36290476171` added explicit payload signing and passed both direct strict signature checks and visible simulator guest launch, without enabling library-validation bypass. The staged runtime copy also verified and matched the signed embedded library. This is simulator loading evidence, not a phone isolation result.
 
+Build 12 selects the signed library in the containing app's `Frameworks` directory for `dlopen`. The guest copy under Documents remains a byte-for-byte staging control and is never selected as executable code. Build 11 reached `dlopen` on the owner's phone but iOS blocked `mmap()` of that Documents copy. The revised bundle path must pass both the simulator loader check and a signed-phone test; the simulator alone cannot establish iOS sandbox behavior.
+
 Each preparation creates up to two small random test Keychain items and a uniquely named sentinel, retained for inspection. This fixture does not delete those items, and uninstalling an app must not be assumed to remove its Keychain entries. No real vault item is read or modified. The host separately reports P12 and DER certificate-file presence, checking existence only and never reading either file. P12 presence is a potential private-material concern requiring resolution before real native guests; DER presence alone is not evidence of a private signing key. These flags do not certify either file's contents or absence of signing material elsewhere.
 
 ## Phone test

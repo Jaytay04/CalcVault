@@ -116,6 +116,7 @@ struct LiveContainerSwiftUIApp: SwiftUI.App {
     NSLog(@"CVLP_LOADER bookmarks active; entering bootstrap");
     if ([appInfo[@"selected"] isEqualToString:@"builtinSideStore"]) {''')
     replace(root, "LiveContainer/LCBootstrap.m", '    if (!LCSharedUtils.certificatePassword && !isSideStore) {', '''    BOOL syntheticPresignedGuest = NO;
+    NSString *syntheticSignedPayloadPath = nil;
     if (isLiveProcess && [selectedApp isEqualToString:@"org.example.syntheticnativeguest.app"]) {
         NSURL *containingBundle = lcMainBundle.bundleURL.URLByDeletingLastPathComponent.URLByDeletingLastPathComponent;
         NSURL *embedded = [containingBundle URLByAppendingPathComponent:@"Frameworks/SyntheticNativeGuestPayload.dylib"];
@@ -124,6 +125,7 @@ struct LiveContainerSwiftUIApp: SwiftUI.App {
         NSData *stagedBytes = [NSData dataWithContentsOfFile:staged options:NSDataReadingMappedIfSafe error:nil];
         syntheticPresignedGuest = embeddedBytes.length > 0 && [embeddedBytes isEqualToData:stagedBytes];
         if (!syntheticPresignedGuest) return @"Synthetic payload differs from the embedded signed copy.";
+        syntheticSignedPayloadPath = embedded.path;
         NSLog(@"CVLP_LOADER embedded and staged payload bytes match");
     }
     // This exact embedded library was already signed by SideStore with the host.
@@ -132,11 +134,14 @@ struct LiveContainerSwiftUIApp: SwiftUI.App {
     replace(root, "LiveContainer/LCBootstrap.m", '''    const char *appExecPath = appBundle.executablePath.fileSystemRepresentation;
     *path = appExecPath;''', '''    const char *appExecPath = appBundle.executablePath.fileSystemRepresentation;
     if (!isLiveProcess || ![selectedApp isEqualToString:@"org.example.syntheticnativeguest.app"] ||
-        ![guestAppInfo[@"LCSyntheticGuestExecutable"] isEqualToString:@"Frameworks/SyntheticNativeGuestPayload.dylib"]) {
+        ![guestAppInfo[@"LCSyntheticGuestExecutable"] isEqualToString:@"Frameworks/SyntheticNativeGuestPayload.dylib"] ||
+        !syntheticPresignedGuest || syntheticSignedPayloadPath.length == 0) {
         return @"Only the pre-signed synthetic LiveProcess payload is permitted.";
     }
-    // This copy was patched before SideStore signed the host. Never patch it on device.
-    appExecPath = strdup([[bundlePath stringByAppendingPathComponent:@"Frameworks/SyntheticNativeGuestPayload.dylib"] fileSystemRepresentation]);
+    // The Documents copy is verified as data, but the extension cannot mmap it as executable code on device.
+    // Load the same prepatched, SideStore-signed library from the immutable containing app bundle.
+    appExecPath = strdup(syntheticSignedPayloadPath.fileSystemRepresentation);
+    NSLog(@"CVLP_LOADER selecting signed bundle payload");
     *path = appExecPath;''')
     replace(root, "LiveContainer/LCBootstrap.m", '    NUDGuestHooksInit();', '    NSLog(@"CVLP_LOADER installing guest hooks");\n    NUDGuestHooksInit();')
     replace(root, "LiveContainer/LCBootstrap.m", '        appHandle = dlopen_nolock(appExecPath, RTLD_LAZY|RTLD_GLOBAL|RTLD_FIRST);', '''        NSLog(@"CVLP_LOADER entering dlopen");

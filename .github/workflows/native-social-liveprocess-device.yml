@@ -153,6 +153,8 @@ jobs:
           cmp "$host/Frameworks/SyntheticNativeGuestPayload.dylib" "$staged"
           cat "$RUNNER_TEMP/cvlp-probe.log"
           test "$found" = 1
+          grep -q 'CVLP_LOADER selecting signed bundle payload' "$RUNNER_TEMP/cvlp-probe.log"
+          grep -q 'CVLP_LOADER dlopen returned handle=1' "$RUNNER_TEMP/cvlp-probe.log"
           for stage in pre-bookmark post-bookmark post-loader guest-entry; do
             grep -q "CVLP_STAGE Stage $stage .*host/extension processes distinct" "$RUNNER_TEMP/cvlp-probe.log"
           done
