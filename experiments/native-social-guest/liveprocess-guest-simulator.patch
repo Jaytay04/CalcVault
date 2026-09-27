@@ -177,6 +177,16 @@ diff --git a/LiveContainer/LCBootstrap.m b/LiveContainer/LCBootstrap.m
 diff --git a/LiveContainerSwiftUI/Views/LCTabView.swift b/LiveContainerSwiftUI/Views/LCTabView.swift
 --- a/LiveContainerSwiftUI/Views/LCTabView.swift
 +++ b/LiveContainerSwiftUI/Views/LCTabView.swift
+@@ -263,4 +263,9 @@
+     func checkBundleId() {
++#if targetEnvironment(simulator)
++        if ProcessInfo.processInfo.environment["LC_SYNTHETIC_LIVEPROCESS_GUEST"] == "1" {
++            return
++        }
++#endif
+         if UserDefaults.standard.bool(forKey: "LCBundleIdChecked") {
+             return
+         }
 @@ -292,3 +292,8 @@
      func checkGetTaskAllow() {
 +#if targetEnvironment(simulator)
