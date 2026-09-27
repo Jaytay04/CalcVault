@@ -44,11 +44,20 @@ def main() -> None:
 @property(nonatomic) CVLPLivenessSample cvlpFirstPreRevokeLivenessSample;
 @property(nonatomic) BOOL cvlpHasFirstPreRevokeLivenessSample;
 @property(nonatomic) CVLPLivenessSample cvlpLatestPreRevokeLivenessSample;
+@property(nonatomic) CVLPLivenessSample cvlpProcessGroupPresenceSample;
 @property(nonatomic) NSUInteger cvlpPreRevokeAttemptCount;
 - (void)cvlpRevoke;
 @property int resizeDebounceToken;''')
     replace_once(scene, '#import "UIKitPrivate+MultitaskSupport.h"',
-                 '#import "UIKitPrivate+MultitaskSupport.h"\n#import "../LiveContainer/CVLPLiveness.h"\n\nstatic void CVLPLogLivenessSample(NSString *phase, CVLPLivenessSample sample) {\n    NSLog(@"CVLP_LIVENESS phase=%@ pid=%d attempted=%d result=%d errno=%d class=%s", phase, (int)sample.pid, sample.attempted, sample.result, sample.errorNumber, CVLPLivenessClassificationName(sample.classification));\n}')
+                 '''#import "UIKitPrivate+MultitaskSupport.h"
+#import "../LiveContainer/CVLPLiveness.h"
+
+static void CVLPLogLivenessSample(NSString *phase, CVLPLivenessSample sample) {
+    NSLog(@"CVLP_LIVENESS phase=%@ pid=%d attempted=%d result=%d errno=%d class=%s pgid=%d pgidErrno=%d pgidClass=%s",
+        phase, (int)sample.pid, sample.attempted, sample.result, sample.errorNumber,
+        CVLPLivenessClassificationName(sample.classification), (int)sample.groupResult,
+        sample.groupErrorNumber, CVLPLivenessClassificationName(sample.groupClassification));
+}''')
     replace_once(scene, '''    [_extension setRequestCancellationBlock:^(NSUUID *uuid, NSError *error) {
         [weakSelf appTerminationCleanUp];
         [weakSelf.delegate appSceneVC:weakSelf didInitializeWithError:error];
@@ -132,6 +141,10 @@ def main() -> None:
     if (livenessSample.classification == CVLPLivenessSuccess) {
         self.cvlpAliveBeforeRevoke = YES;
         NSLog(@"CVLP_LIFECYCLE_ALIVE_BEFORE_REVOKE");
+    }
+    if (CVLPProcessPresenceObserved(livenessSample)) {
+        self.cvlpProcessGroupPresenceSample = livenessSample;
+        NSLog(@"CVLP_PROCESS_GROUP_PRESENT_BEFORE_REVOKE");
     }
     if (firstAttempt) CVLPLogLivenessSample(@"pre-revoke-first", livenessSample);
     CVLPLogLivenessSample(@"pre-revoke-latest", livenessSample);

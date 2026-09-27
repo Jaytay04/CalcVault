@@ -9,7 +9,7 @@ settings:
     CODE_SIGNING_ALLOWED: NO
     TARGETED_DEVICE_FAMILY: "1"
     MARKETING_VERSION: "1.0.0"
-    CURRENT_PROJECT_VERSION: "18"
+    CURRENT_PROJECT_VERSION: "19"
     OTHER_LDFLAGS: "$(inherited) -Wl,-headerpad,0x1000"
 targets:
   CVLPGuest:

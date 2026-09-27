@@ -11,6 +11,7 @@
 @property(nonatomic, readonly) CVLPLivenessSample cvlpFirstPreRevokeLivenessSample;
 @property(nonatomic, readonly) BOOL cvlpHasFirstPreRevokeLivenessSample;
 @property(nonatomic, readonly) CVLPLivenessSample cvlpLatestPreRevokeLivenessSample;
+@property(nonatomic, readonly) CVLPLivenessSample cvlpProcessGroupPresenceSample;
 @property(nonatomic, readonly) NSUInteger cvlpPreRevokeAttemptCount;
 - (void)cvlpRevoke;
 @end
@@ -27,18 +28,21 @@
 @property(nonatomic, copy) NSString *launchResult;
 @property(nonatomic) CVLPLivenessSample postcheckLivenessSample;
 @property(nonatomic) BOOL hasPostcheckLivenessSample;
+@property(nonatomic) BOOL processGroupShutdownLogged;
 @end
 
 static void CVLPLogLivenessSample(NSString *phase, CVLPLivenessSample sample) {
-    NSLog(@"CVLP_LIVENESS phase=%@ pid=%d attempted=%d result=%d errno=%d class=%s",
+    NSLog(@"CVLP_LIVENESS phase=%@ pid=%d attempted=%d result=%d errno=%d class=%s pgid=%d pgidErrno=%d pgidClass=%s",
           phase, (int)sample.pid, sample.attempted, sample.result, sample.errorNumber,
-          CVLPLivenessClassificationName(sample.classification));
+          CVLPLivenessClassificationName(sample.classification), (int)sample.groupResult,
+          sample.groupErrorNumber, CVLPLivenessClassificationName(sample.groupClassification));
 }
 
 static NSString *CVLPDescribeLivenessSample(CVLPLivenessSample sample) {
-    return [NSString stringWithFormat:@"pid=%d,attempted=%d,result=%d,errno=%d,class=%s",
+    return [NSString stringWithFormat:@"pid=%d,attempted=%d,result=%d,errno=%d,class=%s,pgid=%d,pgidErrno=%d,pgidClass=%s",
             (int)sample.pid, sample.attempted, sample.result, sample.errorNumber,
-            CVLPLivenessClassificationName(sample.classification)];
+            CVLPLivenessClassificationName(sample.classification), (int)sample.groupResult,
+            sample.groupErrorNumber, CVLPLivenessClassificationName(sample.groupClassification)];
 }
 
 @implementation CVLPGuestSession
@@ -102,15 +106,25 @@ static NSString *CVLPDescribeLivenessSample(CVLPLivenessSample sample) {
 }
 
 - (void)observeExit {
-    if (!self.revoked || self.exitObserved) return;
-    int pid = self.sceneController.cvlpObservedPID;
-    self.observedPID = pid;
-    self.postcheckLivenessSample = CVLPSampleLiveness((pid_t)pid);
-    self.hasPostcheckLivenessSample = YES;
-    CVLPLogLivenessSample(@"postcheck", self.postcheckLivenessSample);
-    if (self.postcheckLivenessSample.classification == CVLPLivenessESRCH) {
-        self.exitObserved = YES;
-        NSLog(@"CVLP_LIFECYCLE_EXIT_OBSERVED");
+    if (!self.revoked) return;
+    if (!(self.exitObserved && self.hasPostcheckLivenessSample &&
+          CVLPProcessAbsenceObserved(self.postcheckLivenessSample))) {
+        int pid = self.sceneController.cvlpObservedPID;
+        self.observedPID = pid;
+        self.postcheckLivenessSample = CVLPSampleLiveness((pid_t)pid);
+        self.hasPostcheckLivenessSample = YES;
+        CVLPLogLivenessSample(@"postcheck", self.postcheckLivenessSample);
+        if (!self.exitObserved && self.postcheckLivenessSample.classification == CVLPLivenessESRCH) {
+            self.exitObserved = YES;
+            NSLog(@"CVLP_LIFECYCLE_EXIT_OBSERVED");
+        }
+    }
+    // A late request completion may arrive after absence was already observed.
+    if (!self.processGroupShutdownLogged && self.sceneController &&
+        CVLPProcessGroupShutdownObserved(self.revoked, self.sceneController.cvlpBeginCompleted,
+            self.sceneController.cvlpProcessGroupPresenceSample, self.postcheckLivenessSample)) {
+        self.processGroupShutdownLogged = YES;
+        NSLog(@"CVLP_PROCESS_GROUP_SHUTDOWN_OBSERVED");
     }
 }
 
@@ -134,10 +148,14 @@ static NSString *CVLPDescribeLivenessSample(CVLPLivenessSample sample) {
         CVLPDescribeLivenessSample(self.sceneController.cvlpLatestPreRevokeLivenessSample) : @"not sampled";
     NSString *postcheck = self.hasPostcheckLivenessSample ?
         CVLPDescribeLivenessSample(self.postcheckLivenessSample) : @"not sampled";
+    BOOL groupShutdownObserved = self.sceneController && self.hasPostcheckLivenessSample &&
+        CVLPProcessGroupShutdownObserved(self.revoked, self.sceneController.cvlpBeginCompleted,
+            self.sceneController.cvlpProcessGroupPresenceSample, self.postcheckLivenessSample);
     NSString *diagnostics = [NSString stringWithFormat:
-        @"; liveness launch={%@}; firstPreRevoke={%@}; latestPreRevoke={%@}; preRevokeAttempts=%lu; postcheck={%@}",
+        @"; liveness launch={%@}; firstPreRevoke={%@}; latestPreRevoke={%@}; preRevokeAttempts=%lu; postcheck={%@}\nProcess-group shutdown observation: %@ (separate from signal-zero settlement; not a security certification)",
         launchSample, firstSample, latestSample,
-        (unsigned long)self.sceneController.cvlpPreRevokeAttemptCount, postcheck];
+        (unsigned long)self.sceneController.cvlpPreRevokeAttemptCount, postcheck,
+        groupShutdownObserved ? @"observed" : @"unproved"];
     if (!self.started) return [@"Synthetic guest: not started; settled" stringByAppendingString:diagnostics];
     NSString *request = self.sceneController.cvlpBeginCompleted ? @"completed" : @"pending";
     NSString *process = self.exitObserved ? @"exit observed (ESRCH)" :
