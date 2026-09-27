@@ -93,10 +93,9 @@ jobs:
           for sdk in iphoneos iphonesimulator; do
             host="$RUNNER_TEMP/cvlp-host-$sdk/Build/Products/Debug-$sdk/LiveContainer.app"
             guest="$RUNNER_TEMP/cvlp-guest-$sdk/Build/Products/Release-$sdk/CVLPGuest.app"
-            extra=()
-            if test "$sdk" = iphonesimulator; then extra=(--simulator); fi
-            python3 experiments/native-social-liveprocess-device/package-fixture.py \
-              "$host" "$guest" "$RUNNER_TEMP/cvlp-payload-$sdk.dylib" "$RUNNER_TEMP/cvlp-entitlements-$sdk" "${extra[@]}"
+            package_args=("$host" "$guest" "$RUNNER_TEMP/cvlp-payload-$sdk.dylib" "$RUNNER_TEMP/cvlp-entitlements-$sdk")
+            if test "$sdk" = iphonesimulator; then package_args+=(--simulator); fi
+            python3 experiments/native-social-liveprocess-device/package-fixture.py "${package_args[@]}"
             codesign --force --deep --sign - "$host"
             codesign --force --sign - --entitlements "$RUNNER_TEMP/cvlp-entitlements-$sdk/extension.entitlements" "$host/PlugIns/LiveProcess.appex"
             codesign --force --sign - --entitlements "$RUNNER_TEMP/cvlp-entitlements-$sdk/host.entitlements" "$host"
@@ -142,6 +141,15 @@ jobs:
             echo '- Installable candidate is an ad-hoc fixture requiring SideStore re-signing; no private signing material was used.'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Collect synthetic simulator diagnostics on failure
+        if: failure() && env.CVLP_SIMULATOR != ''
+        shell: bash
+        run: |
+          xcrun simctl spawn "$CVLP_SIMULATOR" log show --last 5m --style compact \
+            --predicate 'process == "LiveContainer" OR process == "LiveProcess" OR eventMessage CONTAINS "CVLP_"' \
+            > "$RUNNER_TEMP/cvlp-failure.log" || true
+          xcrun simctl io "$CVLP_SIMULATOR" screenshot "$RUNNER_TEMP/cvlp-failure.png" || true
+
       - uses: actions/upload-artifact@v4
         with:
           name: synthetic-liveprocess-device-probe
@@ -157,6 +165,8 @@ jobs:
           path: |
             ${{ runner.temp }}/cvlp-probe.log
             ${{ runner.temp }}/cvlp-probe.png
+            ${{ runner.temp }}/cvlp-failure.log
+            ${{ runner.temp }}/cvlp-failure.png
             ${{ runner.temp }}/cvlp-host-*.log
             ${{ runner.temp }}/cvlp-guest-*.log
             ${{ runner.temp }}/cvlp-payload-*.result
