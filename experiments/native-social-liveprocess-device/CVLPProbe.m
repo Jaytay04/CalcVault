@@ -297,7 +297,7 @@ static NSString *CVLPSeedObservation(NSString *controlName, NSDictionary<NSStrin
         CVLPHostObservations = [NSMutableArray array];
         CVLPStageObservations = [NSMutableArray array];
     }
-    CVLPAppendHostObservation(@"Build marker: build11.");
+    CVLPAppendHostObservation(@"Build marker: build12.");
     CVLPAppendHostObservation(CVLPHostSigningExportObservation());
 
     NSFileManager *fileManager = NSFileManager.defaultManager;
