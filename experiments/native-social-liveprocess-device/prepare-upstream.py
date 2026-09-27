@@ -161,6 +161,8 @@ struct LiveContainerSwiftUIApp: SwiftUI.App {
             }
         });
         NSString *status = patched && !error && result == 0 ? @"PATCHED" : @"FAILED";
+        NSString *diagnostic = [NSString stringWithFormat:@"slice=%d flags=%d parseError=%d", patched, result, error != nil];
+        [diagnostic writeToFile:[NSString stringWithFormat:@"%s.flags", prepatchPath] atomically:YES encoding:NSUTF8StringEncoding error:nil];
         [status writeToFile:[NSString stringWithFormat:@"%s.result", prepatchPath] atomically:YES encoding:NSUTF8StringEncoding error:nil];
         return [status isEqualToString:@"PATCHED"] ? 0 : 94;
     }

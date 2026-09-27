@@ -77,8 +77,13 @@ jobs:
               sleep 2
             done
             test "$patched" = 1
+            printf 'Prepatch result for %s: ' "$sdk"
+            cat "$payload.result" "$payload.flags"
+            printf '\n'
             test "$(cat "$payload.result")" = PATCHED
-            xcrun otool -hv "$payload" | grep -q DYLIB
+            xcrun otool -hv "$payload" > "$payload.header"
+            cat "$payload.header"
+            grep -q DYLIB "$payload.header"
           done
 
       - name: Package one resignable phone app and sign simulator fixture
@@ -154,5 +159,8 @@ jobs:
             ${{ runner.temp }}/cvlp-probe.png
             ${{ runner.temp }}/cvlp-host-*.log
             ${{ runner.temp }}/cvlp-guest-*.log
+            ${{ runner.temp }}/cvlp-payload-*.result
+            ${{ runner.temp }}/cvlp-payload-*.flags
+            ${{ runner.temp }}/cvlp-payload-*.header
           if-no-files-found: ignore
           retention-days: 7
