@@ -62,7 +62,7 @@ def main():
     app.write_text('''import SwiftUI
 
 @main
-struct LiveContainerSwiftUIApp: App {
+struct LiveContainerSwiftUIApp: SwiftUI.App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     var body: some Scene {
         WindowGroup { CVLPHostView() }
