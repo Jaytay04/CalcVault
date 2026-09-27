@@ -14,6 +14,8 @@ Simulator signing intentionally uses only the synthetic App Group for host and e
 
 The upstream certificate/JIT prerequisite is skipped only for this exact synthetic selection when the staged dylib matches the immutable embedded copy byte for byte. iOS code-signature validation at `dlopen` remains enabled. This route's compatibility with the actual SideStore signature must be measured on the phone.
 
+The patched loose dylib must be signed explicitly before signing its containing app. Run `36289781996` passed outer-package checks but was killed with `CODESIGNING / Invalid Page` at guest `dlopen`. Run `36290476171` added explicit payload signing and passed both direct strict signature checks and visible simulator guest launch, without enabling library-validation bypass. The staged runtime copy also verified and matched the signed embedded library. This is simulator loading evidence, not a phone isolation result.
+
 Each preparation creates two small random test Keychain items and a uniquely named sentinel, retained for inspection. This fixture does not delete those items, and uninstalling an app must not be assumed to remove its Keychain entries. No real vault item is read or modified. The host also reports whether SideStore embedded a certificate export in its bundle, checking existence only; that finding must be resolved before any real native guest is considered.
 
 ## Phone test
