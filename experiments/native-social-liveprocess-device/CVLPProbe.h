@@ -5,6 +5,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// Synthetic-only observations for the disposable LiveProcess guest experiment.
 @interface CVLPProbe : NSObject
 
+ (NSDictionary<NSString *, NSString *> *)migrationIdentity;
+ (void)setMigrationFixture:(NSDictionary<NSString *, id> *)fixture;
+
 /// Creates fresh synthetic fixtures and stages the signed guest payload. Returns a sanitized error on failure.
 + (nullable NSString *)prepareHost;
 

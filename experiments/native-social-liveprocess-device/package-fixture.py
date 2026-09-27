@@ -36,7 +36,8 @@ def main():
     if host_info["CFBundleIdentifier"] != "com.jaylintaylor.calcvault":
         raise SystemExit("Unexpected containing app identity")
     host_info["CFBundleDisplayName"] = "Native Probe"
-    host_info["CFBundleVersion"] = "14"
+    host_info["CFBundleVersion"] = "15"
+    host_info["NSFaceIDUsageDescription"] = "Authenticate disposable synthetic Keychain migration test items."
     (host / "Info.plist").write_bytes(plistlib.dumps(host_info))
     resources = host / "SyntheticGuestResources.bundle"
     resources.mkdir(exist_ok=True)
@@ -45,7 +46,7 @@ def main():
         "CFBundleIdentifier": "org.example.cvlp.resources",
         "CFBundleName": "SyntheticGuestResources",
         "CFBundlePackageType": "BNDL",
-        "CFBundleVersion": "14",
+        "CFBundleVersion": "15",
         "CFBundleShortVersionString": "1.0.0",
     }
     (resources / "Info.plist").write_bytes(plistlib.dumps(resource_info))

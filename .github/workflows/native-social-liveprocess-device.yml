@@ -39,6 +39,15 @@ jobs:
           "$RUNNER_TEMP/cvlp-keychain-identity-tests"
           echo 'Keychain identity regression tests: PASS'
 
+      - name: Test data-preserving Keychain migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun swiftc CalcVault/Security/KeychainGroupMigration.swift \
+            experiments/native-social-liveprocess-device/test_keychain_migration.swift \
+            -o "$RUNNER_TEMP/cvlp-keychain-migration-tests"
+          "$RUNNER_TEMP/cvlp-keychain-migration-tests"
+
       - name: Build synthetic guest and actual LiveProcess host
         shell: bash
         run: |

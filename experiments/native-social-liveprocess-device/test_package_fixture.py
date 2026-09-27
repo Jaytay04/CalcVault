@@ -79,9 +79,10 @@ class PackageFixtureTests(unittest.TestCase):
 
         self.assertEqual(resource_info["CFBundlePackageType"], "BNDL")
         self.assertEqual(resource_info["CFBundleIdentifier"], "org.example.cvlp.resources")
-        self.assertEqual(resource_info["CFBundleVersion"], "14")
+        self.assertEqual(resource_info["CFBundleVersion"], "15")
         host_info = plistlib.loads((self.host / "Info.plist").read_bytes())
-        self.assertEqual(host_info["CFBundleVersion"], "14")
+        self.assertEqual(host_info["CFBundleVersion"], "15")
+        self.assertIn("synthetic", host_info["NSFaceIDUsageDescription"])
         self.assertEqual(copied_guest_info, self.guest_info)
 
     def test_embedded_payload_is_preserved_byte_for_byte(self):

@@ -69,7 +69,9 @@ struct LiveContainerSwiftUIApp: SwiftUI.App {
     }
 }
 
-''' + (fixture / "CVLPHostView.swift").read_text(encoding="utf-8"), encoding="utf-8")
+''' + (fixture / "CVLPHostView.swift").read_text(encoding="utf-8")
+        + "\n" + (fixture / "CVLPKeychainMigrationFixture.swift").read_text(encoding="utf-8")
+        + "\n" + (fixture.parent.parent / "CalcVault/Security/KeychainGroupMigration.swift").read_text(encoding="utf-8"), encoding="utf-8")
 
     scene = root / "MultitaskSupport/AppSceneViewController.m"
     text = scene.read_text(encoding="utf-8")

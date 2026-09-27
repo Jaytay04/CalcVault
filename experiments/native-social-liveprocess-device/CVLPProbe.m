@@ -21,6 +21,7 @@ static NSString *const CVLPPayloadName = @"SyntheticNativeGuestPayload.dylib";
 static NSString *const CVLPLiveContainerSharedGroupSuffix = @".com.kdt.livecontainer.shared";
 
 static NSDictionary<NSString *, id> *CVLPHostLaunchInfo;
+static NSDictionary<NSString *, id> *CVLPMigrationFixture;
 static NSDictionary<NSString *, id> *CVLPRuntimeLaunchInfo;
 static NSMutableArray<NSString *> *CVLPHostObservations;
 static NSMutableArray<NSString *> *CVLPStageObservations;
@@ -223,7 +224,8 @@ static NSString *CVLPKeychainOutcome(NSString *service, NSString *account, NSStr
         (__bridge id)kSecAttrService: service,
         (__bridge id)kSecAttrAccount: account,
         (__bridge id)kSecAttrAccessGroup: accessGroup,
-        (__bridge id)kSecReturnData: @YES
+        (__bridge id)kSecReturnData: @YES,
+        (__bridge id)kSecUseAuthenticationUI: (__bridge id)kSecUseAuthenticationUIFail
     };
     CFTypeRef result = NULL;
     OSStatus status = copyFunction((__bridge CFDictionaryRef)query, &result);
@@ -301,6 +303,20 @@ static NSString *CVLPSeedObservation(NSString *controlName, NSDictionary<NSStrin
 
 @implementation CVLPProbe
 
++ (NSDictionary<NSString *, NSString *> *)migrationIdentity {
+    NSDictionary *identity = CVLPReadKeychainIdentityEntitlements();
+    id raw = identity[@"applicationIdentifier"];
+    NSString *appID = [raw isKindOfClass:NSString.class] ? raw : nil;
+    NSString *source = CVLPSelectApplicationIDControlGroup(appID, NULL);
+    NSString *destination = CVLPSelectHostOnlyGroup(identity[@"explicitGroups"], appID, NULL);
+    if (source.length == 0 || destination.length == 0 || [source isEqualToString:destination]) { return @{}; }
+    return @{@"source": source, @"destination": destination};
+}
+
++ (void)setMigrationFixture:(NSDictionary<NSString *, id> *)fixture {
+    @synchronized (self) { CVLPMigrationFixture = [fixture copy]; }
+}
+
 + (NSString *)prepareHost {
     @synchronized (self) {
         CVLPHostLaunchInfo = nil;
@@ -312,8 +328,14 @@ static NSString *CVLPSeedObservation(NSString *controlName, NSDictionary<NSStrin
         CVLPHostObservations = [NSMutableArray array];
         CVLPStageObservations = [NSMutableArray array];
     }
-    CVLPAppendHostObservation(@"Build marker: build14.");
+    CVLPAppendHostObservation(@"Build marker: build15.");
     CVLPAppendHostObservation(CVLPHostSigningExportObservation());
+    CVLPAppendHostObservation(CVLPMigrationFixture[@"summary"] ?: @"Synthetic migration: NOT RUN.");
+#if !TARGET_OS_SIMULATOR
+    if (![CVLPMigrationFixture[@"ready"] boolValue]) {
+        return @"Synthetic migration did not finish; guest launch blocked.";
+    }
+#endif
 
     NSFileManager *fileManager = NSFileManager.defaultManager;
     NSError *fileError = nil;
@@ -487,6 +509,7 @@ static NSString *CVLPSeedObservation(NSString *controlName, NSDictionary<NSStrin
     NSURL *reportURL = [guestDataURL URLByAppendingPathComponent:[NSString stringWithFormat:@"CVLPProbeReport-%@.txt", runID]];
     NSDictionary<NSString *, id> *launchInfo = @{
         @"hostPID": @(getpid()),
+        @"migrationFixture": CVLPMigrationFixture ?: @{},
         @"runID": runID,
         @"hostSentinelPath": sentinelURL.path,
         @"sentinelLength": @(sentinelContents.length),
@@ -602,10 +625,31 @@ static NSString *CVLPSeedObservation(NSString *controlName, NSDictionary<NSStrin
         ? CVLPKeychainOutcome(service, info[@"appIDControlAccount"], info[@"appIDControlGroup"])
         : @"INCONCLUSIVE (host fixture setup unavailable)";
     NSString *signingExportOutcome = CVLPSigningExportOpenOutcome();
+    NSDictionary *migration = info[@"migrationFixture"];
+    NSString *migrationObservation = @"migration checks SKIPPED (fixture unavailable)";
+    NSString *migrationService = migration[@"service"];
+    NSString *migrationSource = migration[@"source"];
+    NSString *migrationDestination = migration[@"destination"];
+    if ([migration[@"ready"] boolValue] &&
+        [migrationService isKindOfClass:NSString.class] &&
+        [migrationService hasPrefix:@"org.example.calcvault.migration-probe."] &&
+        [migrationSource isEqual:info[@"appIDControlGroup"]] &&
+        [migrationDestination isEqual:info[@"hostOnlyGroup"]]) {
+        NSMutableArray *results = [NSMutableArray array];
+        for (NSString *account in @[@"metadata-v1", @"biometric-root-v1"]) {
+            NSString *source = CVLPKeychainOutcome(migrationService, account, migrationSource);
+            // Absence is meaningful only with the independent shared-group positive control.
+            if ([source isEqualToString:@"INCONCLUSIVE (item not found)"] &&
+                [sharedKeychainOutcome isEqualToString:@"EXPOSED"]) { source = @"ABSENT"; }
+            NSString *destination = CVLPKeychainOutcome(migrationService, account, migrationDestination);
+            [results addObject:[NSString stringWithFormat:@"%@ old copy %@, host-only copy %@", account, source, destination]];
+        }
+        migrationObservation = [results componentsJoinedByString:@"; "];
+    }
 
     NSString *observation = [NSString stringWithFormat:
-        @"Stage %@ (pid %d; host/extension processes %@): file read %@; synthetic file write %@; host-only Keychain %@; app-ID control Keychain %@; signing-export open %@.",
-        stageName, probePID, processObservation, fileReadOutcome, fileWriteOutcome, hostOnlyKeychainOutcome, sharedKeychainOutcome, signingExportOutcome];
+        @"Stage %@ (pid %d; host/extension processes %@): file read %@; synthetic file write %@; host-only Keychain %@; app-ID control Keychain %@; signing-export open %@; %@.",
+        stageName, probePID, processObservation, fileReadOutcome, fileWriteOutcome, hostOnlyKeychainOutcome, sharedKeychainOutcome, signingExportOutcome, migrationObservation];
     NSLog(@"CVLP_STAGE %@", observation);
     NSArray<NSString *> *allStageObservations;
     BOOL bookmarkActivated;

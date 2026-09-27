@@ -2,6 +2,7 @@ struct CVLPHostView: View {
     @State private var report = "Ready to prepare synthetic fixtures."
     @State private var launched = false
     @State private var autoStarted = false
+    @State private var preparing = false
 
     var body: some View {
         NavigationStack {
@@ -9,9 +10,9 @@ struct CVLPHostView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     Text("Native LiveProcess probe").font(.title2)
                     Text("This test loads a synthetic native guest in a separate process and checks its access to host test files and keys.")
-                    Button("Prepare and launch guest", action: launch)
+                    Button("Test migration with Face ID and launch guest", action: launch)
                         .buttonStyle(.borderedProminent)
-                        .disabled(launched)
+                        .disabled(launched || preparing)
                     Button("Refresh host report") { report = CVLPProbe.hostSummary() }
                         .buttonStyle(.bordered)
                     Text(report).font(.system(.footnote, design: .monospaced))
@@ -33,7 +34,20 @@ struct CVLPHostView: View {
     }
 
     private func launch() {
-        guard !launched else { return }
+        guard !launched, !preparing else { return }
+        preparing = true
+        report = "Preparing disposable migration items. Complete Face ID if prompted."
+        DispatchQueue.global(qos: .userInitiated).async {
+            let fixture = CVLPKeychainMigrationFixture.prepare()
+            DispatchQueue.main.async {
+                CVLPProbe.setMigrationFixture(fixture)
+                preparing = false
+                launchPreparedGuest()
+            }
+        }
+    }
+
+    private func launchPreparedGuest() {
         if let error = CVLPProbe.prepareHost() {
             report = error + "\n\n" + CVLPProbe.hostSummary()
             NSLog("CVLP_HOST_SETUP_INCONCLUSIVE")
