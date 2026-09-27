@@ -29,7 +29,7 @@ def main():
     head = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
     if head != PIN:
         raise SystemExit("Upstream revision mismatch")
-    for name in ("CVLPProbe.h", "CVLPProbe.m"):
+    for name in ("CVLPProbe.h", "CVLPProbe.m", "CVLPKeychainIdentity.h"):
         shutil.copy2(fixture / name, root / "LiveContainer" / name)
     replace(root, "LiveContainer/LCSharedUtils.h", "@import Foundation;", '@import Foundation;\n#import "CVLPProbe.h"')
     replace(root, "LiveContainer/LCSharedUtils.m", '#import "LCSharedUtils.h"', '#import "LCSharedUtils.h"\n#import "CVLPProbe.m"')

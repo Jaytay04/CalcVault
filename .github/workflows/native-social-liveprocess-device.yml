@@ -29,6 +29,16 @@ jobs:
           cd experiments/native-social-liveprocess-device
           xcodegen generate
 
+      - name: Test signed Keychain identity selection
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun clang -fobjc-arc -Wall -Wextra -Werror -framework Foundation \
+            experiments/native-social-liveprocess-device/test_keychain_identity.m \
+            -o "$RUNNER_TEMP/cvlp-keychain-identity-tests"
+          "$RUNNER_TEMP/cvlp-keychain-identity-tests"
+          echo 'Keychain identity regression tests: PASS'
+
       - name: Build synthetic guest and actual LiveProcess host
         shell: bash
         run: |

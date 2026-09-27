@@ -1,4 +1,5 @@
 #import "CVLPProbe.h"
+#import "CVLPKeychainIdentity.h"
 
 #import <Security/Security.h>
 #import <TargetConditionals.h>
@@ -17,7 +18,6 @@ extern CFTypeRef SecTaskCopyValueForEntitlement(void *task, CFStringRef key, CFE
 static NSString *const CVLPGuestBundleIdentifier = @"org.example.syntheticnativeguest.app";
 static NSString *const CVLPGuestResourceBundleName = @"SyntheticGuestResources.bundle";
 static NSString *const CVLPPayloadName = @"SyntheticNativeGuestPayload.dylib";
-static NSString *const CVLPHostOnlyGroupSuffix = @".com.jaylintaylor.calcvault.hostonly";
 static NSString *const CVLPLiveContainerSharedGroupSuffix = @".com.kdt.livecontainer.shared";
 
 static NSDictionary<NSString *, id> *CVLPHostLaunchInfo;
@@ -81,67 +81,110 @@ static NSString *CVLPFileReadOutcome(int errorCode) {
     return (errorCode == EACCES || errorCode == EPERM) ? @"DENIED" : @"INCONCLUSIVE";
 }
 
-static NSArray<NSString *> * _Nullable CVLPEffectiveKeychainGroups(void) {
+static NSString *CVLPKeychainEntitlementType(CFTypeRef value) {
+    if (value == NULL) { return @"unavailable"; }
+    CFTypeID type = CFGetTypeID(value);
+    if (type == CFStringGetTypeID()) { return @"string"; }
+    if (type == CFArrayGetTypeID()) { return @"array"; }
+    if (type == CFDictionaryGetTypeID()) { return @"dictionary"; }
+    if (type == CFBooleanGetTypeID()) { return @"boolean"; }
+    if (type == CFNumberGetTypeID()) { return @"number"; }
+    if (type == CFDataGetTypeID()) { return @"data"; }
+    return @"other";
+}
+
+static NSString *CVLPKeychainEntitlementReadResult(CFTypeRef value, CFErrorRef error, BOOL taskAvailable) {
+    if (!taskAvailable) { return @"unavailable"; }
+    if (value != NULL) { return @"present"; }
+    return error != NULL ? @"error" : @"missing";
+}
+
+static NSDictionary<NSString *, id> *CVLPReadKeychainIdentityEntitlements(void) {
     void *task = SecTaskCreateFromSelf(kCFAllocatorDefault);
-    if (task == NULL) { return nil; }
-    CFErrorRef entitlementError = NULL;
-    CFTypeRef rawGroups = SecTaskCopyValueForEntitlement(task, CFSTR("keychain-access-groups"), &entitlementError);
-    CFRelease(task);
-    if (entitlementError != NULL) { CFRelease(entitlementError); }
-    if (rawGroups == NULL) { return nil; }
-    id groupsValue = CFBridgingRelease(rawGroups);
-    if (![groupsValue isKindOfClass:NSArray.class]) { return nil; }
-    NSMutableArray<NSString *> *groups = [NSMutableArray array];
-    for (id value in (NSArray *)groupsValue) {
-        if ([value isKindOfClass:NSString.class]) { [groups addObject:[value copy]]; }
-    }
-    return groups;
-}
+    BOOL taskAvailable = task != NULL;
+    CFErrorRef applicationIDError = NULL;
+    CFErrorRef groupsError = NULL;
+    CFTypeRef rawApplicationID = taskAvailable
+        ? SecTaskCopyValueForEntitlement(task, CFSTR("application-identifier"), &applicationIDError)
+        : NULL;
+    CFTypeRef rawGroups = taskAvailable
+        ? SecTaskCopyValueForEntitlement(task, CFSTR("keychain-access-groups"), &groupsError)
+        : NULL;
 
-static NSString * _Nullable CVLPApplicationIDGroup(NSArray<NSString *> *groups, NSString *bundleIdentifier) {
-    NSString *suffix = [@"." stringByAppendingString:bundleIdentifier];
-    for (NSString *group in groups) {
-        if ([group hasSuffix:suffix] && group.length > suffix.length) { return group; }
-    }
-    return nil;
-}
+    NSString *applicationIDResult = CVLPKeychainEntitlementReadResult(rawApplicationID, applicationIDError, taskAvailable);
+    NSString *applicationIDType = CVLPKeychainEntitlementType(rawApplicationID);
+    NSString *groupsResult = CVLPKeychainEntitlementReadResult(rawGroups, groupsError, taskAvailable);
+    NSString *groupsType = CVLPKeychainEntitlementType(rawGroups);
+    NSString *groupsCount = [groupsType isEqualToString:@"array"]
+        ? [NSString stringWithFormat:@"%lu", (unsigned long)CFArrayGetCount(rawGroups)]
+        : @"not-applicable";
 
-static BOOL CVLPSeedKeychainItem(NSString *service, NSString *account, NSString *accessGroup) {
-    NSMutableData *syntheticValue = [NSMutableData dataWithLength:32];
-    if (SecRandomCopyBytes(kSecRandomDefault, syntheticValue.length, syntheticValue.mutableBytes) != errSecSuccess) {
-        [syntheticValue resetBytesInRange:NSMakeRange(0, syntheticValue.length)];
-        return NO;
-    }
-
-    NSDictionary *baseQuery = @{
-        (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
-        (__bridge id)kSecAttrService: service,
-        (__bridge id)kSecAttrAccount: account,
-        (__bridge id)kSecAttrAccessGroup: accessGroup
+    if (taskAvailable) { CFRelease(task); }
+    if (applicationIDError != NULL) { CFRelease(applicationIDError); }
+    if (groupsError != NULL) { CFRelease(groupsError); }
+    id applicationIDValue = rawApplicationID != NULL ? CFBridgingRelease(rawApplicationID) : NSNull.null;
+    id groupsValue = rawGroups != NULL ? CFBridgingRelease(rawGroups) : NSNull.null;
+    return @{
+        @"applicationIdentifier": applicationIDValue,
+        @"applicationIdentifierResult": applicationIDResult,
+        @"applicationIdentifierType": applicationIDType,
+        @"explicitGroups": groupsValue,
+        @"explicitGroupsResult": groupsResult,
+        @"explicitGroupsType": groupsType,
+        @"explicitGroupsCount": groupsCount
     };
-    NSMutableDictionary *addQuery = [baseQuery mutableCopy];
-    addQuery[(__bridge id)kSecValueData] = syntheticValue;
-    addQuery[(__bridge id)kSecAttrAccessible] = (__bridge id)kSecAttrAccessibleWhenUnlockedThisDeviceOnly;
-    OSStatus addStatus = SecItemAdd((__bridge CFDictionaryRef)addQuery, NULL);
+}
 
-    BOOL readbackSucceeded = NO;
-    NSData *expectedValue = [syntheticValue copy];
-    if (addStatus == errSecSuccess) {
-        NSMutableDictionary *readQuery = [baseQuery mutableCopy];
-        readQuery[(__bridge id)kSecReturnData] = @YES;
-        CFTypeRef result = NULL;
-        OSStatus readStatus = SecItemCopyMatching((__bridge CFDictionaryRef)readQuery, &result);
-        if (readStatus == errSecSuccess && result != NULL) {
-            id value = CFBridgingRelease(result);
-            readbackSucceeded = [value isKindOfClass:NSData.class] && [(NSData *)value isEqualToData:expectedValue];
-        } else if (result != NULL) {
-            CFRelease(result);
+static NSDictionary<NSString *, id> *CVLPSeedKeychainItem(NSString *service, NSString *account, NSString *accessGroup) {
+    NSMutableData *syntheticValue = [NSMutableData dataWithLength:32];
+    OSStatus randomStatus = SecRandomCopyBytes(kSecRandomDefault, syntheticValue.length, syntheticValue.mutableBytes);
+    OSStatus addStatus = errSecParam;
+    OSStatus readStatus = errSecParam;
+    BOOL addAttempted = NO;
+    BOOL readAttempted = NO;
+    BOOL byteMatch = NO;
+    if (randomStatus != errSecSuccess) {
+        [syntheticValue resetBytesInRange:NSMakeRange(0, syntheticValue.length)];
+    } else {
+        NSDictionary *baseQuery = @{
+            (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+            (__bridge id)kSecAttrService: service,
+            (__bridge id)kSecAttrAccount: account,
+            (__bridge id)kSecAttrAccessGroup: accessGroup
+        };
+        NSMutableDictionary *addQuery = [baseQuery mutableCopy];
+        addQuery[(__bridge id)kSecValueData] = syntheticValue;
+        addQuery[(__bridge id)kSecAttrAccessible] = (__bridge id)kSecAttrAccessibleWhenUnlockedThisDeviceOnly;
+        addAttempted = YES;
+        addStatus = SecItemAdd((__bridge CFDictionaryRef)addQuery, NULL);
+
+        NSMutableData *expectedValue = [syntheticValue mutableCopy];
+        if (addStatus == errSecSuccess) {
+            NSMutableDictionary *readQuery = [baseQuery mutableCopy];
+            readQuery[(__bridge id)kSecReturnData] = @YES;
+            CFTypeRef result = NULL;
+            readAttempted = YES;
+            readStatus = SecItemCopyMatching((__bridge CFDictionaryRef)readQuery, &result);
+            if (readStatus == errSecSuccess && result != NULL) {
+                id value = CFBridgingRelease(result);
+                byteMatch = [value isKindOfClass:NSData.class] && [(NSData *)value isEqualToData:expectedValue];
+            } else if (result != NULL) {
+                CFRelease(result);
+            }
         }
+        [expectedValue resetBytesInRange:NSMakeRange(0, expectedValue.length)];
+        [expectedValue setLength:0];
     }
 
     [syntheticValue resetBytesInRange:NSMakeRange(0, syntheticValue.length)];
     [syntheticValue setLength:0];
-    return addStatus == errSecSuccess && readbackSucceeded;
+    return @{
+        @"randomStatus": @(randomStatus),
+        @"addStatus": addAttempted ? @(addStatus) : NSNull.null,
+        @"readStatus": readAttempted ? @(readStatus) : NSNull.null,
+        @"byteMatch": @(byteMatch),
+        @"ready": @(randomStatus == errSecSuccess && addStatus == errSecSuccess && readStatus == errSecSuccess && byteMatch)
+    };
 }
 
 static NSString *CVLPProbeStageName(NSString *stage) {
@@ -217,10 +260,28 @@ static NSString *CVLPHostSigningExportObservation(void) {
         [[bundleURL URLByAppendingPathComponent:@"ALTCertificate.p12"] path]];
     BOOL hasDER = [[NSFileManager defaultManager] fileExistsAtPath:
         [[bundleURL URLByAppendingPathComponent:@"ALTCertificate.der"] path]];
-    if (hasP12 || hasDER) {
-        return @"Containing-app signing certificate export: PRESENT; synthetic probe may continue, production native-guest use requires absence.";
+    return [NSString stringWithFormat:
+        @"Containing-app certificate export existence: P12=%@ (may contain private-key material); DER=%@ (certificate file alone does not prove a private key).",
+        hasP12 ? @"present" : @"absent", hasDER ? @"present" : @"absent"];
+}
+
+static NSString *CVLPSeedOSStatusDescription(id status) {
+    return [status isKindOfClass:NSNumber.class] ? [(NSNumber *)status stringValue] : @"not run";
+}
+
+static NSString *CVLPSeedObservation(NSString *controlName, NSDictionary<NSString *, id> * _Nullable seedResult, NSString *skipReason) {
+    if (seedResult == nil) {
+        return [NSString stringWithFormat:
+            @"Keychain fixture %@: SKIPPED (%@); random/add/read OSStatus=not run; byte-match=no.", controlName, skipReason];
     }
-    return @"Containing-app signing certificate export: not found by existence check only.";
+    return [NSString stringWithFormat:
+        @"Keychain fixture %@: %@; random OSStatus=%@; add OSStatus=%@; read OSStatus=%@; byte-match=%@.",
+        controlName,
+        [seedResult[@"ready"] boolValue] ? @"READY" : @"INCONCLUSIVE",
+        CVLPSeedOSStatusDescription(seedResult[@"randomStatus"]),
+        CVLPSeedOSStatusDescription(seedResult[@"addStatus"]),
+        CVLPSeedOSStatusDescription(seedResult[@"readStatus"]),
+        [seedResult[@"byteMatch"] boolValue] ? @"yes" : @"no"];
 }
 
 @implementation CVLPProbe
@@ -236,6 +297,7 @@ static NSString *CVLPHostSigningExportObservation(void) {
         CVLPHostObservations = [NSMutableArray array];
         CVLPStageObservations = [NSMutableArray array];
     }
+    CVLPAppendHostObservation(@"Build marker: build11.");
     CVLPAppendHostObservation(CVLPHostSigningExportObservation());
 
     NSFileManager *fileManager = NSFileManager.defaultManager;
@@ -351,32 +413,60 @@ static NSString *CVLPHostSigningExportObservation(void) {
         return @"Synthetic guest staging failed (payload copy did not preserve the signed fixture bytes).";
     }
 
-    NSArray<NSString *> *effectiveGroups = CVLPEffectiveKeychainGroups();
-    NSString *appIDGroup = effectiveGroups != nil ? CVLPApplicationIDGroup(effectiveGroups, NSBundle.mainBundle.bundleIdentifier ?: @"") : nil;
+    NSDictionary<NSString *, id> *entitlements = CVLPReadKeychainIdentityEntitlements();
+    id rawApplicationIdentifier = entitlements[@"applicationIdentifier"];
+    NSString *signedApplicationIdentifier = [rawApplicationIdentifier isKindOfClass:NSString.class]
+        ? (NSString *)rawApplicationIdentifier
+        : nil;
+    id explicitGroups = entitlements[@"explicitGroups"];
+    CVLPApplicationIDGroupSelectionStatus appIDSelectionStatus = CVLPApplicationIDGroupSelectionStatusUnavailable;
+    NSString *appIDGroup = CVLPSelectApplicationIDControlGroup(signedApplicationIdentifier, &appIDSelectionStatus);
+    CVLPHostOnlyGroupSelectionStatus hostOnlySelectionStatus = CVLPHostOnlyGroupSelectionStatusMissingApplicationIdentifier;
+    NSString *hostOnlyGroup = CVLPSelectHostOnlyGroup(explicitGroups, signedApplicationIdentifier, &hostOnlySelectionStatus);
     NSString *teamPrefix = nil;
     if (appIDGroup.length > 0) {
         NSRange delimiter = [appIDGroup rangeOfString:@"."];
         if (delimiter.location != NSNotFound && delimiter.location > 0) { teamPrefix = [appIDGroup substringToIndex:delimiter.location]; }
     }
-    NSString *hostOnlyGroup = teamPrefix.length > 0 ? [teamPrefix stringByAppendingString:CVLPHostOnlyGroupSuffix] : nil;
     NSString *liveContainerSharedGroup = teamPrefix.length > 0 ? [teamPrefix stringByAppendingString:CVLPLiveContainerSharedGroupSuffix] : nil;
-    BOOL hostOnlyGroupEntitled = hostOnlyGroup.length > 0 && [effectiveGroups containsObject:hostOnlyGroup];
+    NSArray *effectiveGroups = [explicitGroups isKindOfClass:NSArray.class] ? (NSArray *)explicitGroups : nil;
+    BOOL hostOnlyGroupEntitled = hostOnlyGroup.length > 0;
     BOOL sharedGroupEntitled = liveContainerSharedGroup.length > 0 && [effectiveGroups containsObject:liveContainerSharedGroup];
+
+    CVLPAppendHostObservation([NSString stringWithFormat:
+        @"Signed Keychain entitlement read: application-identifier result=%@ type=%@; keychain-access-groups result=%@ type=%@ count=%@.",
+        entitlements[@"applicationIdentifierResult"], entitlements[@"applicationIdentifierType"],
+        entitlements[@"explicitGroupsResult"], entitlements[@"explicitGroupsType"], entitlements[@"explicitGroupsCount"]]);
+    CVLPAppendHostObservation([NSString stringWithFormat:
+        @"Keychain identity selection: app-ID control %@; host-only control %@.",
+        CVLPApplicationIDGroupSelectionStatusName(appIDSelectionStatus),
+        CVLPHostOnlyGroupSelectionStatusName(hostOnlySelectionStatus)]);
 
     NSString *service = [NSString stringWithFormat:@"org.example.calcvault.cvlp.%@", runID];
     NSString *hostOnlyAccount = [NSString stringWithFormat:@"host-only-%@", runID];
     NSString *sharedAccount = [NSString stringWithFormat:@"shared-control-%@", runID];
-    BOOL appIDFixtureReady = appIDGroup.length > 0 && CVLPSeedKeychainItem(service, sharedAccount, appIDGroup);
-    BOOL hostOnlyFixtureReady = hostOnlyGroupEntitled && CVLPSeedKeychainItem(service, hostOnlyAccount, hostOnlyGroup);
+    NSDictionary<NSString *, id> *appIDSeedResult = appIDGroup != nil
+        ? CVLPSeedKeychainItem(service, sharedAccount, appIDGroup)
+        : nil;
+    NSDictionary<NSString *, id> *hostOnlySeedResult = hostOnlyGroup != nil
+        ? CVLPSeedKeychainItem(service, hostOnlyAccount, hostOnlyGroup)
+        : nil;
+    BOOL appIDFixtureReady = [appIDSeedResult[@"ready"] boolValue];
+    BOOL hostOnlyFixtureReady = [hostOnlySeedResult[@"ready"] boolValue];
+    CVLPAppendHostObservation(CVLPSeedObservation(@"app-ID control", appIDSeedResult,
+        CVLPApplicationIDGroupSelectionStatusName(appIDSelectionStatus)));
+    CVLPAppendHostObservation(CVLPSeedObservation(@"host-only control", hostOnlySeedResult,
+        CVLPHostOnlyGroupSelectionStatusName(hostOnlySelectionStatus)));
 
     if (!appIDFixtureReady || !hostOnlyFixtureReady) {
-        CVLPAppendHostObservation([NSString stringWithFormat:@"Keychain fixture preconditions: app-ID control %@; host-only fixture %@.",
-            appIDFixtureReady ? @"READY" : @"INCONCLUSIVE", hostOnlyFixtureReady ? @"READY" : @"INCONCLUSIVE"]);
 #if !TARGET_OS_SIMULATOR
-        return @"Synthetic Keychain fixture setup is inconclusive; device probe stopped before launch.";
+        CVLPAppendHostObservation(@"Guest launch skipped: both independent Keychain controls must be READY before device launch.");
+        return @"Synthetic Keychain fixture setup is inconclusive; device probe stopped before guest launch. See the host report for each control's identity status and setup result.";
+#else
+        CVLPAppendHostObservation(@"Device guest launch would be skipped because one or both independent Keychain controls are not READY; simulator-only loader smoke continues.");
 #endif
     } else {
-        CVLPAppendHostObservation(@"Keychain fixture preconditions: app-ID control READY; host-only fixture READY (both host readbacks succeeded).");
+        CVLPAppendHostObservation(@"Keychain fixture preconditions: app-ID control READY; host-only fixture READY (both independent host readbacks succeeded).");
     }
 
     NSURL *reportURL = [guestDataURL URLByAppendingPathComponent:[NSString stringWithFormat:@"CVLPProbeReport-%@.txt", runID]];
