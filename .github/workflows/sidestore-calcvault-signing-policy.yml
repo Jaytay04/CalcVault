@@ -35,7 +35,7 @@ jobs:
           xcodebuild -version
           brew install ldid
           cd "$SIDESTORE_SOURCE"
-          if ! make build > "$RUNNER_TEMP/sidestore-build.log" 2>&1; then
+          if ! make MARKETING_VERSION='0.7.0-20260911.328+6032424a.cv1' build > "$RUNNER_TEMP/sidestore-build.log" 2>&1; then
             tail -n 120 "$RUNNER_TEMP/sidestore-build.log"
             exit 1
           fi
@@ -44,6 +44,8 @@ jobs:
             exit 1
           }
           test -s SideStore.ipa
+          version="$(plutil -extract CFBundleShortVersionString raw -o - SideStore.xcarchive/Products/Applications/SideStore.app/Info.plist)"
+          test "$version" = '0.7.0-20260911.328+6032424a.cv1'
           unzip -Z1 SideStore.ipa | grep -q '^Payload/SideStore.app/SideStore$'
           if unzip -Z1 SideStore.ipa | grep -Ei '\.(p12|pfx|mobiledevicepairing)$'; then
             echo 'Unexpected private signing or pairing file in artifact' >&2
