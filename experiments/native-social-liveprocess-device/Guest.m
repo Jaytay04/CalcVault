@@ -67,7 +67,11 @@ static NSString *RunProbe(NSString *stage) {
     if (!self.checked) {
         self.checked = YES;
         self.report.text = RunProbe(@"guest-entry");
-        NSLog(@"CVLP_GUEST_VISIBLE");
+        if (self.view.window.windowScene != nil && !CGRectIsEmpty(self.view.window.bounds)) {
+            NSLog(@"CVLP_GUEST_VISIBLE");
+        } else {
+            NSLog(@"CVLP_UI_VIEW_UNATTACHED");
+        }
     }
 }
 - (void)increment {
@@ -77,15 +81,40 @@ static NSString *RunProbe(NSString *stage) {
 - (void)checkBoundary { self.report.text = RunProbe(@"guest-button"); }
 @end
 
-@interface CVLPGuestDelegate : UIResponder <UIApplicationDelegate>
+@interface CVLPGuestSceneDelegate : UIResponder <UIWindowSceneDelegate>
 @property(nonatomic, strong) UIWindow *window;
+@end
+@implementation CVLPGuestSceneDelegate
+- (void)scene:(UIScene *)scene
+    willConnectToSession:(UISceneSession *)session
+    options:(UISceneConnectionOptions *)connectionOptions {
+    if (![scene isKindOfClass:UIWindowScene.class]) {
+        NSLog(@"CVLP_UI_UNEXPECTED_SCENE");
+        return;
+    }
+    UIWindowScene *windowScene = (UIWindowScene *)scene;
+    self.window = [[UIWindow alloc] initWithWindowScene:windowScene];
+    self.window.frame = windowScene.coordinateSpace.bounds;
+    self.window.rootViewController = [CVLPGuestController new];
+    [self.window makeKeyAndVisible];
+    NSLog(@"CVLP_UI scene-attached");
+}
+@end
+
+@interface CVLPGuestDelegate : UIResponder <UIApplicationDelegate>
 @end
 @implementation CVLPGuestDelegate
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
-    self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
-    self.window.rootViewController = [CVLPGuestController new];
-    [self.window makeKeyAndVisible];
+    NSLog(@"CVLP_UI application-launched");
     return YES;
+}
+- (UISceneConfiguration *)application:(UIApplication *)application
+    configurationForConnectingSceneSession:(UISceneSession *)connectingSceneSession
+    options:(UISceneConnectionOptions *)options {
+    UISceneConfiguration *configuration = [[UISceneConfiguration alloc] initWithName:@"Synthetic Guest Scene"
+                                                                        sessionRole:connectingSceneSession.role];
+    configuration.delegateClass = CVLPGuestSceneDelegate.class;
+    return configuration;
 }
 @end
 

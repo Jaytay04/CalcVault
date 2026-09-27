@@ -22,6 +22,8 @@ Build 12 selects the signed library in the containing app's `Frameworks` directo
 
 Each preparation creates up to two small random test Keychain items and a uniquely named sentinel, retained for inspection. This fixture does not delete those items, and uninstalling an app must not be assumed to remove its Keychain entries. No real vault item is read or modified. The host separately reports P12 and DER certificate-file presence, checking existence only and never reading either file. P12 presence is a potential private-material concern requiring resolution before real native guests; DER presence alone is not evidence of a private signing key. These flags do not certify either file's contents or absence of signing material elsewhere.
 
+Build 12 reached all four probe stages on the owner's phone, but its LiveProcess guest panel was black. Build 13 makes the disposable guest scene-aware: UIKit creates its window with the connected `UIWindowScene`, and simulator smoke requires a scene-attachment marker before guest visibility. The scene mismatch is a hypothesis for the black panel, not yet a confirmed phone diagnosis.
+
 ## Phone test
 
 This IPA replaces the current disposable Calculator/CalcVault test app under the same identity. It does not require another Home Screen app or removal of SideStore or Spotify. Keep the LiveProcess extension when SideStore asks. No signed IPA export or import is needed for this fixture.

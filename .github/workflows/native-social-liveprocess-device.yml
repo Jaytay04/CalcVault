@@ -155,6 +155,7 @@ jobs:
           test "$found" = 1
           grep -q 'CVLP_LOADER selecting signed bundle payload' "$RUNNER_TEMP/cvlp-probe.log"
           grep -q 'CVLP_LOADER dlopen returned handle=1' "$RUNNER_TEMP/cvlp-probe.log"
+          grep -q 'CVLP_UI scene-attached' "$RUNNER_TEMP/cvlp-probe.log"
           for stage in pre-bookmark post-bookmark post-loader guest-entry; do
             grep -q "CVLP_STAGE Stage $stage .*host/extension processes distinct" "$RUNNER_TEMP/cvlp-probe.log"
           done
