@@ -48,6 +48,15 @@ jobs:
             -o "$RUNNER_TEMP/cvlp-keychain-migration-tests"
           "$RUNNER_TEMP/cvlp-keychain-migration-tests"
 
+      - name: Test lifecycle generation gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun swiftc experiments/native-social-liveprocess-device/CVLPLifecycleGate.swift \
+            experiments/native-social-liveprocess-device/test_lifecycle_gate.swift \
+            -o "$RUNNER_TEMP/cvlp-lifecycle-gate-tests"
+          "$RUNNER_TEMP/cvlp-lifecycle-gate-tests"
+
       - name: Build synthetic guest and actual LiveProcess host
         shell: bash
         run: |
@@ -147,13 +156,15 @@ jobs:
           host="$RUNNER_TEMP/cvlp-host-iphonesimulator/Build/Products/Debug-iphonesimulator/LiveContainer.app"
           xcrun simctl install "$CVLP_SIMULATOR" "$host"
           sleep 10
-          SIMCTL_CHILD_CVLP_AUTORUN=1 xcrun simctl launch --terminate-running-process "$CVLP_SIMULATOR" com.jaylintaylor.calcvault
+          SIMCTL_CHILD_CVLP_AUTORUN=1 SIMCTL_CHILD_CVLP_LIFECYCLE_AUTOTEST=lock \
+            xcrun simctl launch --terminate-running-process "$CVLP_SIMULATOR" com.jaylintaylor.calcvault
           found=0
           for attempt in {1..8}; do
             sleep 10
             xcrun simctl spawn "$CVLP_SIMULATOR" log show --last 5m --style compact \
               --predicate 'eventMessage CONTAINS "CVLP_"' > "$RUNNER_TEMP/cvlp-probe.log"
-            if grep -q CVLP_GUEST_VISIBLE "$RUNNER_TEMP/cvlp-probe.log"; then found=1; break; fi
+            if grep -q CVLP_GUEST_VISIBLE "$RUNNER_TEMP/cvlp-probe.log" && \
+               grep -q CVLP_LIFECYCLE_EXIT_OBSERVED "$RUNNER_TEMP/cvlp-probe.log"; then found=1; break; fi
           done
           xcrun simctl io "$CVLP_SIMULATOR" screenshot "$RUNNER_TEMP/cvlp-probe.png"
           data="$(xcrun simctl get_app_container "$CVLP_SIMULATOR" com.jaylintaylor.calcvault data)"
@@ -165,6 +176,9 @@ jobs:
           grep -q 'CVLP_LOADER selecting signed bundle payload' "$RUNNER_TEMP/cvlp-probe.log"
           grep -q 'CVLP_LOADER dlopen returned handle=1' "$RUNNER_TEMP/cvlp-probe.log"
           grep -q 'CVLP_UI scene-attached' "$RUNNER_TEMP/cvlp-probe.log"
+          grep -q 'CVLP_LIFECYCLE_COVER_INSTALLED' "$RUNNER_TEMP/cvlp-probe.log"
+          grep -q 'CVLP_LIFECYCLE_KILL_REQUESTED' "$RUNNER_TEMP/cvlp-probe.log"
+          grep -q 'exit observed (ESRCH); settled' "$RUNNER_TEMP/cvlp-probe.log"
           grep -q 'signing-export open ABSENT' "$RUNNER_TEMP/cvlp-probe.log"
           for stage in pre-bookmark post-bookmark post-loader guest-entry; do
             grep -q "CVLP_STAGE Stage $stage .*host/extension processes distinct" "$RUNNER_TEMP/cvlp-probe.log"
@@ -177,6 +191,26 @@ jobs:
             echo '- Device SideStore signing, guest loading, file/Keychain isolation: NOT RUN.'
             echo '- Installable candidate is an ad-hoc fixture requiring SideStore re-signing; no private signing material was used.'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Simulator pending launch revocation (no sandbox verdict)
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date '+%Y-%m-%d %H:%M:%S')"
+          SIMCTL_CHILD_CVLP_AUTORUN=1 SIMCTL_CHILD_CVLP_LIFECYCLE_AUTOTEST=race \
+            SIMCTL_CHILD_CVLP_DELAY_EXTENSION_COMPLETION=1 \
+            xcrun simctl launch --terminate-running-process "$CVLP_SIMULATOR" com.jaylintaylor.calcvault
+          sleep 20
+          xcrun simctl spawn "$CVLP_SIMULATOR" log show --start "$start" --style compact \
+            --predicate 'eventMessage CONTAINS "CVLP_"' > "$RUNNER_TEMP/cvlp-lifecycle-race.log"
+          cat "$RUNNER_TEMP/cvlp-lifecycle-race.log"
+          grep -q CVLP_LIFECYCLE_KILL_REQUESTED "$RUNNER_TEMP/cvlp-lifecycle-race.log"
+          grep -q CVLP_LIFECYCLE_LATE_COMPLETION_REJECTED "$RUNNER_TEMP/cvlp-lifecycle-race.log"
+          if grep -q CVLP_GUEST_VISIBLE "$RUNNER_TEMP/cvlp-lifecycle-race.log"; then
+            echo 'Revoked pending launch incorrectly displayed a guest'; exit 1
+          fi
+          xcrun simctl io "$CVLP_SIMULATOR" screenshot "$RUNNER_TEMP/cvlp-lifecycle-race.png"
+          echo '- Simulator pending-launch callback rejected without guest visibility; physical revocation and audio remain NOT RUN.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Collect synthetic simulator diagnostics on failure
         if: failure() && env.CVLP_SIMULATOR != ''
@@ -216,5 +250,7 @@ jobs:
             ${{ runner.temp }}/cvlp-payload-*.header
             ${{ runner.temp }}/cvlp-payload-*.signature
             ${{ runner.temp }}/cvlp-staged-signature.log
+            ${{ runner.temp }}/cvlp-lifecycle-race.log
+            ${{ runner.temp }}/cvlp-lifecycle-race.png
           if-no-files-found: ignore
           retention-days: 7

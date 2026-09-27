@@ -1,5 +1,22 @@
 #import <UIKit/UIKit.h>
 #import <objc/message.h>
+#import <AVFoundation/AVFoundation.h>
+#import <math.h>
+
+static NSData *SyntheticTone(void) {
+    const uint32_t sampleRate = 22050, sampleCount = 22050, byteCount = sampleCount * 2;
+    NSMutableData *data = [NSMutableData data];
+    void (^u32)(uint32_t) = ^(uint32_t value) { value = CFSwapInt32HostToLittle(value); [data appendBytes:&value length:4]; };
+    void (^u16)(uint16_t) = ^(uint16_t value) { value = CFSwapInt16HostToLittle(value); [data appendBytes:&value length:2]; };
+    [data appendBytes:"RIFF" length:4]; u32(36 + byteCount);
+    [data appendBytes:"WAVEfmt " length:8]; u32(16); u16(1); u16(1);
+    u32(sampleRate); u32(sampleRate * 2); u16(2); u16(16);
+    [data appendBytes:"data" length:4]; u32(byteCount);
+    for (uint32_t i = 0; i < sampleCount; i++) {
+        u16((uint16_t)(int16_t)(2000 * sin(2 * M_PI * 440 * i / sampleRate)));
+    }
+    return data;
+}
 
 static NSString *RunProbe(NSString *stage) {
     Class probe = NSClassFromString(@"CVLPProbe");
@@ -15,6 +32,8 @@ static NSString *RunProbe(NSString *stage) {
 @property(nonatomic, strong) UILabel *counter;
 @property(nonatomic) NSInteger taps;
 @property(nonatomic) BOOL checked;
+@property(nonatomic, strong) AVAudioPlayer *tone;
+@property(nonatomic, strong) UIButton *toneButton;
 @end
 
 @implementation CVLPGuestController
@@ -45,6 +64,10 @@ static NSString *RunProbe(NSString *stage) {
     [check setTitle:@"Run boundary tests again" forState:UIControlStateNormal];
     [check addTarget:self action:@selector(checkBoundary) forControlEvents:UIControlEventTouchUpInside];
     [stack addArrangedSubview:check];
+    self.toneButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.toneButton setTitle:@"Start test tone (low volume)" forState:UIControlStateNormal];
+    [self.toneButton addTarget:self action:@selector(toggleTone) forControlEvents:UIControlEventTouchUpInside];
+    [stack addArrangedSubview:self.toneButton];
     self.report = [UILabel new];
     self.report.numberOfLines = 0;
     self.report.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
@@ -79,6 +102,25 @@ static NSString *RunProbe(NSString *stage) {
     self.counter.text = [NSString stringWithFormat:@"Taps: %ld", (long)self.taps];
 }
 - (void)checkBoundary { self.report.text = RunProbe(@"guest-button"); }
+- (void)toggleTone {
+    if (self.tone.isPlaying) {
+        [self.tone stop];
+        [AVAudioSession.sharedInstance setActive:NO error:nil];
+        [self.toneButton setTitle:@"Start test tone (low volume)" forState:UIControlStateNormal];
+        return;
+    }
+    NSError *error = nil;
+    [AVAudioSession.sharedInstance setCategory:AVAudioSessionCategoryPlayback error:&error];
+    if (!error) [AVAudioSession.sharedInstance setActive:YES error:&error];
+    if (!error) self.tone = [[AVAudioPlayer alloc] initWithData:SyntheticTone() error:&error];
+    self.tone.numberOfLoops = -1;
+    if (error || ![self.tone play]) {
+        [self.toneButton setTitle:@"Test tone unavailable" forState:UIControlStateNormal];
+        return;
+    }
+    [self.toneButton setTitle:@"Stop test tone" forState:UIControlStateNormal];
+    NSLog(@"CVLP_GUEST_TONE_STARTED_BY_USER");
+}
 @end
 
 @interface CVLPGuestSceneDelegate : UIResponder <UIWindowSceneDelegate>

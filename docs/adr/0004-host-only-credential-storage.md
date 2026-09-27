@@ -1,6 +1,6 @@
 # ADR 0004: Host-only credential storage, without native guests
 
-Status: implementation candidate, 2026-09-27. Signed-phone production-store verification pending.
+Status: implemented; Build 16 signed-phone functional checks owner-reported PASS, 2026-09-27. Native-guest isolation and lifecycle gates remain open.
 
 ## Evidence and scope
 
@@ -18,7 +18,7 @@ The device IPA is ad-hoc signed with placeholder application/group identities so
 
 ## Validation and remaining gates
 
-Fake-store tests cover routing, conflicts, cancellation/error propagation, retry, wrapper protection policy and identity controls. They do not validate Security's actual queries, biometric behavior, post-signing identities or device sandboxing. The next phone checks are preservation of the entry sequence, passphrase and Face ID unlock, cancellation, dummy-note persistence across restart and refresh, and explicit build identification under Security. If startup reports a credential error, stop; do not reenroll or delete the installation to bypass it.
+Fake-store tests cover routing, conflicts, cancellation/error propagation, retry, wrapper protection policy and identity controls. They do not validate Security's actual queries, biometric behavior, post-signing identities or device sandboxing. The owner reports all Build 16 phone checks passed: preservation of the entry sequence, passphrase and Face ID unlock, cancellation, dummy-note persistence across restart and refresh, and explicit build identification under Security. This is functional device evidence, not an independent entitlement dump or direct enumeration of legacy credential absence. If startup reports a credential error, stop; do not reenroll or delete the installation to bypass it.
 
 Native guest shutdown on lock/background, stale callback revocation, real TikTok loading, and compatibility remain separate work. No vault files or archive formats are changed by this slice.
 

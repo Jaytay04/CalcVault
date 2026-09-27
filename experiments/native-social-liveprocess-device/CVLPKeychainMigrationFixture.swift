@@ -4,7 +4,8 @@ import Security
 
 /// Disposable fixtures only. Never uses production services, accounts, or key bytes.
 enum CVLPKeychainMigrationFixture {
-    static func prepare() -> [String: Any] {
+    static func prepare(context: LAContext) -> [String: Any] {
+        defer { context.invalidate() }
 #if targetEnvironment(simulator)
         return ["ready": false, "summary": "Synthetic migration: SKIPPED on simulator; device authentication required."]
 #else
@@ -14,9 +15,7 @@ enum CVLPKeychainMigrationFixture {
             return ["ready": false, "summary": "Synthetic migration: INCONCLUSIVE (signed groups unavailable)."]
         }
         let service = "org.example.calcvault.migration-probe." + UUID().uuidString
-        let context = LAContext()
         context.localizedReason = "Verify disposable biometric migration test items."
-        defer { context.invalidate() }
         let store = SecurityKeychainMigrationStore(context: context)
         let migration = KeychainGroupMigration(store: store)
         var step = "starting"

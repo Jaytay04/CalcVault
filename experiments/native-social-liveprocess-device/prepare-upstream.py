@@ -8,6 +8,7 @@ import argparse
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 PIN = "e370a92dfc03ce109ebce00ed4a7cfc64ad1c801"
 
@@ -29,9 +30,9 @@ def main():
     head = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
     if head != PIN:
         raise SystemExit("Upstream revision mismatch")
-    for name in ("CVLPProbe.h", "CVLPProbe.m", "CVLPKeychainIdentity.h"):
+    for name in ("CVLPProbe.h", "CVLPProbe.m", "CVLPKeychainIdentity.h", "CVLPGuestSession.h", "CVLPGuestSession.m"):
         shutil.copy2(fixture / name, root / "LiveContainer" / name)
-    replace(root, "LiveContainer/LCSharedUtils.h", "@import Foundation;", '@import Foundation;\n#import "CVLPProbe.h"')
+    replace(root, "LiveContainer/LCSharedUtils.h", "@import Foundation;", '@import Foundation;\n#import "CVLPProbe.h"\n#import "CVLPGuestSession.h"')
     replace(root, "LiveContainer/LCSharedUtils.m", '#import "LCSharedUtils.h"', '#import "LCSharedUtils.h"\n#import "CVLPProbe.m"')
     replace(root, "LiveContainer/LCSharedUtils.m", "+ (NSString*) teamIdentifier {", '''+ (NSString*) teamIdentifier {
 #if TARGET_OS_SIMULATOR
@@ -70,6 +71,7 @@ struct LiveContainerSwiftUIApp: SwiftUI.App {
 }
 
 ''' + (fixture / "CVLPHostView.swift").read_text(encoding="utf-8")
+        + "\n" + (fixture / "CVLPLifecycleGate.swift").read_text(encoding="utf-8")
         + "\n" + (fixture / "CVLPKeychainMigrationFixture.swift").read_text(encoding="utf-8")
         + "\n" + (fixture.parent.parent / "CalcVault/Security/KeychainGroupMigration.swift").read_text(encoding="utf-8"), encoding="utf-8")
 
@@ -185,6 +187,7 @@ struct LiveContainerSwiftUIApp: SwiftUI.App {
 #if TARGET_OS_SIMULATOR
     return; // The established simulator loader fixture needs no dyld binary patch.
 #endif''')
+    subprocess.run([sys.executable, str(fixture / "prepare-lifecycle.py"), str(root)], check=True)
     print("Prepared pinned synthetic LiveProcess device fixture")
 
 
