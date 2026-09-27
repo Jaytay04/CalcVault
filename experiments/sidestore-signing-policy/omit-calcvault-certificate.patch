@@ -1,7 +1,7 @@
 diff --git a/SideStore/Core/Operations/PipelineOperations/EmbedSigningCertOperation.swift b/SideStore/Core/Operations/PipelineOperations/EmbedSigningCertOperation.swift
 --- a/SideStore/Core/Operations/PipelineOperations/EmbedSigningCertOperation.swift
 +++ b/SideStore/Core/Operations/PipelineOperations/EmbedSigningCertOperation.swift
-@@ -25,14 +25,33 @@ final class EmbedSigningCertOperation: BasePipelineOperation<InstallAppOperatio
+@@ -25,14 +25,35 @@ final class EmbedSigningCertOperation: BasePipelineOperation<InstallAppOperatio
              throw OperationError.invalidParameters("EmbedSigningCertOperation: No signing certificate found in context.")
          }
          
@@ -23,7 +23,9 @@ diff --git a/SideStore/Core/Operations/PipelineOperations/EmbedSigningCertOperat
 +        let stagedID = appBundle.bundleIdentifier
 +        let originalIsCalcVault = originalID == calcVaultID || originalID.hasPrefix(calcVaultID + ".")
 +        let stagedIsCalcVault = stagedID == calcVaultID || stagedID.hasPrefix(calcVaultID + ".")
-+        if originalIsCalcVault || stagedIsCalcVault {
++        // Backup flows temporarily stage SideBackup under the target app's ID.
++        let isBackupHelper = appBundle.fileURL.pathComponents.contains { $0.hasPrefix("SideBackup-") }
++        if (originalIsCalcVault || stagedIsCalcVault) && !isBackupHelper {
 +            for name in ["ALTCertificate.p12", "ALTCertificate.der"] {
 +                let certificateURL = appBundle.fileURL.appendingPathComponent(name)
 +                if FileManager.default.fileExists(atPath: certificateURL.path) {
