@@ -51,6 +51,25 @@ def info(executable='Example'):
                           'CFBundleVersion': '1', 'CFBundleExecutable': executable})
 
 
+def armv7(cryptid=0, platform=2):
+    commands = struct.pack('<4I', 0x25 if platform == 2 else 0x24, 16, 0, 0)
+    commands += struct.pack('<5I', 0x21, 20, 0, 0, cryptid)
+    return struct.pack('<7I', 0xfeedface, 12, 9, 6, 2, len(commands), 0) + commands
+
+
+def mixed_fat(legacy=None, wide=False):
+    first, second = armv7() if legacy is None else legacy, thin(kind=6)
+    stride = 32 if wide else 20
+    start = (8 + stride * 2 + 7) & ~7
+    second_offset = (start + len(first) + 7) & ~7
+    table = b''
+    for cpu, sub, offset, payload in ((12, 9, start, first), (0x100000c, 0, second_offset, second)):
+        values = (cpu, sub, offset, len(payload), 3)
+        table += struct.pack('>IIQQII' if wide else '>5I', *(values + (0,) if wide else values))
+    header = struct.pack('>II', 0xcafebabf if wide else 0xcafebabe, 2) + table
+    return (header.ljust(start, b'\0') + first).ljust(second_offset, b'\0') + second
+
+
 class PreflightTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -275,6 +294,108 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertNotIn('PRIVATE-MARKER', result.stdout + result.stderr)
         self.assertEqual(json.loads(result.stdout)['status'], 'rejected')
+
+    def review(self):
+        return subject.inspect_ipa(self.path, profile='extended-review')
+
+    def review_reject(self, code):
+        with self.assertRaisesRegex(subject.InspectionError, '^' + code + '$'):
+            self.review()
+
+    def test_review_requires_explicit_profile_and_remains_unapproved(self):
+        self.write(extra=[(ROOT + '/Frameworks/Legacy.dylib', mixed_fat())])
+        before = self.path.read_bytes()
+        self.reject('unsupported_macho_architecture')
+        report = self.review()
+        self.assertEqual(report['inspection_profile'], 'extended-review')
+        self.assertEqual(report['max_entry_bytes'], 1024**3)
+        self.assertFalse(report['installation_authorized'])
+        self.assertEqual(report['status'], 'review_required')
+        self.assertIn('legacy_architecture_requires_disposition', report['review_flags'])
+        self.assertEqual(before, self.path.read_bytes())
+        self.assertEqual(list(Path(self.temp.name).iterdir()), [self.path])
+
+    def test_review_thin_and_fat32_fat64_legacy_inventory(self):
+        for payload in (armv7(), mixed_fat(), mixed_fat(wide=True)):
+            self.write(extra=[(ROOT + '/Legacy.dylib', payload)])
+            slices = self.review()['code'][ROOT + '/Legacy.dylib']
+            self.assertEqual(slices[0]['architecture'], 'armv7')
+            self.assertEqual(slices[0]['cryptids'], [0])
+
+    def test_review_still_rejects_encrypted_legacy_slice(self):
+        self.write(extra=[(ROOT + '/Legacy.dylib', mixed_fat(armv7(cryptid=1)))])
+        self.review_reject('encrypted_macho')
+
+    def test_review_legacy_malformed_commands_and_platform(self):
+        payload = bytearray(armv7())
+        struct.pack_into('<I', payload, 32, 15)
+        self.write(extra=[(ROOT + '/Legacy.dylib', mixed_fat(payload))])
+        self.review_reject('invalid_load_commands')
+        self.write(extra=[(ROOT + '/Legacy.dylib', mixed_fat(armv7(platform=1)))])
+        self.review_reject('unsupported_macho_platform')
+
+    def test_review_rejects_legacy_main(self):
+        self.write(executable=armv7())
+        self.review_reject('unsupported_main_executable')
+
+    def test_review_fat_identity_and_alignment(self):
+        payload = bytearray(mixed_fat())
+        struct.pack_into('>I', payload, 12, 10)
+        self.write(extra=[(ROOT + '/Legacy.dylib', payload)])
+        self.review_reject('fat_identity_mismatch')
+        payload = bytearray(mixed_fat())
+        struct.pack_into('>I', payload, 16, 49)
+        self.write(extra=[(ROOT + '/Legacy.dylib', payload)])
+        self.review_reject('invalid_fat_range')
+
+    def test_review_entry_limit_is_bounded_and_not_default(self):
+        self.write()
+        with patch.object(subject, 'MAX_ENTRY', 1):
+            self.reject('archive_entry_limit')
+            self.review()
+        with patch.object(subject, 'MAX_REVIEW_ENTRY', 1):
+            self.review_reject('archive_entry_limit')
+        with patch.object(subject, 'MAX_TOTAL', 1):
+            self.review_reject('archive_total_limit')
+        with patch.object(subject, 'MAX_COMMANDS', 1):
+            self.review_reject('invalid_load_commands')
+
+    def test_review_preserves_plist_limit(self):
+        self.write(plist=b'x' * (1024**2 + 1))
+        self.review_reject('invalid_bundle_plist')
+
+    def test_review_material_members_remain_unopened(self):
+        secret = ROOT + '/Resource/private_key.p12'
+        self.write(extra=[(secret, b'synthetic only')])
+        original = zipfile.ZipFile.open
+        def guarded(archive, name, *args, **kwargs):
+            filename = name.filename if isinstance(name, zipfile.ZipInfo) else name
+            self.assertNotEqual(filename, secret)
+            return original(archive, name, *args, **kwargs)
+        with patch.object(zipfile.ZipFile, 'open', guarded):
+            self.assertEqual(self.review()['uninspected_material_names'], [secret])
+
+    def test_invalid_profile_rejected_before_file_open(self):
+        with self.assertRaisesRegex(subject.InspectionError, '^unsupported_inspection_profile$'):
+            subject.inspect_ipa(self.path, profile='unlimited')
+
+    def test_review_cli(self):
+        self.write(extra=[(ROOT + '/Legacy.dylib', mixed_fat())])
+        result = subprocess.run([sys.executable, str(Path(subject.__file__)), str(self.path),
+                                 '--profile', 'extended-review'], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0)
+        self.assertFalse(json.loads(result.stdout)['installation_authorized'])
+
+    def test_strict_short_fat_header_error_unchanged(self):
+        payload = bytearray(fat())
+        struct.pack_into('>I', payload, 20, 28)
+        self.write(executable=payload)
+        self.reject('invalid_fat_range')
+        self.review_reject('truncated_macho')
+
+    def test_strict_thin_armv7_error_unchanged(self):
+        self.write(extra=[(ROOT + '/Legacy.dylib', armv7())])
+        self.reject('unsupported_macho_format')
 
 
 if __name__ == '__main__':

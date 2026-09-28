@@ -12,6 +12,7 @@ from pathlib import Path
 
 MAX_ARCHIVE = 2 * 1024**3
 MAX_ENTRY = 512 * 1024**2
+MAX_REVIEW_ENTRY = 1024**3
 MAX_TOTAL = 4 * 1024**3
 MAX_ENTRIES = 20000
 MAX_COMMANDS = 4 * 1024**2
@@ -25,6 +26,11 @@ class InspectionError(ValueError):
 def require(condition, code):
     if not condition:
         raise InspectionError(code)
+
+
+def entry_limit(profile):
+    require(profile in ('strict', 'extended-review'), 'unsupported_inspection_profile')
+    return MAX_ENTRY if profile == 'strict' else MAX_REVIEW_ENTRY
 
 
 def text(value):
@@ -65,7 +71,8 @@ def bound_central_directory(source, size):
     source.seek(0)
 
 
-def archive_entries(archive):
+def archive_entries(archive, profile='strict'):
+    limit = entry_limit(profile)
     entries = archive.infolist()
     require(len(entries) <= MAX_ENTRIES, 'archive_directory_limit')
     seen, file_keys, total = {}, set(), 0
@@ -82,7 +89,7 @@ def archive_entries(archive):
         require(not (entry.flag_bits & 1), 'encrypted_zip_entry')
         require(entry.compress_type in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED),
                 'unsupported_zip_compression')
-        require(entry.file_size <= MAX_ENTRY and
+        require(entry.file_size <= limit and
                 entry.file_size <= max(1, entry.compress_size) * 1000, 'archive_entry_limit')
         total += entry.file_size
         require(total <= MAX_TOTAL, 'archive_total_limit')
@@ -116,22 +123,26 @@ def read_exact(stream, offset, length, limit):
     return result
 
 
-def macho_slice(stream, offset, size, total, expected=None):
-    require(size >= 32, 'truncated_macho')
-    fields = struct.unpack('<8I', read_exact(stream, offset, 32, total))
-    magic, cpu, subtype, kind, count, length, flags, reserved = fields
-    require(magic == 0xfeedfacf and cpu == 0x100000c, 'unsupported_macho_architecture')
-    require(subtype & 0xffffff in (0, 1, 2), 'unsupported_macho_architecture')
+def macho_slice(stream, offset, size, total, expected=None, profile='strict'):
+    entry_limit(profile)
+    require(size >= (28 if profile == 'extended-review' else 32), 'truncated_macho')
+    magic, cpu, subtype, kind, count, length, flags = struct.unpack(
+        '<7I', read_exact(stream, offset, 28, total))
+    legacy = magic == 0xfeedface and cpu == 12 and subtype & 0xffffff == 9
+    arm64 = magic == 0xfeedfacf and cpu == 0x100000c and subtype & 0xffffff in (0, 1, 2)
+    require(arm64 or (profile == 'extended-review' and legacy), 'unsupported_macho_architecture')
+    header_size, alignment = (28, 4) if legacy else (32, 8)
+    require(size >= header_size, 'truncated_macho')
     require(expected is None or expected == (cpu, subtype), 'fat_identity_mismatch')
     require(kind in (2, 6, 8), 'unsupported_macho_filetype')
-    require(count <= 8192 and length <= MAX_COMMANDS and 32 + length <= size,
+    require(count <= 8192 and length <= MAX_COMMANDS and header_size + length <= size,
             'invalid_load_commands')
-    commands = read_exact(stream, offset + 32, length, total)
+    commands = read_exact(stream, offset + header_size, length, total)
     pos, platforms, encryption, dependencies, rpaths = 0, [], [], [], []
     for _ in range(count):
         require(pos + 8 <= length, 'invalid_load_commands')
         cmd, command_size = struct.unpack_from('<II', commands, pos)
-        require(command_size >= 8 and command_size % 8 == 0 and
+        require(command_size >= 8 and command_size % alignment == 0 and
                 pos + command_size <= length, 'invalid_load_commands')
         if cmd in (0x21, 0x2c):
             require(command_size >= (24 if cmd == 0x2c else 20), 'invalid_encryption_command')
@@ -163,19 +174,20 @@ def macho_slice(stream, offset, size, total, expected=None):
         pos += command_size
     require(pos == length, 'invalid_load_commands')
     require(not platforms or set(platforms) == {2}, 'unsupported_macho_platform')
-    return {'architecture': 'arm64e' if subtype & 0xffffff == 2 else 'arm64',
+    return {'architecture': 'armv7' if legacy else ('arm64e' if subtype & 0xffffff == 2 else 'arm64'),
             'cpu_subtype': subtype, 'filetype': kind, 'platforms': platforms,
             'cryptids': encryption, 'dependencies': dependencies, 'rpaths': rpaths,
             'dependencies_needing_layout_review': [d for d in dependencies if not d.startswith(
                 ('/usr/lib/', '/System/Library/Frameworks/'))]}
 
 
-def inspect_macho(archive, entry):
+def inspect_macho(archive, entry, profile='strict'):
+    entry_limit(profile)
     size = entry.file_size
     with archive.open(entry) as stream:
         magic = read_exact(stream, 0, 4, size)
-        if magic == b'\xcf\xfa\xed\xfe':
-            return [macho_slice(stream, 0, size, size)]
+        if magic == b'\xcf\xfa\xed\xfe' or (profile == 'extended-review' and magic == b'\xce\xfa\xed\xfe'):
+            return [macho_slice(stream, 0, size, size, profile=profile)]
         require(magic in (b'\xca\xfe\xba\xbe', b'\xca\xfe\xba\xbf'),
                 'unsupported_macho_format')
         count = struct.unpack('>I', read_exact(stream, 4, 4, size))[0]
@@ -192,23 +204,25 @@ def inspect_macho(archive, entry):
             require((cpu, sub) not in identities, 'duplicate_fat_slice')
             identities.add((cpu, sub))
             require(align <= 30 and offset % (1 << align) == 0 and offset >= table_end and
-                    amount >= 32 and offset <= size and amount <= size - offset,
+                    amount >= (28 if profile == 'extended-review' else 32) and
+                    offset <= size and amount <= size - offset,
                     'invalid_fat_range')
             require(all(offset + amount <= a or offset >= b for a, b in ranges),
                     'overlapping_fat_slices')
             ranges.append((offset, offset + amount))
-            result.append(macho_slice(stream, offset, amount, size, (cpu, sub)))
+            result.append(macho_slice(stream, offset, amount, size, (cpu, sub), profile))
         return result
 
 
-def _inspect(source):
+def _inspect(source, profile='strict'):
+    limit = entry_limit(profile)
     source.seek(0, 2)
     size = source.tell()
     bound_central_directory(source, size)
     digest = hashlib.file_digest(source, 'sha256').hexdigest()
     source.seek(0)
     with zipfile.ZipFile(source) as archive:
-        entries = archive_entries(archive)
+        entries = archive_entries(archive, profile)
         roots = [n[:-11] for n in entries if n.startswith('Payload/') and
                  n.endswith('.app/Info.plist') and n.count('/') == 2]
         require(len(roots) == 1, 'expected_one_payload_app')
@@ -229,7 +243,7 @@ def _inspect(source):
                     not executable.lower().endswith(MATERIAL), 'invalid_bundle_executable')
             name = directory + '/' + executable
             require(name in entries, 'missing_bundle_executable')
-            code[name] = inspect_macho(archive, entries[name])
+            code[name] = inspect_macho(archive, entries[name], profile)
             bundles.append({'path': directory, 'identifier': text(info.get('CFBundleIdentifier')),
                             'version': text(info.get('CFBundleShortVersionString', 'unspecified')),
                             'build': text(info.get('CFBundleVersion', 'unspecified')),
@@ -237,13 +251,18 @@ def _inspect(source):
         for name, entry in entries.items():
             if name.lower().endswith('.dylib'):
                 require(name.startswith(root + '/'), 'code_outside_root_app')
-                code[name] = inspect_macho(archive, entry)
+                code[name] = inspect_macho(archive, entry, profile)
         main = next(b for b in bundles if b['path'] == root)
-        require(all(s['filetype'] == 2 and s['platforms'] and set(s['platforms']) == {2}
+        require(all(s['architecture'] in ('arm64', 'arm64e') and s['filetype'] == 2 and
+                    s['platforms'] and set(s['platforms']) == {2}
                     for s in code[root + '/' + main['executable']]), 'unsupported_main_executable')
         materials = sorted(n for n in entries if n.lower().endswith(MATERIAL))
         extensions = sorted(d for d in bundle_dirs if d.endswith('.appex'))
         flags = ['main_executable_requires_pre_signing_adapter', 'dependency_layout_review_required']
+        if profile == 'extended-review':
+            flags.append('extended_inspection_profile_selected')
+        if any(s['architecture'] == 'armv7' for slices in code.values() for s in slices):
+            flags.append('legacy_architecture_requires_disposition')
         if materials:
             flags.append('certificate_or_key_named_resources_uninspected')
         if extensions:
@@ -251,6 +270,7 @@ def _inspect(source):
         if any(not s['platforms'] for slices in code.values() for s in slices):
             flags.append('some_embedded_platforms_unspecified')
         return {'schema': 1, 'status': 'review_required', 'checks_completed': True,
+                'inspection_profile': profile, 'max_entry_bytes': limit,
                 'installation_authorized': False, 'sha256': digest, 'file_size': size,
                 'entry_count': len(archive.infolist()), 'main_bundle': main, 'bundles': bundles,
                 'other_file_count': len(entries) - len(code),
@@ -261,10 +281,11 @@ def _inspect(source):
                                'unlisted_executable_resources', 'full_archive_crc']}
 
 
-def inspect_ipa(path):
+def inspect_ipa(path, *, profile='strict'):
     try:
+        entry_limit(profile)
         with Path(path).open('rb') as source:
-            return _inspect(source)
+            return _inspect(source, profile)
     except InspectionError:
         raise
     except Exception:
@@ -274,9 +295,11 @@ def inspect_ipa(path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('ipa', type=Path)
+    parser.add_argument('--profile', choices=('strict', 'extended-review'), default='strict',
+                        help='Explicit metadata review of up to 1 GiB entries and ARMv7 library slices.')
     args = parser.parse_args()
     try:
-        result = inspect_ipa(args.ipa)
+        result = inspect_ipa(args.ipa, profile=args.profile)
     except InspectionError as error:
         print(json.dumps({'status': 'rejected', 'installation_authorized': False, 'error': str(error)}))
         return 2

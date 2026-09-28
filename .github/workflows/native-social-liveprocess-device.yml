@@ -2,6 +2,11 @@ name: Synthetic LiveProcess device probe (manual)
 
 on:
   workflow_dispatch:
+    inputs:
+      framework_guest:
+        description: 'Build 20 immutable-framework route with generated synthetic guest only'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -13,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Test synthetic packaging rules
-        run: python3 -m unittest discover -s experiments/native-social-liveprocess-device -p test_package_fixture.py -v
+        run: python3 -m unittest discover -s experiments/native-social-liveprocess-device -p 'test_*.py' -v
       - name: Select pinned toolchain and source
         shell: bash
         run: |
@@ -26,6 +31,9 @@ jobs:
           git clone --depth 1 --branch 3.8.0 --recurse-submodules \
             https://github.com/LiveContainer/LiveContainer.git "$RUNNER_TEMP/cvlp-source"
           python3 experiments/native-social-liveprocess-device/prepare-upstream.py "$RUNNER_TEMP/cvlp-source"
+          if test '${{ inputs.framework_guest }}' = true; then
+            python3 experiments/native-social-liveprocess-device/prepare-framework-guest.py "$RUNNER_TEMP/cvlp-source"
+          fi
           cd experiments/native-social-liveprocess-device
           xcodegen generate
 
@@ -37,6 +45,15 @@ jobs:
             experiments/native-social-liveprocess-device/test_liveness.c \
             -o "$RUNNER_TEMP/cvlp-liveness-tests"
           "$RUNNER_TEMP/cvlp-liveness-tests"
+
+      - name: Test immutable framework guest contract with synthetic files
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun clang -fobjc-arc -Wall -Wextra -Werror -framework Foundation \
+            experiments/native-social-liveprocess-device/test_framework_guest.m \
+            -o "$RUNNER_TEMP/cvlp-framework-contract-tests"
+          "$RUNNER_TEMP/cvlp-framework-contract-tests"
 
       - name: Test signed Keychain identity selection
         shell: bash
@@ -135,6 +152,12 @@ jobs:
             package_args=("$host" "$guest" "$RUNNER_TEMP/cvlp-payload-$sdk.dylib" "$RUNNER_TEMP/cvlp-entitlements-$sdk")
             if test "$sdk" = iphonesimulator; then package_args+=(--simulator); fi
             python3 experiments/native-social-liveprocess-device/package-fixture.py "${package_args[@]}"
+            if test '${{ inputs.framework_guest }}' = true; then
+              python3 experiments/native-social-liveprocess-device/package-framework-fixture.py \
+                "$host" "$guest" "$RUNNER_TEMP/cvlp-payload-$sdk.dylib"
+              codesign --force --sign - "$host/Frameworks/NativeGuest.framework"
+              codesign --verify --strict --verbose=2 "$host/Frameworks/NativeGuest.framework"
+            fi
             # Mach-O prepatching invalidates any linker-generated signature.
             # Sign and verify the loose payload explicitly before sealing its host.
             payload="$host/Frameworks/SyntheticNativeGuestPayload.dylib"
@@ -178,11 +201,21 @@ jobs:
           xcrun simctl io "$CVLP_SIMULATOR" screenshot "$RUNNER_TEMP/cvlp-probe.png"
           data="$(xcrun simctl get_app_container "$CVLP_SIMULATOR" com.jaylintaylor.calcvault data)"
           staged="$data/Documents/Applications/org.example.syntheticnativeguest.app/Frameworks/SyntheticNativeGuestPayload.dylib"
-          codesign --verify --strict --verbose=2 "$staged" > "$RUNNER_TEMP/cvlp-staged-signature.log" 2>&1
-          cmp "$host/Frameworks/SyntheticNativeGuestPayload.dylib" "$staged"
+          if test '${{ inputs.framework_guest }}' = true; then
+            test ! -e "$staged"
+            codesign --verify --strict --verbose=2 "$host/Frameworks/NativeGuest.framework" \
+              > "$RUNNER_TEMP/cvlp-staged-signature.log" 2>&1
+          else
+            codesign --verify --strict --verbose=2 "$staged" > "$RUNNER_TEMP/cvlp-staged-signature.log" 2>&1
+            cmp "$host/Frameworks/SyntheticNativeGuestPayload.dylib" "$staged"
+          fi
           cat "$RUNNER_TEMP/cvlp-probe.log"
           test "$found" = 1
-          grep -q 'CVLP_LOADER selecting signed bundle payload' "$RUNNER_TEMP/cvlp-probe.log"
+          if test '${{ inputs.framework_guest }}' = true; then
+            grep -q 'CVLP_FRAMEWORK selecting immutable bundle payload' "$RUNNER_TEMP/cvlp-probe.log"
+          else
+            grep -q 'CVLP_LOADER selecting signed bundle payload' "$RUNNER_TEMP/cvlp-probe.log"
+          fi
           grep -q 'CVLP_LOADER dlopen returned handle=1' "$RUNNER_TEMP/cvlp-probe.log"
           grep -q 'CVLP_UI scene-attached' "$RUNNER_TEMP/cvlp-probe.log"
           grep -q 'CVLP_LIFECYCLE_COVER_INSTALLED' "$RUNNER_TEMP/cvlp-probe.log"
@@ -200,7 +233,8 @@ jobs:
           done
           {
             echo '## Synthetic LiveProcess probe'
-            echo '- One containing app, one LiveProcess extension, embedded synthetic guest dylib.'
+            echo '- One containing app, one LiveProcess extension, embedded synthetic guest.'
+            echo '- Immutable framework variant: ${{ inputs.framework_guest }} (no real social package in CI).'
             echo '- Actual LiveProcess bootstrap and guest loader: simulator smoke check passed.'
             echo '- Simulator filesystem sandbox verdict: NOT APPLICABLE (sandbox is not enforced).'
             echo '- Device SideStore signing, guest loading, file/Keychain isolation: NOT RUN.'
@@ -245,7 +279,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: synthetic-liveprocess-device-probe
+          name: synthetic-liveprocess-device-probe${{ inputs.framework_guest && '-framework' || '' }}
           path: |
             ${{ runner.temp }}/cvlp-package/SyntheticLiveProcess-device-probe.ipa
             ${{ runner.temp }}/cvlp-package/SyntheticLiveProcess-device-probe.ipa.sha256
@@ -254,7 +288,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: synthetic-liveprocess-device-probe-evidence
+          name: synthetic-liveprocess-device-probe-evidence${{ inputs.framework_guest && '-framework' || '' }}
           path: |
             ${{ runner.temp }}/cvlp-probe.log
             ${{ runner.temp }}/cvlp-probe.png
