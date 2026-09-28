@@ -6,6 +6,7 @@ source; it neither embeds a proprietary guest nor signs/installs/executes one.
 import argparse
 from pathlib import Path
 import subprocess
+import framework_geometry
 
 PIN = 'e370a92dfc03ce109ebce00ed4a7cfc64ad1c801'
 FILES = (
@@ -105,7 +106,7 @@ def transform(sources):
 ''')
     probe = once(probe, 'Guest staging: allowlisted bundle metadata and signed payload copied to the synthetic guest folder.',
                  'Guest selection: fixed immutable framework; no guest code or resources copied into Documents.')
-    probe = probe.replace('Build marker: build19.', 'Build marker: build20-framework.')
+    probe = probe.replace('Build marker: build19.', 'Build marker: build20-framework-layout1.')
     result[FILES[1]] = probe
     result[FILES[2]] = once(result[FILES[2]], '#import "CVLPProbe.h"',
                            '#import "CVLPProbe.h"\n#import "CVLPFrameworkGuest.h"')
@@ -130,7 +131,7 @@ def transform(sources):
     ];''')
     result[FILES[4]] = scene
     app = result[FILES[5]]
-    app = app.replace('Build 19', 'Build 20 framework').replace('Native lifecycle test · 19', 'Framework guest research · 20')
+    app = app.replace('Build 19', 'Build 20 framework layout 1').replace('Native lifecycle test · 19', 'Guest layout test · 20.1')
     app = once(app, 'Synthetic data only. Restart the app for each new launch test. The test tone starts only when tapped inside the guest.',
                'Research only. Do not sign in or enter personal data. Restart the app for each new launch test. Boundary fixtures are synthetic; guest behavior is unverified.')
     result[FILES[5]] = app
@@ -164,7 +165,7 @@ def main():
     if head != PIN:
         raise SystemExit('upstream_revision_mismatch')
     sources = {name: (root / name).read_text(encoding='utf-8') for name in FILES}
-    changed = transform(sources)
+    changed = framework_geometry.transform(transform(sources))
     helper = Path(__file__).with_name('CVLPFrameworkGuest.h').read_text(encoding='utf-8')
     if (root / 'LiveContainer/CVLPFrameworkGuest.h').exists():
         raise SystemExit('framework_adapter_already_present')

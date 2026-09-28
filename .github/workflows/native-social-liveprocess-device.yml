@@ -213,6 +213,7 @@ jobs:
           test "$found" = 1
           if test '${{ inputs.framework_guest }}' = true; then
             grep -q 'CVLP_FRAMEWORK selecting immutable bundle payload' "$RUNNER_TEMP/cvlp-probe.log"
+            grep -q 'CVLP_GEOMETRY' "$RUNNER_TEMP/cvlp-probe.log"
           else
             grep -q 'CVLP_LOADER selecting signed bundle payload' "$RUNNER_TEMP/cvlp-probe.log"
           fi

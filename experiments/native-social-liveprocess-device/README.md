@@ -2,6 +2,14 @@
 
 ## Opt-in Build 20 framework route
 
+### Layout candidate 20.1
+
+The framework route now includes a host-only attachment/geometry candidate, labeled `Guest layout test · 20.1` with probe marker `build20-framework-layout1`. The package version remains 20 and the existing host/extension identities are unchanged. The original Build 19 route is unaffected.
+
+It completes the hosted scene controller's containment after adding its view, enables the upstream explicit frame-update path instead of relying only on the flexible autoresizing mask, and requests one attached, nonempty initial frame synchronization. Layout callbacks retain the revocation guard and reject missing presenter/window or empty bounds. Apple's [container-controller guidance](https://developer.apple.com/documentation/uikit/creating-a-custom-container-view-controller) requires notifying the child after attachment; this source correction does not establish the cause of TikTok's intermittent cold-start failure.
+
+Bounded geometry diagnostics record dimensions, insets, orientation and attachment flags only, retaining a small summary for the host report. They do not read guest content, navigation URLs, credentials or media. No guest bytes, bookmark grants, Keychain groups, signing policy or lock/revocation behavior are changed by this adapter. The synthetic CI checks compilation, visible guest launch and lifecycle behavior; real TikTok loading still needs repeated owner-operated cold starts. Do not claim a feed fix from a source or simulator check alone.
+
 The manual workflow's `framework_guest` input defaults to false (the existing Build 19 path). When true, `prepare-framework-guest.py` runs after the pinned synthetic adapter and changes only the disposable research tree. It selects one fixed `Frameworks/NativeGuest.framework` for both executable and bundle resources. The selected token and dedicated data folder are fixed; mutable Documents/App Group guest metadata cannot select code, grant a broader bookmark or enable tweak injection, JIT or a certificate fallback. Existing host-only Keychain fixtures, generation revocation, extension cancellation and synchronous privacy cover remain in use. No production calculator, vault or social browser source is changed.
 
 `CVLPFrameworkGuest.h` validates a bounded, fixed-location `CVLPFrameworkGuest.plist` against the immutable framework metadata and a narrow bundle-ID allowlist. The descriptor has exactly `schema=1`, `bundleIdentifier`, `bundleVersion`, and `executable=NativeGuest`; it is a selection contract, **not** a cryptographic signature verifier, malware scan, or permission to execute an arbitrary package. The OS image-signature checks remain enabled. Missing/mismatched metadata, symlinked child paths, a mutable `LCAppInfo.plist`, or containing-app certificate exports fail selection. No post-signing binary rewrite is allowed.
