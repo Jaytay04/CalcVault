@@ -2,6 +2,42 @@
 
 Status: experimental authorization only, 2026-09-25. Not approved for the shipping CalcVault target.
 
+## Current checkpoint: Build 19 and private guest packaging (2026-09-27)
+
+The Build 19 owner-supplied explicit-Lock and inactive/app-switcher reports pass the bounded signed-phone PID presence/absence test; the owner also confirms stopped audio and calculator cover in both. Host-only files/Keychain remain denied in the supplied stages through guest-entry, with successful independent controls and absent signing exports. See `TEST_REPORT.md` for exact observations and limits. The historical unresolved gates below describe earlier revisions; the current result is not a general security certification or proof of TikTok compatibility.
+
+The next useful gate is **read-only inspection of an owner-supplied local TikTok IPA**, not another identical synthetic lifecycle test. No real TikTok package has been inspected in this review. This does not authorize executing it, importing accounts, replacing production code, or uploading its contents.
+
+### Candidate route, not an implemented importer
+
+1. Public CI builds only the generic/synthetic research host and auditable tooling. Keep the real social IPA, any owner-signed output, provisioning material and signing keys out of source, CI and public artifacts.
+2. A private local assembly step would preserve the original IPA and prepare a separate guest copy before signing. Its executable and dependencies must be packaged as immutable containing-app code, not executed from Documents. Build 11 observed sandbox mmap denial for that Documents location; the subsequent synthetic fixture uses the containing app's Frameworks directory.
+3. SideStore signs the assembled containing app and supported nested code. Keep the `.cv1` no-export behavior; do not enable LiveContainer's normal certificate-import flow in CalcVault. No guest receives SideStore's signing key. Exact nested-package traversal, effective entitlements and refresh must be checked for the selected package before claiming this works.
+4. Only the existing separate LiveProcess research extension may execute the guest. Preserve host-only credential groups, bounded guest-only resource/data access, generation revocation and synchronous privacy cover. Do not run the guest in the vault's process or grant it a vault operation bridge.
+
+The proposed advantage is one containing Home Screen app with signing retained in SideStore. The tradeoff is that guest updates require private repackaging and re-signing of the containing app; it is not arbitrary on-device IPA import. No additional guest extension or app product is approved by this proposal. SideStore and Spotify must remain installed.
+
+### Concrete source constraints
+
+- `experiments/native-social-liveprocess-device/package-fixture.py` packages only one synthetic dylib and a small resource bundle; it rejects nested apps and removes generated extensions other than LiveProcess. It does not package a real client's resource/framework graph.
+- `prepare-upstream.py` permits only the exact synthetic guest identifier/metadata and matches staged bytes to the embedded signed payload. It explicitly refuses every other guest. Extending that boundary requires a reviewed package manifest, not removal of the allowlist.
+- Pinned LiveContainer `e370a92dfc03ce109ebce00ed4a7cfc64ad1c801`, `LiveContainer/LCMachOUtils.m`, converts a guest executable to a dylib and changes Mach-O load commands. `LiveContainerSwiftUI/Models/LCAppInfo.m` checks ARM64/encryption and patches before signing. These are executable changes: they must precede SideStore signing and cannot be applied to the installed signed code. The current build-time helper runs on the Mac simulator, not on this Windows PC; a private assembly environment/tool remains to be selected after payload inspection.
+- Guest resources, `NSBundle` assumptions, `@rpath`/`@loader_path` dependencies, framework collisions and required entitlements remain unverified for TikTok. A renamed framework directory alone does not solve them. No promise is made that login, highlights, media or all original capabilities will survive this embedding.
+
+### Signing-source review
+
+CodeSignKit `d0c67710fda9a2646b9e829cb2cf443892728371`, [`Sources/CodeSigner.swift`](https://github.com/mahee96/CodeSignKit/blob/d0c67710fda9a2646b9e829cb2cf443892728371/Sources/CodeSigner.swift), recursively collects embedded framework bundles, dylibs and Mach-O files and signs deeper paths before their parent bundles. This supports investigating an immutable `Frameworks/TikTokGuest.framework` containing its own framework dependencies without creating a second launchable app. It is source feasibility, not an approved layout or signed-phone result. The existing phone fixture tests one prepared loose dylib only.
+
+The installed `.cv1` base SideStore `6032424a0e56c1c319762e786099bdd9186a238b` pins that same CodeSignKit revision and SideSign `a731c0d5a9a6617c7b385ae493e07ffb7f81cd5d`. A Git comparison with the initially inspected SideStore `0dd743f75afc358b0ba4a002feb5f19474492371` / SideSign `6b68651697f99791ef85404b7aea1891a26a285d` found the SideSign `CodeSignerAPI.swift` wrapper unchanged; `AppBundle.swift` has metadata-parser differences but its root `PlugIns/*.appex` discovery is unchanged. The wrapper selects empty entitlement XML for framework/dylib signing targets. Guest code still runs under LiveProcess's process entitlements; framework packaging does not preserve or confer a separate application's original privileges. The installed base's resign operation copies the staged containing app before signing. A ZIP/IPA left as an opaque resource is not converted into executable guest code by this signer.
+
+These checks used pinned public source/Git objects, not the owner's certificate or a real social payload. The CodeSignKit checkout has pre-existing deleted working-tree files; its tracked source was read through Git without restoring or editing it. No SideStore change, new build, install or phone test was performed in this review.
+
+### Local preflight boundary
+
+Request only the owner's intended IPA path, not an account password, P12 or certificate export. Read ZIP metadata and bounded file contents without executing binaries or extracting them into tracked source. Check archive traversal/duplicate-entry hazards, bundle identifier/version, executable declaration, Mach-O architecture/platform and encryption commands, nested executable/framework/extension inventory, dependency paths, and required entitlement names. Do not log private entitlement values, profile contents or account material. Preserve the original and fail visibly on malformed, unsupported or encrypted executable input. Preflight does not decrypt an App Store binary or establish its trustworthiness, valid signature or runtime compatibility.
+
+Only after that inventory should a package-specific implementation and disposable no-account launch test be proposed. Retain all existing boundary/lifecycle gates; successful packaging alone cannot authorize native TikTok in the production vault.
+
 ## Correction: Simulator does not enforce the application sandbox
 
 On 2026-09-26, investigation located Apple's explicit statement in [Getting the Most Out of Simulator](https://developer.apple.com/videos/play/wwdc2019/418/) that the application sandbox is not enforced. This accounts for our host-file and unrelated-app-container reads before any bookmark activation. Historical simulator observations below remain accurate, but their failed file-read assertions cannot establish failure of the physical-device boundary. The signed-phone classic-extension fixture denied host-only files and the explicit host-only Keychain group; the actual LiveProcess loader must still repeat those tests on the phone.
