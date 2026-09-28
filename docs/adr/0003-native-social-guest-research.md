@@ -6,7 +6,7 @@ Status: experimental authorization only, 2026-09-25. Not approved for the shippi
 
 The Build 19 owner-supplied explicit-Lock and inactive/app-switcher reports pass the bounded signed-phone PID presence/absence test; the owner also confirms stopped audio and calculator cover in both. Host-only files/Keychain remain denied in the supplied stages through guest-entry, with successful independent controls and absent signing exports. See `TEST_REPORT.md` for exact observations and limits. The historical unresolved gates below describe earlier revisions; the current result is not a general security certification or proof of TikTok compatibility.
 
-The next useful gate is **read-only inspection of an owner-supplied local TikTok IPA**, not another identical synthetic lifecycle test. No real TikTok package has been inspected in this review. This does not authorize executing it, importing accounts, replacing production code, or uploading its contents.
+The next useful gate was **read-only inspection of a local TikTok IPA**, not another identical synthetic lifecycle test. Following the owner's request to inspect the BHTikTok repositories, an older public GitHub release was downloaded into ignored local storage and inspected without execution. See `NATIVE_GUEST_PACKAGING.md` for exact package findings. A newer owner-supplied RXTikTok package remains pending. Static inspection does not authorize importing accounts, replacing production code, or uploading package contents; private packaging and no-account launch remain separate unimplemented gates.
 
 ### Candidate route, not an implemented importer
 
