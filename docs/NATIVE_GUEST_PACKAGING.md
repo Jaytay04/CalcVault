@@ -1,5 +1,13 @@
 # Native guest packaging research
 
+## Current checkpoint: private containing-host IPA (2026-09-28)
+
+The owner confirmed Build 20's signed-phone boundary/lifecycle batch, including audio stop/calculator cover on explicit Lock and inactivity, and no delayed guest appearance. A separate digest-bound host merger is implemented and independently reviewed for the narrow packaging boundary; 118 package-tool and 15 framework tests pass. It checks the exact research host/placeholder contract, independently verifies the prepared guest's complete inventory and hashes, pins TikTok's bundle ID and build 439042, preserves other host bytes, and publishes only a new readback-verified IPA. Inputs remain read-only; material members and additional guest products are rejected. This is not a general importer or signature/provenance verifier.
+
+Created local ignored `build/private-native-guest-rx166/CalcVault-native-TikTok-research.ipa` (696,266,865 bytes), SHA-256 `9e753cf5bf1f3fcc524ac443626a05a9683b692d87d8d115d66deebef9822f7e`. The writer and separate readback verified 2,424 guest files, 104 byte-preserved host files and the fixed runtime selection descriptor; only the existing LiveProcess extension remains. Known synthetic placeholder files and external obsolete signature metadata are omitted from this separate copy. The original IPA and prepared ZIP remain unchanged. Actual SideStore nested-code signing and native loading remain untested; no proprietary input/output was uploaded or executed. Historical unimplemented checkpoints below are superseded only for packaging, not runtime.
+
+Next gate is an owner-operated disposable, **no-account** SideStore .cv1 signing and launch test of this private candidate. Keep LiveProcess; never restore certificate export or broaden guest grants to make a failure disappear. This candidate replaces the current research app under the same CalcVault identity, not SideStore or Spotify, and is not the production calculator/vault/browser interface. Production browser/download code is untouched. If launch fails, capture the exact diagnostic without entering account credentials. If it opens, check explicit Lock and background cover/audio cessation and collect the host report after real guest loading. Native highlights, login, library/resource compatibility and actual-guest privacy remain NOT RUN.
+
 Status: local static research, 2026-09-28. Not an installer, trust verdict, or production native-guest authorization. Build 19's synthetic loader and the normal CalcVault app are unchanged.
 
 ## Public candidate discovery

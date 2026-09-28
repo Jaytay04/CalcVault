@@ -2,7 +2,11 @@
 
 Status: experimental authorization only, 2026-09-25. Not approved for the shipping CalcVault target.
 
-## Current checkpoint: Build 19 and private guest packaging (2026-09-28)
+## Current checkpoint: Build 20 and private guest packaging (2026-09-28)
+
+Private containing-host packaging is now implemented and synthetic-tested. The real local candidate was merged and independently readback-verified without changing the original or uploading proprietary bytes. It preserves the tested host/extension executables and replaces only the approved synthetic guest/descriptor plus obsolete metadata. Fresh SideStore signing and a disposable no-account native launch are the next gates, not a completed feature or production security approval. See `NATIVE_GUEST_PACKAGING.md` and `TEST_REPORT.md` for exact digests, test counts and remaining limitations; earlier unimplemented-merger statements below are historical.
+
+Build 20's opt-in immutable-framework route has now passed synthetic CI and the owner's signed-phone batch: protected file/Keychain controls through guest-button, absent signing exports, unchanged sentinel, bounded getpgid presence/absence, and confirmed audio stop/calculator cover on both explicit Lock and inactivity. The delayed guest did not appear after cancellation. Signal-zero settlement remains separately unsettled; these observations do not certify an arbitrary guest. Next is a digest-bound private containing-host merger, tested with synthetic files before assembling a separate local TikTok research IPA. No account, production integration, extra extension or public binary upload is authorized by this result.
 
 The Build 19 owner-supplied explicit-Lock and inactive/app-switcher reports pass the bounded signed-phone PID presence/absence test; the owner also confirms stopped audio and calculator cover in both. Host-only files/Keychain remain denied in the supplied stages through guest-entry, with successful independent controls and absent signing exports. See `TEST_REPORT.md` for exact observations and limits. The historical unresolved gates below describe earlier revisions; the current result is not a general security certification or proof of TikTok compatibility.
 

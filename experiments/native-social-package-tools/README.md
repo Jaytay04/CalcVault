@@ -1,6 +1,6 @@
 # Local native package research tools
 
-Research tooling, separate from the vault, social browser and Build 19 loader. The preflight and planner are read-only; the separate adapter and writer create new private outputs only. None decrypts, signs, installs, executes or uploads a package, or creates a manifest accepted by the loader.
+Research tooling, separate from the vault and social browser. The preflight and planner are read-only; the adapter, writer and host merger create new private outputs only. None decrypts, signs, installs, executes or uploads a package. Only the host merger creates the fixed Build 20 selection descriptor; this descriptor is not a signature, trust verdict or installation approval.
 
 Requires Python 3.11+; standard library only. Run locally, never with a real social IPA in public CI:
 
@@ -56,7 +56,7 @@ An optional local `--policy proposal.json` can record **proposed** exact-path ex
 
 JSON policies are capped at 1 MiB. Unknown/duplicate fields or targets, non-object JSON, unsupported schemas and stale input digests reject. Only discovered extension roots and discovered material names can be excluded; encrypted/malformed code cannot be hidden with exclusions because preflight runs first. Both the initial and final whole-input hashes must match. Do not concurrently modify an input during planning; this is not a filesystem snapshot/locking implementation.
 
-The planner never writes or extracts files, changes a binary, signs, uploads or executes code. Exit 0 means a draft was generated, **not** that its blockers are resolved: `status=draft_review_required`, `assembly_authorized=false`, `installation_authorized=false` always remain. The JSON policy is not a permission to execute a guest, nor can it authorize new extensions. Keep real plans/policies local. The separate executable adapter and research ZIP writer are described below; neither is automatically applied by the planner. Host-IPA integration, signing checks and actual loader integration remain unimplemented.
+The planner never writes or extracts files, changes a binary, signs, uploads or executes code. Exit 0 means a draft was generated, **not** that its blockers are resolved: `status=draft_review_required`, `assembly_authorized=false`, `installation_authorized=false` always remain. The JSON policy is not a permission to execute a guest, nor can it authorize new extensions. Keep real plans/policies local. The separate executable adapter, research ZIP writer and host merger are described below; none is automatically applied by the planner. Signing and actual native guest compatibility remain separate gates.
 
 ## Narrow executable preparation
 
@@ -88,3 +88,17 @@ There are no default extension/material exclusions: undisposed members, outside-
 Included members are streamed in 64 KiB chunks to a new ZIP_STORED archive, capped at 2 GiB; the main is bounded at 32 MiB, the root plist at 1 MiB, and the manifest at 16 MiB. `GuestPackage.json` records each included file's pre-signing hash, omissions, adaptation evidence and unverified flags. It is explicitly **not a runtime manifest**. Every included output member is reopened and checked for inventory, size, CRC and SHA-256, then the source hash is checked again before no-replace publication. This is not a snapshot against hostile concurrent input mutation; do not modify the source during assembly.
 
 The existing trusted output parent and hard-link/no-overwrite/owned-temporary-cleanup rules from the adapter also apply. An unsupported filesystem fails; no overwrite fallback exists. A cleanup failure after publication may leave a valid output plus the owned temporary link, so inspect the reported failure before retrying. Omitted members do not receive a full CRC/content check. Output is an **unsigned guest-framework research ZIP, not a host app or IPA**; `installation_authorized=false` and `runtime_manifest=false` remain explicit. Keep all real outputs private. Following explicit owner approval of the two component exclusions, the supplied RXTikTok package has also been assembled locally into a separate ignored research ZIP and readback-verified; see `docs/NATIVE_GUEST_PACKAGING.md`. Host integration, signing and no-account launch remain outstanding. No real binary fixtures or package outputs belong in source or public CI.
+
+## Private Build 20 host merger
+
+`merge_host.py` is a separate, narrow packaging stage for the reviewed Build 20 framework host and prepared TikTok build 439042. It requires externally supplied SHA-256 values for the host IPA, prepared guest ZIP and original guest IPA. Obtain those values from independently reviewed evidence, not from an untrusted package's own claims. A caller-supplied digest is an integrity constraint, not a provenance or malware verdict.
+
+```powershell
+python experiments/native-social-package-tools/merge_host.py 'C:\private\Build20-host.ipa' 'C:\private\guest.zip' 'C:\private\CalcVault-native-TikTok-research.ipa' --host-sha256 '<reviewed host SHA-256>' --guest-sha256 '<reviewed ZIP SHA-256>' --guest-input-sha256 '<reviewed original IPA SHA-256>' --acknowledge-unverified-runtime
+```
+
+The merger checks the fixed host identity/build, single LiveProcess extension, synthetic replacement inventory, prepared guest identity/build, manifest inventory and per-file hashes. It replaces the synthetic framework and selection descriptor, omits the known obsolete synthetic payload/resource bundle and external signature metadata, and preserves other host file contents including embedded executable/entitlement bytes. It neither grants new entitlements nor adds a guest extension. The guest's prepared main and nested code/resources stay together under `Frameworks/NativeGuest.framework`.
+
+Inputs are opened read-only; ZIP member paths and types are checked before streaming into a new bounded output. The merger verifies output inventory, CRCs and hashes, rechecks inputs, and publishes without replacing existing files. The trusted-parent and cleanup-after-publication cautions above apply. Keep inputs stable during the operation. All proprietary inputs and outputs must remain private and outside tracked source/public CI.
+
+Output is an IPA-shaped **research candidate requiring fresh SideStore signing**, not a verified launchable or production build. It retains the Build 20 research host UI, not the production calculator/vault/browser interface. `installation_authorized=false`, `requires_fresh_signing=true` and `runtime_verified=false` remain explicit. This tool cannot verify the eventual SideStore signature, dependency/resource compatibility, guest behavior, login, highlights or privacy after actual guest loading. Start any separately approved device test without account sign-in or personal data. CalcVault's existing browser/downloader source is untouched.
