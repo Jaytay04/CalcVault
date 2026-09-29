@@ -45,6 +45,12 @@ def stage(host, guest, payload):
     descriptor.write_bytes(plistlib.dumps(contract))
     host_info['CFBundleVersion'] = '20'
     host_info['CVLPFrameworkGuestMode'] = 1
+    # This opt-in native guest research host is portrait-only. Production
+    # CalcVault and its browser workspace do not use this packaging route.
+    for key in ('UISupportedInterfaceOrientations',
+                'UISupportedInterfaceOrientations~iphone',
+                'UISupportedInterfaceOrientations~ipad'):
+        host_info[key] = ['UIInterfaceOrientationPortrait']
     (host / 'Info.plist').write_bytes(plistlib.dumps(host_info))
 
 

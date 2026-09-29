@@ -321,6 +321,32 @@ jobs:
           python3 experiments/native-social-liveprocess-device/verify_guest_diagnostics.py "$RUNNER_TEMP/cvlp-diagnostic-deadline.log"
           echo '- Both guest diagnostic schedulers, bounded monotonic observations, deadline terminal marker and later host lock/exit passed in the simulator.' >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Portrait-only framework host rejects landscape
+        if: ${{ inputs.framework_guest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          host="$RUNNER_TEMP/cvlp-host-iphonesimulator/Build/Products/Debug-iphonesimulator/LiveContainer.app"
+          python3 - "$host/Info.plist" <<'PY'
+          import plistlib, sys
+          with open(sys.argv[1], 'rb') as stream:
+              info = plistlib.load(stream)
+          for key in ('UISupportedInterfaceOrientations', 'UISupportedInterfaceOrientations~iphone', 'UISupportedInterfaceOrientations~ipad'):
+              assert info[key] == ['UIInterfaceOrientationPortrait'], key
+          PY
+          start="$(date '+%Y-%m-%d %H:%M:%S')"
+          SIMCTL_CHILD_CVLP_AUTORUN=1 SIMCTL_CHILD_CVLP_LIFECYCLE_AUTOTEST=portrait \
+            xcrun simctl launch --terminate-running-process "$CVLP_SIMULATOR" com.jaylintaylor.calcvault
+          sleep 25
+          xcrun simctl spawn "$CVLP_SIMULATOR" log show --start "$start" --style compact \
+            --predicate 'eventMessage CONTAINS "CVLP_"' > "$RUNNER_TEMP/cvlp-portrait.log"
+          cat "$RUNNER_TEMP/cvlp-portrait.log"
+          for marker in CVLP_GUEST_VISIBLE CVLP_PORTRAIT_LANDSCAPE_REQUEST CVLP_PORTRAIT_LANDSCAPE_REJECTED CVLP_PORTRAIT_HOST_RETAINED CVLP_LIFECYCLE_KILL_REQUESTED CVLP_PROCESS_GROUP_SHUTDOWN_OBSERVED; do
+            grep -q "$marker" "$RUNNER_TEMP/cvlp-portrait.log"
+          done
+          if grep -q CVLP_PORTRAIT_HOST_FAILED "$RUNNER_TEMP/cvlp-portrait.log"; then exit 1; fi
+          echo '- Framework host portrait-only policy rejected a landscape request, retained full-window portrait geometry and passed subsequent lock/exit checks in Simulator.' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Legacy app delegate baseline (framework simulator route only)
         if: ${{ inputs.framework_guest }}
         shell: bash
@@ -457,6 +483,7 @@ jobs:
             ${{ runner.temp }}/cvlp-lifecycle-race.png
             ${{ runner.temp }}/cvlp-diagnostic-deadline.log
             ${{ runner.temp }}/cvlp-initial-geometry-rejection.log
+            ${{ runner.temp }}/cvlp-portrait.log
             ${{ runner.temp }}/cvlp-legacy.log
             ${{ runner.temp }}/cvlp-legacy.png
             ${{ runner.temp }}/cvlp-legacy-guest.log

@@ -154,6 +154,20 @@ class FrameworkFixtureTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'already_exists'):
             self.stage()
 
+    def test_host_orientation_is_portrait_only_without_changing_guest_metadata(self):
+        keys = ('UISupportedInterfaceOrientations', 'UISupportedInterfaceOrientations~iphone',
+                'UISupportedInterfaceOrientations~ipad')
+        original = {'CFBundleIdentifier': 'com.jaylintaylor.calcvault',
+                    **{key: ['UIInterfaceOrientationPortrait', 'UIInterfaceOrientationLandscapeLeft',
+                             'UIInterfaceOrientationLandscapeRight'] for key in keys}}
+        (self.host / 'Info.plist').write_bytes(plistlib.dumps(original))
+        self.stage()
+        result = plistlib.loads((self.host / 'Info.plist').read_bytes())
+        for key in keys:
+            self.assertEqual(result[key], ['UIInterfaceOrientationPortrait'])
+        self.assertEqual(plistlib.loads((self.guest / 'Info.plist').read_bytes()), self.info)
+        self.assertEqual(result['CVLPFrameworkGuestMode'], 1)
+
     def test_refuses_real_social_guest(self):
         (self.guest / 'Info.plist').write_bytes(plistlib.dumps(dict(self.info, CFBundleIdentifier='com.zhiliaoapp.musically')))
         with self.assertRaisesRegex(ValueError, 'synthetic_guest_only'):

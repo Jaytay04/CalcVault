@@ -99,6 +99,28 @@ final class CVLPLifecycleModel: NSObject, ObservableObject {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 4) { self.lock(reason: "simulator explicit lock") }
                 } else if ProcessInfo.processInfo.environment["CVLP_LIFECYCLE_AUTOTEST"] == "diagnostic-deadline" {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 35) { self.lock(reason: "simulator diagnostic deadline test") }
+                } else if ProcessInfo.processInfo.environment["CVLP_LIFECYCLE_AUTOTEST"] == "portrait",
+                          Bundle.main.object(forInfoDictionaryKey: "CVLPFrameworkGuestMode") as? Bool == true {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+                        guard let self, self.gate.accepts(token: token), !self.inactiveTransition,
+                              UIApplication.shared.applicationState == .active,
+                              let scene = self.guest.viewController.viewIfLoaded?.window?.windowScene else { return }
+                        NSLog("CVLP_PORTRAIT_LANDSCAPE_REQUEST")
+                        scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscape)) { _ in
+                            NSLog("CVLP_PORTRAIT_LANDSCAPE_REJECTED")
+                        }
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+                        guard let self, self.gate.accepts(token: token), !self.inactiveTransition,
+                              UIApplication.shared.applicationState == .active,
+                              let view = self.guest.viewController.viewIfLoaded,
+                              let window = view.window, let scene = window.windowScene else { return }
+                        if scene.interfaceOrientation == .portrait && window.bounds.width > 0 &&
+                            window.bounds.height > window.bounds.width && view.bounds.size == window.bounds.size {
+                            NSLog("CVLP_PORTRAIT_HOST_RETAINED")
+                        } else { NSLog("CVLP_PORTRAIT_HOST_FAILED") }
+                        self.lock(reason: "simulator portrait policy test")
+                    }
                 }
 #endif
             } else { lock(reason: "guest launch failed") }

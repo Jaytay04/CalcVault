@@ -2,6 +2,14 @@
 
 ## Opt-in Build 20 framework route
 
+### Portrait-only framework host 20.6
+
+The candidate is labeled `Guest portrait test · 20.6`, marker `build20-framework-portrait1`. Owner tests of 20.5 report working portrait startup and media cessation on Lock and app-switcher return, but a landscape screenshot and report show a cropped portrait-width feed. Read-only inspection found the actual guest declares iPhone portrait support only. The owner approved keeping native TikTok in portrait.
+
+The opt-in framework packaging route sets the containing research host's generic, iPhone and iPad supported-orientation arrays to portrait before signing. This dedicated research build has no browser workspace; production CalcVault and its calculator/vault/browser orientation settings are unchanged. The unshipped rotation-synchronization candidate was removed; initial-frame preparation, runtime scene sizing, guest bytes and lifecycle handling remain at the working 20.5 baseline.
+
+A simulator-only regression requests landscape through Apple's [window-scene geometry API](https://developer.apple.com/documentation/uikit/uiwindowscene/requestgeometryupdate(_:errorhandler:)), requires rejection and retained full-window portrait geometry, then uses the existing lock/exit path. Both metadata and runtime checks must pass. Physical device rotation and playback remain separate owner tests. No real guest bytes, licensing logic, signing material or permissions are changed.
+
 ### Initial scene frame experiment 20.5
 
 The current route is labeled `Guest initial frame test · 20.5`, marker `build20-framework-initialframe1`. Three 20.4 phone reports correlate failed video startup with root loading in a zero-sized window; the successful run starts with a nonzero window before root loading. All later converge to full-screen dimensions. This is not proof of causation.
