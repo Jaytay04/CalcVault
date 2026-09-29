@@ -1,3 +1,4 @@
+import Combine
 import XCTest
 @testable import CalcVault
 
@@ -118,6 +119,34 @@ final class NativeGuestPreflightModelTests: XCTestCase {
 
     func testLateSuccessCannotChangeStatusOfFreshSessionRequest() async throws {
         try await assertLateCompletionCannotChangeFreshRequest(failOldRequest: false)
+    }
+
+    func testCancellationAllowsRescanBeforeUncooperativeBackendReturns() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedPreflightChecker()
+        let model = makeModel(lifecycle: lifecycle, checker: checker)
+        let oldTask = try XCTUnwrap(model.check())
+        await checker.waitForCall(1)
+
+        let reset = expectation(description: "Cancelled request stops displaying checking")
+        let observation = model.$state.dropFirst().sink { state in
+            if state == .notChecked { reset.fulfill() }
+        }
+        oldTask.cancel()
+        await fulfillment(of: [reset], timeout: 2)
+        observation.cancel()
+
+        let newTask = try XCTUnwrap(model.check())
+        await checker.waitForCall(2)
+        let oldResolved = await checker.succeed(1)
+        XCTAssertTrue(oldResolved)
+        await oldTask.value
+        XCTAssertEqual(model.state, .checking)
+        let newResolved = await checker.succeed(2)
+        XCTAssertTrue(newResolved)
+        await newTask.value
+        XCTAssertEqual(model.state, .noLegacyCopiesObserved)
     }
 
     func testLateFailureCannotChangeStatusOfFreshSessionRequest() async throws {

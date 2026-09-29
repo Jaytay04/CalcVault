@@ -14,12 +14,12 @@ public final class NativeGuestPreflightModel: ObservableObject {
 
     @Published public private(set) var state: State = .notChecked
 
-    private struct SessionContext: Equatable {
+    private struct SessionContext: Equatable, Sendable {
         let sessionID: UUID
         let generation: UInt64
     }
 
-    private struct CheckRequest: Equatable {
+    private struct CheckRequest: Equatable, Sendable {
         let session: SessionContext
         let requestID: UUID
     }
@@ -91,19 +91,27 @@ public final class NativeGuestPreflightModel: ObservableObject {
                 return
             }
 
-            do {
-                try await checker()
-                guard !Task.isCancelled else {
-                    self?.finishCancelled(request)
-                    return
+            await withTaskCancellationHandler {
+                do {
+                    try await checker()
+                    guard !Task.isCancelled else {
+                        self?.finishCancelled(request)
+                        return
+                    }
+                    self?.finish(request, succeeded: true)
+                } catch {
+                    guard !Task.isCancelled else {
+                        self?.finishCancelled(request)
+                        return
+                    }
+                    self?.finish(request, succeeded: false)
                 }
-                self?.finish(request, succeeded: true)
-            } catch {
-                guard !Task.isCancelled else {
+            } onCancel: { [weak self] in
+                // The backend may not cooperate with task cancellation. Clear
+                // only this request on the actor, without waiting for its reply.
+                Task { @MainActor [weak self] in
                     self?.finishCancelled(request)
-                    return
                 }
-                self?.finish(request, succeeded: false)
             }
         }
         activeTask = task
