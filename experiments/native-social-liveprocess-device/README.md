@@ -2,9 +2,17 @@
 
 ## Opt-in Build 20 framework route
 
+### Startup diagnostics 20.2
+
+The current framework route is labeled `Guest startup test · 20.2`, marker `build20-framework-diagnostics1`, with package version and identities unchanged. The owner still observed the black/clipped feed on 20.1 despite consistent attached host dimensions. This revision is a diagnostic, not a feed fix.
+
+Guest observations use public launch, scene and window notifications plus a bounded startup sampling window. They report delegate scene support, scene activation and dimensions, window association/bounds/safe area, and already-loaded root-view dimensions. They do not resize windows, load TweakLoader, inspect content/preferences, or extend bookmark/Keychain access. Host geometry additionally records the scene settings and presentation surface. Reports are observations from an untrusted guest process, not security attestations.
+
+The same synthetic guest target can be compiled as a legacy app-delegate/window fixture for a separate simulator baseline. It uses the same app identity and a copied simulator host, not another product or phone app. Lack of legacy visibility is recorded as an experiment result; standard scene-aware visibility and existing lock/revocation assertions remain mandatory. No real social binary is uploaded to CI. Native and phone results are recorded in the test report after they actually run.
+
 ### Layout candidate 20.1
 
-The framework route now includes a host-only attachment/geometry candidate, labeled `Guest layout test · 20.1` with probe marker `build20-framework-layout1`. The package version remains 20 and the existing host/extension identities are unchanged. The original Build 19 route is unaffected.
+The prior framework route included a host-only attachment/geometry candidate, labeled `Guest layout test · 20.1` with probe marker `build20-framework-layout1`. Its host corrections remain in 20.2. The package version remains 20 and the existing host/extension identities are unchanged. The original Build 19 route is unaffected.
 
 It completes the hosted scene controller's containment after adding its view, enables the upstream explicit frame-update path instead of relying only on the flexible autoresizing mask, and requests one attached, nonempty initial frame synchronization. Layout callbacks retain the revocation guard and reject missing presenter/window or empty bounds. Apple's [container-controller guidance](https://developer.apple.com/documentation/uikit/creating-a-custom-container-view-controller) requires notifying the child after attachment; this source correction does not establish the cause of TikTok's intermittent cold-start failure.
 

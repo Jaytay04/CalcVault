@@ -125,7 +125,9 @@ class FrameworkGeometryTests(unittest.TestCase):
         recorder_end = scene.index("- (NSString *)cvlpGeometrySummary", recorder_start)
         recorder = scene[recorder_start:recorder_end]
         for field in ("viewBounds", "contentBounds", "contentFrame", "windowBounds", "safeAreaInsets",
-                      "interfaceOrientation", "parentAttached", "windowAttached"):
+                      "interfaceOrientation", "parentAttached", "windowAttached", "sceneSettingsPresent",
+                      "sceneFrame", "presentationPresent", "presentationBounds", "presentationFrame",
+                      "contentWindowFrame", "contentClips"):
             self.assertIn(field, recorder)
         for forbidden in ("bundleIdentifier", "URL", "cookie", "password", "keychain", "token"):
             self.assertNotIn(forbidden.lower(), recorder.lower())

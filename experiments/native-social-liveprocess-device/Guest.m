@@ -90,11 +90,18 @@ static NSString *RunProbe(NSString *stage) {
     if (!self.checked) {
         self.checked = YES;
         self.report.text = RunProbe(@"guest-entry");
+#if defined(CVLP_LEGACY_FIXTURE) && CVLP_LEGACY_FIXTURE
+        UIWindow *window = self.view.window;
+        if (window && !window.hidden && !CGRectIsEmpty(window.bounds)) {
+            NSLog(@"CVLP_LEGACY_VISIBLE");
+        }
+#else
         if (self.view.window.windowScene != nil && !CGRectIsEmpty(self.view.window.bounds)) {
             NSLog(@"CVLP_GUEST_VISIBLE");
         } else {
             NSLog(@"CVLP_UI_VIEW_UNATTACHED");
         }
+#endif
     }
 }
 - (void)increment {
@@ -123,6 +130,7 @@ static NSString *RunProbe(NSString *stage) {
 }
 @end
 
+#if !defined(CVLP_LEGACY_FIXTURE) || !CVLP_LEGACY_FIXTURE
 @interface CVLPGuestSceneDelegate : UIResponder <UIWindowSceneDelegate>
 @property(nonatomic, strong) UIWindow *window;
 @end
@@ -142,14 +150,36 @@ static NSString *RunProbe(NSString *stage) {
     NSLog(@"CVLP_UI scene-attached");
 }
 @end
+#endif
 
 @interface CVLPGuestDelegate : UIResponder <UIApplicationDelegate>
+#if defined(CVLP_LEGACY_FIXTURE) && CVLP_LEGACY_FIXTURE
+@property(nonatomic, strong) UIWindow *window;
+#endif
 @end
 @implementation CVLPGuestDelegate
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
     NSLog(@"CVLP_UI application-launched");
+#if defined(CVLP_LEGACY_FIXTURE) && CVLP_LEGACY_FIXTURE
+    self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+    self.window.rootViewController = [CVLPGuestController new];
+    [self.window makeKeyAndVisible];
+    UIWindowScene *scene = self.window.windowScene;
+    NSString *sceneState = @"none";
+    if (scene) {
+        switch (scene.activationState) {
+            case UISceneActivationStateForegroundActive: sceneState = @"foregroundActive"; break;
+            case UISceneActivationStateForegroundInactive: sceneState = @"foregroundInactive"; break;
+            case UISceneActivationStateBackground: sceneState = @"background"; break;
+            case UISceneActivationStateUnattached: sceneState = @"unattached"; break;
+            default: sceneState = @"unknown"; break;
+        }
+    }
+    NSLog(@"CVLP_LEGACY_WINDOW_CREATED sceneState=%@", sceneState);
+#endif
     return YES;
 }
+#if !defined(CVLP_LEGACY_FIXTURE) || !CVLP_LEGACY_FIXTURE
 - (UISceneConfiguration *)application:(UIApplication *)application
     configurationForConnectingSceneSession:(UISceneSession *)connectingSceneSession
     options:(UISceneConnectionOptions *)options {
@@ -158,10 +188,14 @@ static NSString *RunProbe(NSString *stage) {
     configuration.delegateClass = CVLPGuestSceneDelegate.class;
     return configuration;
 }
+#endif
 @end
 
 int main(int argc, char *argv[]) {
     @autoreleasepool {
+#if defined(CVLP_LEGACY_FIXTURE) && CVLP_LEGACY_FIXTURE
+        NSLog(@"CVLP_LEGACY_MAIN");
+#endif
         return UIApplicationMain(argc, argv, nil, NSStringFromClass(CVLPGuestDelegate.class));
     }
 }

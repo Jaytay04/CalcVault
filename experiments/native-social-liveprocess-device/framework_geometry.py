@@ -113,13 +113,18 @@ def transform(sources):
     if (self.cvlpRevoked || !self.view.window || CGRectIsEmpty(self.view.bounds)) return;
     UIWindow *window = self.view.window;
     UIInterfaceOrientation orientation = window.windowScene.interfaceOrientation;
+    UIApplicationSceneSettings *sceneSettings = (UIApplicationSceneSettings *)self.presenter.scene.settings;
+    UIView *presentationView = self.presenter.presentationView;
+    CGRect contentWindowFrame = self.contentView ? [self.contentView convertRect:self.contentView.bounds toView:window] : CGRectZero;
     NSString *geometry = [NSString stringWithFormat:
-        @"viewBounds=%@,contentBounds=%@,contentFrame=%@,windowBounds=%@,safeAreaInsets=%@,interfaceOrientation=%ld,parentAttached=%d,windowAttached=%d,contentWindowAttached=%d",
+        @"viewBounds=%@,contentBounds=%@,contentFrame=%@,windowBounds=%@,safeAreaInsets=%@,interfaceOrientation=%ld,parentAttached=%d,windowAttached=%d,contentWindowAttached=%d,sceneSettingsPresent=%d,sceneFrame=%@,presentationPresent=%d,presentationBounds=%@,presentationFrame=%@,contentWindowFrame=%@,contentClips=%d",
         NSStringFromCGRect(self.view.bounds), NSStringFromCGRect(self.contentView.bounds),
         NSStringFromCGRect(self.contentView.frame),
         NSStringFromCGRect(window.bounds), NSStringFromUIEdgeInsets(self.view.safeAreaInsets),
         (long)orientation, self.parentViewController != nil, window != nil,
-        self.contentView.window == window];
+        self.contentView.window == window, sceneSettings != nil, NSStringFromCGRect(sceneSettings.frame),
+        presentationView != nil, NSStringFromCGRect(presentationView.bounds), NSStringFromCGRect(presentationView.frame),
+        NSStringFromCGRect(contentWindowFrame), self.contentView.clipsToBounds];
     if ([self.cvlpLastGeometrySnapshot isEqualToString:geometry]) return;
     self.cvlpLastGeometrySnapshot = geometry;
     if (!self.cvlpGeometrySamples) self.cvlpGeometrySamples = [NSMutableArray array];

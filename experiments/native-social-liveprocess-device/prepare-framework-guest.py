@@ -7,6 +7,7 @@ import argparse
 from pathlib import Path
 import subprocess
 import framework_geometry
+import guest_diagnostics
 
 PIN = 'e370a92dfc03ce109ebce00ed4a7cfc64ad1c801'
 FILES = (
@@ -106,7 +107,7 @@ def transform(sources):
 ''')
     probe = once(probe, 'Guest staging: allowlisted bundle metadata and signed payload copied to the synthetic guest folder.',
                  'Guest selection: fixed immutable framework; no guest code or resources copied into Documents.')
-    probe = probe.replace('Build marker: build19.', 'Build marker: build20-framework-layout1.')
+    probe = probe.replace('Build marker: build19.', 'Build marker: build20-framework-diagnostics1.')
     result[FILES[1]] = probe
     result[FILES[2]] = once(result[FILES[2]], '#import "CVLPProbe.h"',
                            '#import "CVLPProbe.h"\n#import "CVLPFrameworkGuest.h"')
@@ -131,7 +132,7 @@ def transform(sources):
     ];''')
     result[FILES[4]] = scene
     app = result[FILES[5]]
-    app = app.replace('Build 19', 'Build 20 framework layout 1').replace('Native lifecycle test · 19', 'Guest layout test · 20.1')
+    app = app.replace('Build 19', 'Build 20 framework startup diagnostics 1').replace('Native lifecycle test · 19', 'Guest startup test · 20.2')
     app = once(app, 'Synthetic data only. Restart the app for each new launch test. The test tone starts only when tapped inside the guest.',
                'Research only. Do not sign in or enter personal data. Restart the app for each new launch test. Boundary fixtures are synthetic; guest behavior is unverified.')
     result[FILES[5]] = app
@@ -164,14 +165,18 @@ def main():
     head = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
     if head != PIN:
         raise SystemExit('upstream_revision_mismatch')
-    sources = {name: (root / name).read_text(encoding='utf-8') for name in FILES}
-    changed = framework_geometry.transform(transform(sources))
+    sources = {name: (root / name).read_text(encoding='utf-8') for name in FILES + ('LiveContainer/CVLPProbe.h',)}
+    changed = guest_diagnostics.transform(framework_geometry.transform(transform(sources)))
     helper = Path(__file__).with_name('CVLPFrameworkGuest.h').read_text(encoding='utf-8')
     if (root / 'LiveContainer/CVLPFrameworkGuest.h').exists():
         raise SystemExit('framework_adapter_already_present')
+    diagnostics_header = Path(__file__).with_name('CVLPGuestDiagnostics.h').read_text(encoding='utf-8')
+    if (root / 'LiveContainer/CVLPGuestDiagnostics.h').exists():
+        raise SystemExit('guest_diagnostics_already_present')
     for name, text in changed.items():
         (root / name).write_text(text, encoding='utf-8')
     (root / 'LiveContainer/CVLPFrameworkGuest.h').write_text(helper, encoding='utf-8')
+    (root / 'LiveContainer/CVLPGuestDiagnostics.h').write_text(diagnostics_header, encoding='utf-8')
     print('Prepared opt-in immutable framework research loader; guest package and fresh signing still required')
 
 

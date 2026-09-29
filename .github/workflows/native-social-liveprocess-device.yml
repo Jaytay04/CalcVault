@@ -214,6 +214,9 @@ jobs:
           if test '${{ inputs.framework_guest }}' = true; then
             grep -q 'CVLP_FRAMEWORK selecting immutable bundle payload' "$RUNNER_TEMP/cvlp-probe.log"
             grep -q 'CVLP_GEOMETRY' "$RUNNER_TEMP/cvlp-probe.log"
+            grep -q 'CVLP_GUEST_GEOMETRY phase=armed' "$RUNNER_TEMP/cvlp-probe.log"
+            grep -Eq 'CVLP_GUEST_GEOMETRY .*delegatePresent=1 delegateSceneSupport=1' "$RUNNER_TEMP/cvlp-probe.log"
+            grep -Eq 'CVLP_GUEST_GEOMETRY .*rootLoaded=1' "$RUNNER_TEMP/cvlp-probe.log"
           else
             grep -q 'CVLP_LOADER selecting signed bundle payload' "$RUNNER_TEMP/cvlp-probe.log"
           fi
@@ -265,6 +268,100 @@ jobs:
           xcrun simctl io "$CVLP_SIMULATOR" screenshot "$RUNNER_TEMP/cvlp-lifecycle-race.png"
           echo '- Simulator pending-launch callback rejected without guest visibility; physical revocation and audio remain NOT RUN.' >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Legacy app delegate baseline (framework simulator route only)
+        if: ${{ inputs.framework_guest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild build \
+            -project experiments/native-social-liveprocess-device/CVLPGuest.xcodeproj \
+            -scheme CVLPGuest -configuration Release -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/cvlp-legacy-guest" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
+            GCC_PREPROCESSOR_DEFINITIONS='$(inherited) CVLP_LEGACY_FIXTURE=1' \
+            > "$RUNNER_TEMP/cvlp-legacy-guest.log" 2>&1 || { tail -n 100 "$RUNNER_TEMP/cvlp-legacy-guest.log"; exit 1; }
+          guest="$RUNNER_TEMP/cvlp-legacy-guest/Build/Products/Release-iphonesimulator/CVLPGuest.app"
+          payload="$RUNNER_TEMP/cvlp-legacy-payload.dylib"
+          cp "$guest/CVLPGuest" "$payload"
+          xcrun otool -hv "$payload" | grep -q EXECUTE
+          xcrun vtool -show-build "$payload" > "$payload.build"
+          grep -Eq 'platform IOSSIMULATOR([[:space:]]|$)' "$payload.build"
+          SIMCTL_CHILD_CVLP_PREPATCH_PATH="$payload" \
+            xcrun simctl launch --terminate-running-process "$CVLP_SIMULATOR" com.jaylintaylor.calcvault || true
+          patched=0
+          for attempt in {1..20}; do
+            if test -f "$payload.result"; then patched=1; break; fi
+            sleep 2
+          done
+          test "$patched" = 1
+          test "$(cat "$payload.result")" = PATCHED
+          xcrun otool -hv "$payload" > "$payload.header"
+          grep -q DYLIB "$payload.header"
+          xcrun vtool -show-build "$payload" > "$payload.build"
+          grep -Eq 'platform IOSSIMULATOR([[:space:]]|$)' "$payload.build"
+
+          source_host="$RUNNER_TEMP/cvlp-host-iphonesimulator/Build/Products/Debug-iphonesimulator/LiveContainer.app"
+          legacy_host="$RUNNER_TEMP/cvlp-legacy-host/Build/Products/Debug-iphonesimulator/LiveContainer.app"
+          mkdir -p "$(dirname "$legacy_host")"
+          ditto "$source_host" "$legacy_host"
+          python3 experiments/native-social-liveprocess-device/stage_legacy_simulator.py \
+            "$legacy_host" "$guest" "$payload"
+          framework="$legacy_host/Frameworks/NativeGuest.framework"
+          codesign --force --sign - "$framework"
+          codesign --verify --strict --verbose=2 "$framework"
+          codesign --force --deep --sign - "$legacy_host"
+          codesign --force --sign - \
+            --entitlements "$RUNNER_TEMP/cvlp-entitlements-iphonesimulator/extension.entitlements" \
+            "$legacy_host/PlugIns/LiveProcess.appex"
+          codesign --force --sign - \
+            --entitlements "$RUNNER_TEMP/cvlp-entitlements-iphonesimulator/host.entitlements" \
+            "$legacy_host"
+          codesign --verify --deep "$legacy_host"
+          codesign --verify --strict --verbose=2 "$framework"
+          codesign -d --entitlements - "$legacy_host/PlugIns/LiveProcess.appex" 2>/dev/null \
+            > "$RUNNER_TEMP/cvlp-legacy-extension-entitlements.plist"
+          if grep -q calcvault.hostonly "$RUNNER_TEMP/cvlp-legacy-extension-entitlements.plist"; then exit 1; fi
+          xcrun simctl install "$CVLP_SIMULATOR" "$legacy_host"
+
+          legacy_start="$(date '+%Y-%m-%d %H:%M:%S')"
+          SIMCTL_CHILD_CVLP_AUTORUN=1 SIMCTL_CHILD_CVLP_LIFECYCLE_AUTOTEST=lock \
+            xcrun simctl launch --terminate-running-process "$CVLP_SIMULATOR" com.jaylintaylor.calcvault
+          found=0
+          for attempt in {1..8}; do
+            sleep 10
+            xcrun simctl spawn "$CVLP_SIMULATOR" log show --start "$legacy_start" --style compact \
+              --predicate 'eventMessage CONTAINS "CVLP_"' > "$RUNNER_TEMP/cvlp-legacy.log"
+            if grep -q CVLP_LEGACY_MAIN "$RUNNER_TEMP/cvlp-legacy.log" && \
+               grep -q 'CVLP_GUEST_GEOMETRY phase=armed' "$RUNNER_TEMP/cvlp-legacy.log" && \
+               grep -q CVLP_LIFECYCLE_KILL_REQUESTED "$RUNNER_TEMP/cvlp-legacy.log" && \
+               grep -q 'exit observed (ESRCH); settled' "$RUNNER_TEMP/cvlp-legacy.log"; then found=1; break; fi
+          done
+          xcrun simctl io "$CVLP_SIMULATOR" screenshot "$RUNNER_TEMP/cvlp-legacy.png"
+          cat "$RUNNER_TEMP/cvlp-legacy.log"
+          test "$found" = 1
+          grep -q 'CVLP_FRAMEWORK selecting immutable bundle payload' "$RUNNER_TEMP/cvlp-legacy.log"
+          grep -q 'CVLP_LOADER dlopen returned handle=1' "$RUNNER_TEMP/cvlp-legacy.log"
+          grep -q CVLP_LEGACY_MAIN "$RUNNER_TEMP/cvlp-legacy.log"
+          grep -q 'CVLP_GUEST_GEOMETRY phase=armed' "$RUNNER_TEMP/cvlp-legacy.log"
+          grep -q CVLP_LIFECYCLE_KILL_REQUESTED "$RUNNER_TEMP/cvlp-legacy.log"
+          grep -q 'exit observed (ESRCH); settled' "$RUNNER_TEMP/cvlp-legacy.log"
+
+          window_created='not observed'
+          legacy_visible='not observed'
+          scene_support_zero='not observed'
+          if grep -q CVLP_LEGACY_WINDOW_CREATED "$RUNNER_TEMP/cvlp-legacy.log"; then window_created='observed'; fi
+          if grep -q CVLP_LEGACY_VISIBLE "$RUNNER_TEMP/cvlp-legacy.log"; then legacy_visible='observed'; fi
+          if grep -Eq 'delegateSceneSupport=0' "$RUNNER_TEMP/cvlp-legacy.log"; then scene_support_zero='observed'; fi
+          {
+            echo '### Legacy app delegate simulator baseline'
+            echo '- Synthetic framework guest was rebuilt with CVLP_LEGACY_FIXTURE=1 and staged into a dedicated simulator host clone.'
+            echo '- CVLP_LEGACY_MAIN, armed guest geometry diagnostics, and lifecycle revocation/exit were observed.'
+            echo "- CVLP_LEGACY_WINDOW_CREATED: $window_created; CVLP_LEGACY_VISIBLE: $legacy_visible; delegateSceneSupport=0: $scene_support_zero."
+            echo '- Missing window creation or visibility is recorded as the legacy startup outcome, not treated as a product-smoke failure.'
+            echo '- This experiment used one simulator app identity; device-target host and IPA were not modified by the legacy stage.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Collect synthetic simulator diagnostics on failure
         if: failure() && env.CVLP_SIMULATOR != ''
         shell: bash
@@ -305,5 +402,13 @@ jobs:
             ${{ runner.temp }}/cvlp-staged-signature.log
             ${{ runner.temp }}/cvlp-lifecycle-race.log
             ${{ runner.temp }}/cvlp-lifecycle-race.png
+            ${{ runner.temp }}/cvlp-legacy.log
+            ${{ runner.temp }}/cvlp-legacy.png
+            ${{ runner.temp }}/cvlp-legacy-guest.log
+            ${{ runner.temp }}/cvlp-legacy-payload.dylib.result
+            ${{ runner.temp }}/cvlp-legacy-payload.dylib.flags
+            ${{ runner.temp }}/cvlp-legacy-payload.dylib.header
+            ${{ runner.temp }}/cvlp-legacy-payload.dylib.build
+            ${{ runner.temp }}/cvlp-legacy-extension-entitlements.plist
           if-no-files-found: ignore
           retention-days: 7
