@@ -20,11 +20,13 @@ def verify(lines):
         raise ValueError('diagnostic_process_or_event_bound')
     phases = [record.get('phase') for record in records]
     required = {'armed', 'installed', 'snapshot-1s', 'snapshot-3s', 'snapshot-10s',
-                'runloop-2s', 'runloop-8s', 'stopped'}
+                'runloop-2s', 'runloop-8s', 'app-inactive', 'stopped'}
     if not required <= set(phases) or phases[0] != 'armed' or phases[-1] != 'stopped':
         raise ValueError('missing_scheduler_or_terminal_evidence')
     if phases.count('stopped') != 1 or phases.count('armed') != 1 or phases.count('installed') != 1:
         raise ValueError('duplicate_terminal_or_start')
+    if phases.index('app-inactive') >= phases.index('runloop-8s'):
+        raise ValueError('missing_post_inactive_sample')
     try:
         sequence = [int(record['sequence']) for record in records]
         elapsed = [int(record['elapsedMs']) for record in records]
@@ -42,7 +44,7 @@ def verify(lines):
         raise ValueError('dispatch_count_mismatch')
     if runloop_count != sum(phase.startswith('runloop-') for phase in phases):
         raise ValueError('runloop_count_mismatch')
-    notifications = {'did-finish-launching', 'scene-active', 'window-visible', 'window-key'}
+    notifications = {'did-finish-launching', 'scene-active', 'window-visible', 'window-key', 'app-inactive', 'app-active'}
     if notification_count != sum(phase in notifications for phase in phases) or notification_count > 6:
         raise ValueError('notification_count_mismatch')
     return len(records)

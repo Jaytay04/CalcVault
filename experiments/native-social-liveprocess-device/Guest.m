@@ -1,4 +1,5 @@
 #import <UIKit/UIKit.h>
+#import <TargetConditionals.h>
 #import <objc/message.h>
 #import <AVFoundation/AVFoundation.h>
 #import <math.h>
@@ -160,6 +161,15 @@ static NSString *RunProbe(NSString *stage) {
 @implementation CVLPGuestDelegate
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
     NSLog(@"CVLP_UI application-launched");
+#if TARGET_OS_SIMULATOR
+    // Guest-process notification only: reproduce the early observer stop without
+    // changing the host lifecycle or pretending the OS changed application state.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        NSLog(@"CVLP_SYNTHETIC_INACTIVE_NOTIFICATION");
+        [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationWillResignActiveNotification
+                                                        object:application];
+    });
+#endif
 #if defined(CVLP_LEGACY_FIXTURE) && CVLP_LEGACY_FIXTURE
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     self.window.rootViewController = [CVLPGuestController new];

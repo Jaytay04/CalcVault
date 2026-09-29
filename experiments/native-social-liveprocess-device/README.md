@@ -2,9 +2,17 @@
 
 ## Opt-in Build 20 framework route
 
+### Full-window viewport experiment 20.4
+
+The current route is labeled `Guest viewport test · 20.4`, marker `build20-framework-viewport1`. For the framework route only, the host gives the guest the full window with a compact, safe-area-positioned Lock overlay. It removes the earlier test header's height from the guest layout calculation; it does not scale media, change guest code, enable TweakLoader hooks or certify a cropping fix. The normal non-framework fixture layout is unchanged. A bounded host marker records when the mounted canvas and child dimensions match the full host window.
+
+Three owner-reported 20.3 launches played video/audio and stopped audio on explicit lock, but all diagnostic observers stopped on a guest app-inactive notification within 119-158 ms. Revision 20.4 records this guest-only notification as one of the six allowed notification samples instead of terminating observation. It also reports numeric application state and screen bounds alongside existing window/scene/root geometry. Background and scene-deactivation stops, the thirty-second deadline and sixteen-record cap remain. This is not a change to host inactivity handling: the host still covers, revokes and terminates the guest on its existing lock conditions. Guest observations never authorize continued execution or certify host safety.
+
+The synthetic simulator guest posts a local app-inactive notification during startup; the deadline log check requires later geometry samples and a final stop. It does not imitate an actual OS state transition, and real host inactive/background tests remain separate. The new viewport and diagnostic behavior require native CI and phone validation; do not infer that the prior intermittent black feed is repaired.
+
 ### Sampling diagnostics 20.3
 
-The current route is labeled `Guest startup test · 20.3`, marker `build20-framework-diagnostics2`. This is still a diagnostic, not a feed repair. Observations include a sequence number, elapsed monotonic time, an installation marker and one terminal stop reason. Six notification-triggered samples are allowed; scheduled samples and the terminal record share the original sixteen-event limit. All original inactive, background and scene-deactivation stops remain in place, with no restart after stopping.
+The prior route was labeled `Guest startup test · 20.3`, marker `build20-framework-diagnostics2`. It was a diagnostic, not a feed repair. Observations include a sequence number, elapsed monotonic time, an installation marker and one terminal stop reason. Six notification-triggered samples are allowed; scheduled samples and the terminal record share the original sixteen-event limit. In that revision, all original inactive, background and scene-deactivation stops remained in place, with no restart after stopping.
 
 Dispatch samples are supplemented by three one-shot [run-loop timers](https://developer.apple.com/documentation/foundation/timer) in [common modes](https://developer.apple.com/documentation/foundation/runloop/run_loop_modes), plus an independent terminal timer. Neither scheduler guarantees prompt execution if the main thread is occupied. Timers are invalidated on stop; samples beyond the bounded deadline are rejected. A killed process may not write a terminal record. A missing record alone does not prove a particular stop cause or that no guest window exists.
 

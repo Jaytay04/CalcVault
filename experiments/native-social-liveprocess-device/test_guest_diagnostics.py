@@ -166,6 +166,24 @@ class GuestDiagnosticsTests(unittest.TestCase):
         for forbidden in ("url=", "cookie=", "password=", "path=", "text=", "preferences="):
             self.assertNotIn(forbidden, emitted_fields.lower())
 
+    def test_guest_inactive_observation_does_not_remove_host_or_background_stops(self):
+        helper = Path(__file__).with_name("CVLPGuestDiagnostics.h").read_text(encoding="utf-8")
+        self.assertIn('name:UIApplicationWillResignActiveNotification phase:@"app-inactive" stops:NO', helper)
+        self.assertIn('name:UIApplicationDidBecomeActiveNotification phase:@"app-active" stops:NO', helper)
+        self.assertIn('name:UIApplicationDidEnterBackgroundNotification phase:nil stops:YES', helper)
+        self.assertIn('name:UISceneWillDeactivateNotification phase:nil stops:YES', helper)
+        self.assertIn('appState=%ld screen=%@', helper)
+        host = Path(__file__).with_name("CVLPHostView.swift").read_text(encoding="utf-8")
+        self.assertIn('if gate.phase != .preparing { lock(reason: "inactive") }', host)
+        self.assertIn('lock(reason: "background or protected-data loss")', host)
+        self.assertIn('gate.revoke()', host)
+        self.assertIn('guest.revoke()', host)
+        guest = Path(__file__).with_name("Guest.m").read_text(encoding="utf-8")
+        start = guest.index('#if TARGET_OS_SIMULATOR')
+        end = guest.index('#endif', start)
+        self.assertIn('CVLP_SYNTHETIC_INACTIVE_NOTIFICATION', guest[start:end])
+        self.assertIn('postNotificationName:UIApplicationWillResignActiveNotification', guest[start:end])
+
 
 if __name__ == "__main__":
     unittest.main()

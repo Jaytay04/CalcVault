@@ -5,7 +5,7 @@ from verify_guest_diagnostics import verify
 
 
 def fixture():
-    phases = ['armed', 'installed', 'did-finish-launching', 'snapshot-1s', 'runloop-2s',
+    phases = ['armed', 'installed', 'app-inactive', 'snapshot-1s', 'runloop-2s',
               'snapshot-3s', 'runloop-8s', 'snapshot-10s', 'runloop-30s', 'stopped']
     lines = []
     for index, phase in enumerate(phases, 1):
@@ -22,7 +22,7 @@ class DiagnosticLogTests(unittest.TestCase):
         self.assertEqual(verify(fixture()), 10)
 
     def test_missing_path_or_terminal_rejected(self):
-        for phase in ('snapshot-1s', 'runloop-2s', 'stopped'):
+        for phase in ('snapshot-1s', 'runloop-2s', 'app-inactive', 'stopped'):
             with self.subTest(phase=phase), self.assertRaises(ValueError):
                 verify([line for line in fixture() if f'phase={phase} ' not in line])
 
@@ -30,6 +30,13 @@ class DiagnosticLogTests(unittest.TestCase):
         for tail in (fixture()[3], fixture()[-1], fixture()[3].replace('[123:', '[456:')):
             with self.assertRaises(ValueError):
                 verify(fixture() + [tail])
+
+    def test_inactive_requires_subsequent_scheduled_measurement(self):
+        lines = [line.replace('phase=app-inactive ', 'phase=swap ')
+                 .replace('phase=runloop-30s ', 'phase=app-inactive ')
+                 .replace('phase=swap ', 'phase=runloop-30s ') for line in fixture()]
+        with self.assertRaisesRegex(ValueError, 'missing_post_inactive_sample'):
+            verify(lines)
 
     def test_wrong_counts_time_reason_sequence_rejected(self):
         for original, replacement in (

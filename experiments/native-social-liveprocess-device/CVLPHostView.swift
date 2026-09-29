@@ -201,6 +201,8 @@ final class CVLPMountController: UIViewController {
     let session: CVLPGuestSession
     let onReady: () -> Void
     private var started = false
+    private let frameworkGuestMode = Bundle.main.object(forInfoDictionaryKey: "CVLPFrameworkGuestMode") as? Bool == true
+    private var fullWindowFitLogged = false
     init(session: CVLPGuestSession, onReady: @escaping () -> Void) {
         self.session = session
         self.onReady = onReady
@@ -211,10 +213,29 @@ final class CVLPMountController: UIViewController {
         super.viewDidLoad()
         let child = session.viewController
         addChild(child)
+        if frameworkGuestMode { view.clipsToBounds = true }
         child.view.frame = view.bounds
         child.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         view.addSubview(child.view)
         child.didMove(toParent: self)
+    }
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        guard frameworkGuestMode,
+              let childView = session.viewController.viewIfLoaded else { return }
+        childView.frame = view.bounds
+
+        guard !fullWindowFitLogged,
+              let window = view.window, !view.bounds.isEmpty,
+              childView.bounds.size == view.bounds.size else { return }
+        let mountInWindow = view.convert(view.bounds, to: window)
+        let windowBounds = window.bounds
+        guard abs(mountInWindow.minX - windowBounds.minX) <= 1,
+              abs(mountInWindow.minY - windowBounds.minY) <= 1,
+              abs(mountInWindow.width - windowBounds.width) <= 1,
+              abs(mountInWindow.height - windowBounds.height) <= 1 else { return }
+        fullWindowFitLogged = true
+        NSLog("CVLP_FULL_WINDOW_HOST_FIT")
     }
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
@@ -228,12 +249,27 @@ struct CVLPHostView: View {
     @StateObject private var model = CVLPLifecycleModel()
     @State private var reportVisible = false
     @State private var autoStarted = false
+    private var frameworkGuestMode: Bool {
+        Bundle.main.object(forInfoDictionaryKey: "CVLPFrameworkGuestMode") as? Bool == true
+    }
     var body: some View {
         Group {
             if model.locked && !reportVisible {
                 ZStack(alignment: .topTrailing) {
                     CVLPCalculatorCover()
                     Button("Test report") { reportVisible = true; model.refresh() }.padding(.top, 50).padding(.trailing)
+                }
+            } else if model.showingGuest && frameworkGuestMode {
+                ZStack(alignment: .topLeading) {
+                    CVLPGuestSurface(session: model.guest, onReady: model.surfaceReady).ignoresSafeArea()
+                    Button("Lock") { reportVisible = false; model.lock() }
+                        .font(.system(.footnote, design: .rounded).weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 44)
+                        .background(Color.black.opacity(0.9), in: Capsule())
+                        .padding(.leading, 12)
+                        .padding(.top, 8)
                 }
             } else {
                 VStack {

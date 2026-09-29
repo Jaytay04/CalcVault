@@ -163,8 +163,13 @@ static CVLPGuestGeometryDiagnostics *CVLPGuestGeometryDiagnosticsShared;
         stopReason:CVLPGuestDiagnosticsStopReasonDeadline];
     [self observe:center name:UIWindowDidBecomeKeyNotification phase:@"window-key" stops:NO
         stopReason:CVLPGuestDiagnosticsStopReasonDeadline];
-    [self observe:center name:UIApplicationWillResignActiveNotification phase:nil stops:YES
+    // This observer runs in the guest extension, not the host. A startup
+    // app-inactive notification can occur while its hosted scene remains visible.
+    // Record bounded geometry only; host lock/revocation is a separate authority.
+    [self observe:center name:UIApplicationWillResignActiveNotification phase:@"app-inactive" stops:NO
         stopReason:CVLPGuestDiagnosticsStopReasonAppInactive];
+    [self observe:center name:UIApplicationDidBecomeActiveNotification phase:@"app-active" stops:NO
+        stopReason:CVLPGuestDiagnosticsStopReasonDeadline];
     [self observe:center name:UIApplicationDidEnterBackgroundNotification phase:nil stops:YES
         stopReason:CVLPGuestDiagnosticsStopReasonAppBackground];
     [self observe:center name:UISceneWillDeactivateNotification phase:nil stops:YES
@@ -315,7 +320,7 @@ notificationWindow:(nullable UIWindow *)notificationWindow
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         allowedPhases = [NSSet setWithArray:@[
-            @"did-finish-launching", @"scene-active", @"window-visible", @"window-key",
+            @"did-finish-launching", @"scene-active", @"window-visible", @"window-key", @"app-inactive", @"app-active",
             @"snapshot-1s", @"snapshot-3s", @"snapshot-10s", @"snapshot-30s",
             @"runloop-2s", @"runloop-8s", @"runloop-30s"
         ]];
@@ -379,10 +384,11 @@ notificationWindow:(nullable UIWindow *)notificationWindow
     }
 
     NSString *fields = [NSString stringWithFormat:
-        @"delegatePresent=%d delegateSceneSupport=%d scenes=%lu[%@] windows=%lu[%@]",
+        @"delegatePresent=%d delegateSceneSupport=%d scenes=%lu[%@] windows=%lu[%@] appState=%ld screen=%@",
         delegatePresent, delegateSceneSupport,
         (unsigned long)sceneDetails.count, [sceneDetails componentsJoinedByString:@"|"],
-        (unsigned long)windowDetails.count, [windowDetails componentsJoinedByString:@"|"]];
+        (unsigned long)windowDetails.count, [windowDetails componentsJoinedByString:@"|"],
+        (long)application.applicationState, CVLPGuestDiagnosticsRect(UIScreen.mainScreen.bounds)];
     BOOL appended = [self appendPhase:phase fields:fields];
     if (appended) {
         switch (source) {

@@ -216,6 +216,7 @@ jobs:
             grep -q 'CVLP_GEOMETRY' "$RUNNER_TEMP/cvlp-probe.log"
             grep -q 'CVLP_GUEST_GEOMETRY phase=armed' "$RUNNER_TEMP/cvlp-probe.log"
             grep -q 'CVLP_GUEST_GEOMETRY phase=installed' "$RUNNER_TEMP/cvlp-probe.log"
+            grep -q 'CVLP_FULL_WINDOW_HOST_FIT' "$RUNNER_TEMP/cvlp-probe.log"
             grep -q 'CVLP_GUEST_GEOMETRY phase=snapshot-1s' "$RUNNER_TEMP/cvlp-probe.log"
             grep -q 'CVLP_GUEST_GEOMETRY phase=runloop-2s' "$RUNNER_TEMP/cvlp-probe.log"
             grep -Eq 'CVLP_GUEST_GEOMETRY .*delegatePresent=1 delegateSceneSupport=1' "$RUNNER_TEMP/cvlp-probe.log"
@@ -290,6 +291,8 @@ jobs:
           test "$found" = 1
           grep -q CVLP_GUEST_VISIBLE "$RUNNER_TEMP/cvlp-diagnostic-deadline.log"
           grep -q CVLP_LIFECYCLE_KILL_REQUESTED "$RUNNER_TEMP/cvlp-diagnostic-deadline.log"
+          grep -q CVLP_SYNTHETIC_INACTIVE_NOTIFICATION "$RUNNER_TEMP/cvlp-diagnostic-deadline.log"
+          grep -q CVLP_FULL_WINDOW_HOST_FIT "$RUNNER_TEMP/cvlp-diagnostic-deadline.log"
           python3 experiments/native-social-liveprocess-device/verify_guest_diagnostics.py "$RUNNER_TEMP/cvlp-diagnostic-deadline.log"
           echo '- Both guest diagnostic schedulers, bounded monotonic observations, deadline terminal marker and later host lock/exit passed in the simulator.' >> "$GITHUB_STEP_SUMMARY"
 
