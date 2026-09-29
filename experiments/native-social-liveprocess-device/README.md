@@ -2,6 +2,14 @@
 
 ## Opt-in Build 20 framework route
 
+### Initial scene frame experiment 20.5
+
+The current route is labeled `Guest initial frame test · 20.5`, marker `build20-framework-initialframe1`. Three 20.4 phone reports correlate failed video startup with root loading in a zero-sized window; the successful run starts with a nonzero window before root loading. All later converge to full-screen dimensions. This is not proof of causation.
+
+The framework-only adapter seeds validated, attached host dimensions into the initial scene settings and sizes the hosting surface before scene parameter configuration. Invalid geometry fails visibly; there is no screen-size fallback, delayed retry, guest root inspection or post-startup content repair. The synthetic scene delegate logs its initial scene/window dimensions before assigning the root controller, and CI rejects invalid measurements. The [UIKit window/scene association](https://developer.apple.com/documentation/uikit/uiwindow/init(windowscene:)) remains standard in the synthetic guest; this container experiment uses the already-reviewed upstream private hosting route and is not an Apple-supported embedding API.
+
+The full-window canvas and Lock overlay remain. Authorization, privacy cover, revocation, termination, guest diagnostics bounds and guest capabilities are unchanged. No private guest bytes, licensing code, credentials, permissions or TweakLoader policy are modified. Native and physical results must be recorded separately; passing a scene-aware fixture does not prove that a legacy third-party guest initializes correctly.
+
 ### Full-window viewport experiment 20.4
 
 The current route is labeled `Guest viewport test · 20.4`, marker `build20-framework-viewport1`. For the framework route only, the host gives the guest the full window with a compact, safe-area-positioned Lock overlay. It removes the earlier test header's height from the guest layout calculation; it does not scale media, change guest code, enable TweakLoader hooks or certify a cropping fix. The normal non-framework fixture layout is unchanged. A bounded host marker records when the mounted canvas and child dimensions match the full host window.

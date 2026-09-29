@@ -217,6 +217,8 @@ jobs:
             grep -q 'CVLP_GUEST_GEOMETRY phase=armed' "$RUNNER_TEMP/cvlp-probe.log"
             grep -q 'CVLP_GUEST_GEOMETRY phase=installed' "$RUNNER_TEMP/cvlp-probe.log"
             grep -q 'CVLP_FULL_WINDOW_HOST_FIT' "$RUNNER_TEMP/cvlp-probe.log"
+            grep -q 'CVLP_INITIAL_SCENE_GEOMETRY' "$RUNNER_TEMP/cvlp-probe.log"
+            python3 experiments/native-social-liveprocess-device/verify_initial_geometry.py "$RUNNER_TEMP/cvlp-probe.log"
             grep -q 'CVLP_GUEST_GEOMETRY phase=snapshot-1s' "$RUNNER_TEMP/cvlp-probe.log"
             grep -q 'CVLP_GUEST_GEOMETRY phase=runloop-2s' "$RUNNER_TEMP/cvlp-probe.log"
             grep -Eq 'CVLP_GUEST_GEOMETRY .*delegatePresent=1 delegateSceneSupport=1' "$RUNNER_TEMP/cvlp-probe.log"
@@ -272,6 +274,27 @@ jobs:
           xcrun simctl io "$CVLP_SIMULATOR" screenshot "$RUNNER_TEMP/cvlp-lifecycle-race.png"
           echo '- Simulator pending-launch callback rejected without guest visibility; physical revocation and audio remain NOT RUN.' >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Invalid initial geometry revokes before launch acceptance
+        if: ${{ inputs.framework_guest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date '+%Y-%m-%d %H:%M:%S')"
+          SIMCTL_CHILD_CVLP_AUTORUN=1 SIMCTL_CHILD_CVLP_TEST_INVALID_INITIAL_GEOMETRY=1 \
+            xcrun simctl launch --terminate-running-process "$CVLP_SIMULATOR" com.jaylintaylor.calcvault
+          sleep 20
+          xcrun simctl spawn "$CVLP_SIMULATOR" log show --start "$start" --style compact \
+            --predicate 'eventMessage CONTAINS "CVLP_"' > "$RUNNER_TEMP/cvlp-initial-geometry-rejection.log"
+          cat "$RUNNER_TEMP/cvlp-initial-geometry-rejection.log"
+          grep -q CVLP_INITIAL_GEOMETRY_REJECTED "$RUNNER_TEMP/cvlp-initial-geometry-rejection.log"
+          grep -q CVLP_LIFECYCLE_COVER_INSTALLED "$RUNNER_TEMP/cvlp-initial-geometry-rejection.log"
+          grep -q CVLP_LIFECYCLE_KILL_REQUESTED "$RUNNER_TEMP/cvlp-initial-geometry-rejection.log"
+          grep -q CVLP_PROCESS_GROUP_SHUTDOWN_OBSERVED "$RUNNER_TEMP/cvlp-initial-geometry-rejection.log"
+          if grep -Eq 'CVLP_HOST_LAUNCHED|CVLP_GUEST_VISIBLE|CVLP_INITIAL_SCENE_GEOMETRY' "$RUNNER_TEMP/cvlp-initial-geometry-rejection.log"; then
+            echo 'Invalid initial geometry incorrectly accepted or displayed a guest'; exit 1
+          fi
+          echo '- Simulator invalid-initial-geometry rejection covered and revoked before host launch acceptance.' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Guest diagnostic deadline and scheduler checks
         if: ${{ inputs.framework_guest }}
         shell: bash
@@ -293,6 +316,8 @@ jobs:
           grep -q CVLP_LIFECYCLE_KILL_REQUESTED "$RUNNER_TEMP/cvlp-diagnostic-deadline.log"
           grep -q CVLP_SYNTHETIC_INACTIVE_NOTIFICATION "$RUNNER_TEMP/cvlp-diagnostic-deadline.log"
           grep -q CVLP_FULL_WINDOW_HOST_FIT "$RUNNER_TEMP/cvlp-diagnostic-deadline.log"
+          grep -q CVLP_INITIAL_SCENE_GEOMETRY "$RUNNER_TEMP/cvlp-diagnostic-deadline.log"
+          python3 experiments/native-social-liveprocess-device/verify_initial_geometry.py "$RUNNER_TEMP/cvlp-diagnostic-deadline.log"
           python3 experiments/native-social-liveprocess-device/verify_guest_diagnostics.py "$RUNNER_TEMP/cvlp-diagnostic-deadline.log"
           echo '- Both guest diagnostic schedulers, bounded monotonic observations, deadline terminal marker and later host lock/exit passed in the simulator.' >> "$GITHUB_STEP_SUMMARY"
 
@@ -431,6 +456,7 @@ jobs:
             ${{ runner.temp }}/cvlp-lifecycle-race.log
             ${{ runner.temp }}/cvlp-lifecycle-race.png
             ${{ runner.temp }}/cvlp-diagnostic-deadline.log
+            ${{ runner.temp }}/cvlp-initial-geometry-rejection.log
             ${{ runner.temp }}/cvlp-legacy.log
             ${{ runner.temp }}/cvlp-legacy.png
             ${{ runner.temp }}/cvlp-legacy-guest.log

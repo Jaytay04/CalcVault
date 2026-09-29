@@ -7,6 +7,7 @@ import argparse
 from pathlib import Path
 import subprocess
 import framework_geometry
+import framework_initial_geometry
 import guest_diagnostics
 
 PIN = 'e370a92dfc03ce109ebce00ed4a7cfc64ad1c801'
@@ -107,7 +108,7 @@ def transform(sources):
 ''')
     probe = once(probe, 'Guest staging: allowlisted bundle metadata and signed payload copied to the synthetic guest folder.',
                  'Guest selection: fixed immutable framework; no guest code or resources copied into Documents.')
-    probe = probe.replace('Build marker: build19.', 'Build marker: build20-framework-viewport1.')
+    probe = probe.replace('Build marker: build19.', 'Build marker: build20-framework-initialframe1.')
     result[FILES[1]] = probe
     result[FILES[2]] = once(result[FILES[2]], '#import "CVLPProbe.h"',
                            '#import "CVLPProbe.h"\n#import "CVLPFrameworkGuest.h"')
@@ -132,7 +133,7 @@ def transform(sources):
     ];''')
     result[FILES[4]] = scene
     app = result[FILES[5]]
-    app = app.replace('Build 19', 'Build 20 framework viewport test 1').replace('Native lifecycle test · 19', 'Guest viewport test · 20.4')
+    app = app.replace('Build 19', 'Build 20 framework initial frame test 1').replace('Native lifecycle test · 19', 'Guest initial frame test · 20.5')
     app = once(app, 'Synthetic data only. Restart the app for each new launch test. The test tone starts only when tapped inside the guest.',
                'Research only. Do not sign in or enter personal data. Restart the app for each new launch test. Boundary fixtures are synthetic; guest behavior is unverified.')
     result[FILES[5]] = app
@@ -166,7 +167,8 @@ def main():
     if head != PIN:
         raise SystemExit('upstream_revision_mismatch')
     sources = {name: (root / name).read_text(encoding='utf-8') for name in FILES + ('LiveContainer/CVLPProbe.h',)}
-    changed = guest_diagnostics.transform(framework_geometry.transform(transform(sources)))
+    changed = guest_diagnostics.transform(
+        framework_initial_geometry.transform(framework_geometry.transform(transform(sources))))
     helper = Path(__file__).with_name('CVLPFrameworkGuest.h').read_text(encoding='utf-8')
     if (root / 'LiveContainer/CVLPFrameworkGuest.h').exists():
         raise SystemExit('framework_adapter_already_present')

@@ -146,6 +146,12 @@ static NSString *RunProbe(NSString *stage) {
     UIWindowScene *windowScene = (UIWindowScene *)scene;
     self.window = [[UIWindow alloc] initWithWindowScene:windowScene];
     self.window.frame = windowScene.coordinateSpace.bounds;
+    // Observe before root assignment; do not repair a zero-sized fixture window.
+    NSLog(@"CVLP_INITIAL_GUEST_GEOMETRY sceneW=%.3f sceneH=%.3f windowW=%.3f windowH=%.3f rootAssigned=%d",
+        (double)windowScene.coordinateSpace.bounds.size.width,
+        (double)windowScene.coordinateSpace.bounds.size.height,
+        (double)self.window.bounds.size.width, (double)self.window.bounds.size.height,
+        self.window.rootViewController != nil);
     self.window.rootViewController = [CVLPGuestController new];
     [self.window makeKeyAndVisible];
     NSLog(@"CVLP_UI scene-attached");
