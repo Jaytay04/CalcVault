@@ -272,6 +272,10 @@ private struct PrivateAreaView: View {
                     if Bundle.main.object(forInfoDictionaryKey: "CVNativeIntegrationStage") as? String == "credential-preflight-21" {
                         NativeGuestPreflightSection(model: coordinator.nativeGuestPreflight)
                     }
+                    if coordinator.nativeGuestAvailable {
+                        NativeGuestIntegrationSection(model: coordinator.nativeGuest,
+                                                      start: coordinator.startNativeGuest)
+                    }
                 }
                 .navigationTitle("Security")
                 .navigationBarTitleDisplayMode(.inline)

@@ -95,6 +95,22 @@ public struct VaultExportPayload: Identifiable, Sendable {
 public final class AppCoordinator: ObservableObject {
     public let lifecycle: SessionLifecycleCoordinator
     public let calculator: CalculatorViewModel
+    private let nativeRuntimeFactory: (@MainActor () throws -> any NativeGuestRuntime)?
+    public var nativeGuestAvailable: Bool { nativeRuntimeFactory != nil }
+    public lazy var nativeGuest = NativeGuestCoordinator(
+        lifecycle: lifecycle,
+        check: { biometricEnabled in
+            try await Task.detached(priority: .userInitiated) {
+                try NativeGuestCredentialInventory.checkForLaunch(biometricEnabled: biometricEnabled)
+            }.value
+        },
+        runtimeFactory: nativeRuntimeFactory
+    )
+
+    public func startNativeGuest() {
+        guard case .ready(let biometricEnabled) = setupState else { return }
+        nativeGuest.start(biometricEnabled: biometricEnabled)
+    }
 
     /// Diagnostic only. No guest launch capability is granted by this model.
     public lazy var nativeGuestPreflight = NativeGuestPreflightModel(lifecycle: lifecycle) {
@@ -138,12 +154,14 @@ public final class AppCoordinator: ObservableObject {
         lifecycle: SessionLifecycleCoordinator = SessionLifecycleCoordinator(),
         calculator: CalculatorViewModel = CalculatorViewModel(),
         credentials: Phase2CredentialManager = Phase2CredentialManager(),
-        rateLimiter: AuthenticationRateLimiter = AuthenticationRateLimiter()
+        rateLimiter: AuthenticationRateLimiter = AuthenticationRateLimiter(),
+        nativeRuntimeFactory: (@MainActor () throws -> any NativeGuestRuntime)? = nil
     ) {
         self.lifecycle = lifecycle
         self.calculator = calculator
         self.credentials = credentials
         self.rateLimiter = rateLimiter
+        self.nativeRuntimeFactory = nativeRuntimeFactory
         let vaultSessionAuthority = VaultSessionAuthority()
         self.vaultSessionAuthority = vaultSessionAuthority
         do {

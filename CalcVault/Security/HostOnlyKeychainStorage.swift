@@ -55,12 +55,13 @@ private struct KeychainCredentialIdentity: Hashable {
 
 public protocol HostOnlyKeychainBackend: KeychainMigrationStore {
     func contains(_ item: KeychainMigrationItem, accessGroup: String) throws -> Bool
+    func validateProtection(_ item: KeychainMigrationItem, accessGroup: String) throws -> Bool
     func replace(_ data: Data, item: KeychainMigrationItem, accessGroup: String) throws
 }
 
 /// Serializes scoped credential operations. Native guests are not enabled by
-/// this type: future integration must separately gate legacy-key absence and
-/// enforce guest lifecycle revocation.
+/// this type: integrations must explicitly apply the credential boundary check
+/// and enforce guest lifecycle revocation.
 public final class HostOnlyKeychainStorage: @unchecked Sendable {
     private static let operationLock = NSRecursiveLock()
     private let groups: () throws -> KeychainAccessGroups
@@ -131,6 +132,60 @@ public final class HostOnlyKeychainStorage: @unchecked Sendable {
             guard !foundLegacyCopy else {
                 throw HostOnlyKeychainStorageError.legacyCredentialPresent
             }
+        }
+    }
+
+    /// Verifies that supported legacy groups contain none of the supplied
+    /// credentials and that required and present optional credentials in the
+    /// host-only group meet their declared protection policy. This is a
+    /// point-in-time storage boundary check, not guest authorization or proof
+    /// that public Keychain attributes expose exact biometric ACL flags.
+    public func assertGuestCredentialBoundary(
+        required: [KeychainMigrationItem],
+        optional: [KeychainMigrationItem]
+    ) throws {
+        try locked {
+            guard !required.isEmpty else { throw HostOnlyKeychainStorageError.invalidInventory }
+            let items = required + optional
+            guard !items.isEmpty else { throw HostOnlyKeychainStorageError.invalidInventory }
+
+            var identities = Set<KeychainCredentialIdentity>()
+            for item in items {
+                guard !item.service.isEmpty, !item.account.isEmpty else {
+                    throw HostOnlyKeychainStorageError.invalidInventory
+                }
+                let identity = KeychainCredentialIdentity(service: item.service, account: item.account)
+                guard identities.insert(identity).inserted else {
+                    throw HostOnlyKeychainStorageError.invalidInventory
+                }
+            }
+
+            let scope = try groups()
+            let store = backend(nil)
+            var foundLegacyCopy = false
+            for item in items {
+                for group in scope.legacyGroups {
+                    if try store.contains(item, accessGroup: group) {
+                        foundLegacyCopy = true
+                    }
+                }
+            }
+            guard !foundLegacyCopy else {
+                throw HostOnlyKeychainStorageError.legacyCredentialPresent
+            }
+
+            var missingRequiredCredential = false
+            for item in required {
+                let isPresent = try store.validateProtection(item, accessGroup: scope.hostOnly)
+                if !isPresent {
+                    missingRequiredCredential = true
+                }
+            }
+            for item in optional {
+                // A false result means only that this optional identity is absent.
+                _ = try store.validateProtection(item, accessGroup: scope.hostOnly)
+            }
+            guard !missingRequiredCredential else { throw HostOnlyKeychainStorageError.invalidItem }
         }
     }
 
@@ -210,6 +265,12 @@ public final class ScopedSecurityKeychainBackend: HostOnlyKeychainBackend {
         try attributes(item, accessGroup: accessGroup) != nil
     }
 
+    public func validateProtection(_ item: KeychainMigrationItem, accessGroup: String) throws -> Bool {
+        guard let values = try attributes(item, accessGroup: accessGroup) else { return false }
+        try verifyProtection(item, accessGroup: accessGroup, attributes: values)
+        return true
+    }
+
     public func replace(_ data: Data, item: KeychainMigrationItem, accessGroup: String) throws {
         try verifyProtection(item, accessGroup: accessGroup)
         let status = SecItemUpdate(try query(item, accessGroup: accessGroup) as CFDictionary,
@@ -221,6 +282,14 @@ public final class ScopedSecurityKeychainBackend: HostOnlyKeychainBackend {
         guard let values = try attributes(item, accessGroup: accessGroup) else {
             throw HostOnlyKeychainStorageError.invalidItem
         }
+        try verifyProtection(item, accessGroup: accessGroup, attributes: values)
+    }
+
+    private func verifyProtection(
+        _ item: KeychainMigrationItem,
+        accessGroup: String,
+        attributes values: [String: Any]
+    ) throws {
         let accessibility = values[kSecAttrAccessible as String] as? String
         let expected = item.protection == .biometryCurrentSet
             ? kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly : kSecAttrAccessibleWhenUnlockedThisDeviceOnly
@@ -234,9 +303,9 @@ public final class ScopedSecurityKeychainBackend: HostOnlyKeychainBackend {
                 throw HostOnlyKeychainStorageError.protectionMismatch
             }
         }
-        // Public attributes do not expose the enrolled biometric set. New items
-        // are always created by the adapter with .biometryCurrentSet; enrollment
-        // invalidation still requires its own device test.
+        // Public attributes reveal an access-control object but not its exact
+        // biometric flags or the enrolled biometric set. Enrollment invalidation
+        // still requires its own device test.
     }
 
     private func attributes(_ item: KeychainMigrationItem, accessGroup: String) throws -> [String: Any]? {

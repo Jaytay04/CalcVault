@@ -193,6 +193,141 @@ final class HostOnlyKeychainStorageTests: XCTestCase {
         XCTAssertEqual(backend.operations.map(\.group), groups.legacyGroups)
     }
 
+    func testGuestBoundaryRejectsMissingRequiredCredential() throws {
+        let groups = try makeSideStoreGroups()
+        let backend = MemoryHostOnlyKeychainBackend()
+        let required = makeItem(account: "required")
+        let storage = makeStorage(groups: groups, backend: backend)
+
+        XCTAssertThrowsError(try storage.assertGuestCredentialBoundary(required: [required], optional: [])) { error in
+            XCTAssertEqual(error as? HostOnlyKeychainStorageError, .invalidItem)
+        }
+
+        XCTAssertEqual(backend.operations.filter { $0.kind == .validateProtection }.map(\.item), [required])
+        XCTAssertTrue(backend.operations.allSatisfy { $0.kind == .contains || $0.kind == .validateProtection })
+    }
+
+    func testGuestBoundaryRejectsPresentOptionalCredentialWithInvalidProtection() throws {
+        let groups = try makeSideStoreGroups()
+        let backend = MemoryHostOnlyKeychainBackend()
+        let required = makeItem(account: "required")
+        let optional = makeItem(account: "optional")
+        backend.seed(Data("required fixture".utf8), item: required, group: groups.hostOnly)
+        backend.seed(Data("optional fixture".utf8), item: optional, group: groups.hostOnly)
+        backend.invalidProtectionFor.insert(ScopedCredential(item: optional, group: groups.hostOnly))
+        let storage = makeStorage(groups: groups, backend: backend)
+
+        XCTAssertThrowsError(try storage.assertGuestCredentialBoundary(required: [required], optional: [optional])) { error in
+            XCTAssertEqual(error as? HostOnlyKeychainStorageError, .protectionMismatch)
+        }
+
+        XCTAssertEqual(backend.operations.filter { $0.kind == .validateProtection }.map(\.item), [required, optional])
+        XCTAssertTrue(backend.operations.allSatisfy { $0.kind == .contains || $0.kind == .validateProtection })
+    }
+
+    func testGuestBoundaryRejectsLegacyCopyEvenWhenHostDestinationIsValid() throws {
+        let groups = try makeSideStoreGroups()
+        let backend = MemoryHostOnlyKeychainBackend()
+        let item = makeItem(account: "required")
+        let data = Data("fixture".utf8)
+        backend.seed(data, item: item, group: groups.legacyGroups[0])
+        backend.seed(data, item: item, group: groups.hostOnly)
+        let storage = makeStorage(groups: groups, backend: backend)
+
+        XCTAssertThrowsError(try storage.assertGuestCredentialBoundary(required: [item], optional: [])) { error in
+            XCTAssertEqual(error as? HostOnlyKeychainStorageError, .legacyCredentialPresent)
+        }
+
+        XCTAssertEqual(backend.operations.filter { $0.kind == .contains }.map(\.group), groups.legacyGroups)
+        XCTAssertFalse(backend.operations.contains { $0.kind == .validateProtection })
+        XCTAssertEqual(backend.values[ScopedCredential(item: item, group: groups.legacyGroups[0])], data)
+        XCTAssertEqual(backend.values[ScopedCredential(item: item, group: groups.hostOnly)], data)
+    }
+
+    func testGuestBoundaryPropagatesProtectionQueryStatusFailure() throws {
+        let groups = try makeSideStoreGroups()
+        let backend = MemoryHostOnlyKeychainBackend()
+        let required = makeItem(account: "required")
+        backend.seed(Data("required fixture".utf8), item: required, group: groups.hostOnly)
+        backend.failValidationFor = ScopedCredential(item: required, group: groups.hostOnly)
+        let storage = makeStorage(groups: groups, backend: backend)
+
+        XCTAssertThrowsError(try storage.assertGuestCredentialBoundary(required: [required], optional: [])) { error in
+            XCTAssertEqual(error as? HostOnlyKeychainStorageError, .unexpectedStatus(-51))
+        }
+
+        XCTAssertTrue(backend.operations.allSatisfy { $0.kind == .contains || $0.kind == .validateProtection })
+        XCTAssertEqual(backend.operations.filter { $0.kind == .validateProtection }.count, 1)
+    }
+
+    func testGuestBoundaryRejectsInvalidInventoryBeforeGroupResolutionOrBackendConstruction() throws {
+        let groups = try makeSideStoreGroups()
+        let invalidInventories: [([KeychainMigrationItem], [KeychainMigrationItem])] = [
+            ([], [makeItem(account: "optional")]),
+            ([makeItem(service: "", account: "required")], []),
+            ([makeItem(account: "same")], [makeItem(account: "same", protection: .biometryCurrentSet)])
+        ]
+
+        for (required, optional) in invalidInventories {
+            let backend = MemoryHostOnlyKeychainBackend()
+            var groupResolutionCalls = 0
+            var backendFactoryCalls = 0
+            let storage = HostOnlyKeychainStorage(
+                groups: {
+                    groupResolutionCalls += 1
+                    return groups
+                },
+                backend: { _ in
+                    backendFactoryCalls += 1
+                    return backend
+                }
+            )
+
+            XCTAssertThrowsError(try storage.assertGuestCredentialBoundary(required: required, optional: optional)) { error in
+                XCTAssertEqual(error as? HostOnlyKeychainStorageError, .invalidInventory)
+            }
+            XCTAssertEqual(groupResolutionCalls, 0)
+            XCTAssertEqual(backendFactoryCalls, 0)
+            XCTAssertTrue(backend.operations.isEmpty)
+        }
+    }
+
+    func testGuestBoundaryAllowsAbsentOptionalAndUsesMetadataOnlyRescans() throws {
+        let groups = try makeSideStoreGroups()
+        let backend = MemoryHostOnlyKeychainBackend()
+        let required = makeItem(account: "required")
+        let optional = makeItem(account: "optional")
+        let requiredData = Data("required fixture".utf8)
+        backend.seed(requiredData, item: required, group: groups.hostOnly)
+        var groupResolutionCalls = 0
+        var backendContexts: [LAContext?] = []
+        let storage = HostOnlyKeychainStorage(
+            groups: {
+                groupResolutionCalls += 1
+                return groups
+            },
+            backend: { context in
+                backendContexts.append(context)
+                return backend
+            }
+        )
+
+        XCTAssertNoThrow(try storage.assertGuestCredentialBoundary(required: [required], optional: [optional]))
+        backend.seed(Data("legacy appeared".utf8), item: optional, group: groups.legacyGroups[1])
+        XCTAssertThrowsError(try storage.assertGuestCredentialBoundary(required: [required], optional: [optional])) { error in
+            XCTAssertEqual(error as? HostOnlyKeychainStorageError, .legacyCredentialPresent)
+        }
+
+        XCTAssertEqual(groupResolutionCalls, 2)
+        XCTAssertEqual(backendContexts.count, 2)
+        for context in backendContexts { XCTAssertNil(context) }
+        XCTAssertEqual(backend.operations.filter { $0.kind == .contains }.count, 8)
+        XCTAssertEqual(backend.operations.filter { $0.kind == .validateProtection }.map(\.item), [required, optional])
+        XCTAssertTrue(backend.operations.allSatisfy { $0.kind == .contains || $0.kind == .validateProtection })
+        XCTAssertEqual(backend.values[ScopedCredential(item: required, group: groups.hostOnly)], requiredData)
+        XCTAssertEqual(backend.values[ScopedCredential(item: optional, group: groups.legacyGroups[1])], Data("legacy appeared".utf8))
+    }
+
     func testNewWriteUsesOnlyHostOnlyGroupAndPreservesProtection() throws {
         let groups = try makeSingleLegacyGroups()
         let backend = MemoryHostOnlyKeychainBackend()
@@ -666,6 +801,7 @@ private enum BackendOperationKind: Equatable {
     case insert
     case remove
     case contains
+    case validateProtection
     case replace
 }
 
@@ -681,9 +817,17 @@ private final class MemoryHostOnlyKeychainBackend: HostOnlyKeychainBackend {
     var failNextInsert = false
     var failNextRemovalForGroups: Set<String> = []
     var failContainsFor: ScopedCredential?
+    var failValidationFor: ScopedCredential?
+    var invalidProtectionFor: Set<ScopedCredential> = []
 
     func seed(_ data: Data, item: KeychainMigrationItem, group: String) {
         values[ScopedCredential(item: item, group: group)] = data
+    }
+
+    private func matchingCredential(_ item: KeychainMigrationItem, group: String) -> ScopedCredential? {
+        values.keys.first {
+            $0.group == group && $0.item.service == item.service && $0.item.account == item.account
+        }
     }
 
     func read(_ item: KeychainMigrationItem, accessGroup: String) throws -> Data? {
@@ -715,7 +859,21 @@ private final class MemoryHostOnlyKeychainBackend: HostOnlyKeychainBackend {
         if failContainsFor == ScopedCredential(item: item, group: accessGroup) {
             throw HostOnlyKeychainStorageError.unexpectedStatus(-50)
         }
-        return values[ScopedCredential(item: item, group: accessGroup)] != nil
+        return matchingCredential(item, group: accessGroup) != nil
+    }
+
+    func validateProtection(_ item: KeychainMigrationItem, accessGroup: String) throws -> Bool {
+        operations.append(BackendOperation(kind: .validateProtection, item: item, group: accessGroup))
+        let expectedCredential = ScopedCredential(item: item, group: accessGroup)
+        if failValidationFor == expectedCredential {
+            throw HostOnlyKeychainStorageError.unexpectedStatus(-51)
+        }
+        guard let credential = matchingCredential(item, group: accessGroup) else { return false }
+        guard credential.item.protection == item.protection,
+              !invalidProtectionFor.contains(expectedCredential) else {
+            throw HostOnlyKeychainStorageError.protectionMismatch
+        }
+        return true
     }
 
     func replace(_ data: Data, item: KeychainMigrationItem, accessGroup: String) throws {

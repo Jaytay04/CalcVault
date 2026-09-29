@@ -2,6 +2,16 @@
 
 Status: separate integration candidate authorized after owner acceptance of portrait research 20.6. This is not production/security acceptance.
 
+## Integration candidate 22: combined host, synthetic guest first
+
+The approved integration continues in a separate opt-in build. Compile existing CalcVault sources as CalcVaultKit, linked only by the containing host UI framework; keep the single reviewed LiveProcess extension and immutable synthetic guest. Framework separation is a build boundary, not an OS security boundary. Physical, SideStore-signed guest denial of host files and host-only Keychain still must be measured in the combined app before adding the private TikTok payload.
+
+CalcVault's authenticated session and generation are the sole authority. Each launch performs a fresh exact-inventory legacy scan plus required host-only destination metadata validation under the existing credential-operation lock. Required navigation/envelope items and an enabled biometric root must exist; optional existing items must satisfy their declared metadata policy. Queries request no credential values and prohibit implicit authentication UI. Public attributes validate accessibility, access-group identity and biometric ACL presence, not exact ACL flags or enrollment behavior. No credentials are passed to the runtime.
+
+The runtime factory runs only after the current-session check. One runtime attempt is consumed per app launch; lock/inactivity synchronously hides and revokes the surface, invalidates pending work and prevents reuse or stale callback reattachment. A fresh authenticated session may inspect bounded synthetic shutdown diagnostics but cannot reuse the revoked guest. Existing browser/downloaders remain available; the initial launcher is in Security so browser media is already inactive before presentation.
+
+The opt-in upstream adapter removes host cookie/preference restoration, arbitrary selected-guest host dispatch, self-tweak loading and embedded SideStore launch from the main entry path. It requires the fixed immutable guest selection in LiveProcess. It does not rerun or report success for the old biometric migration experiment. Independent synthetic host file/Keychain positive controls remain, and an absent containing-app P12 export is a launch prerequisite. No broader bookmarks, vault command bridge, authentication bypass, new Home Screen app or extra extension is introduced. Keep the known-good private 20.6 IPA unchanged while this combined synthetic build is verified.
+
 ## Integration candidate 21: credential preflight first
 
 The owner explicitly approved a separate full-CalcVault integration candidate, retaining the known-good 20.6 fallback, isolated native TikTok and the existing X/Instagram browser/downloaders. This extends the original research-only authorization for that reviewed integration effort; it does not permit additional guest products, broad bookmarks, credential transfer or same-process guest execution.
