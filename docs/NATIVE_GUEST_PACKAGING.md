@@ -1,10 +1,18 @@
 # Native guest packaging research
 
+## Host layout 20.1 candidate ready for physical testing (2026-09-28)
+
+Source `a213532` passed Actions run `36499814804`, including native build, synthetic attached geometry/visibility, lock/exit and pending-launch revocation checks. This does not prove TikTok compatibility or physical isolation. The visible research title is `Guest layout test · 20.1`; package version remains 20 and existing app/extension identities are retained.
+
+Separate ignored local candidate: `build/private-native-guest-rx166/CalcVault-native-TikTok-research-layout1.ipa`, 696,268,593 bytes, SHA-256 `a4c8d9b9d94a1f6ec5b3f74ecf1b769236d6300f7cfe6159b5172549cedda705`. New synthetic host SHA-256 is `c342ff89862106772e18b9b6820b610d2380dbdcccdcef543bd507e22f384111`; the prepared guest remains the same recorded input. Writer and independent ZIP readback confirm all 2,424 guest files exactly match local-init-r1. The 104 retained host files match the new CI artifact and the replacement descriptor matches guest metadata. Original source and previous candidates are preserved; no private package was uploaded or signed.
+
+Next: fresh SideStore .cv1 signing over the disposable research app, retaining its existing LiveProcess extension. Batch-test five full force-close/cold launches without Search as a workaround, portrait/landscape/portrait layout, and explicit Lock/background audio cessation and calculator cover. If blank, capture the guest screen before locking, then collect the test report's geometry section. No new account login is needed. Phone results remain pending; production vault, Instagram/X browser and downloader code remain unchanged.
+
 ## Current checkpoint: prompt absent, guest UI incomplete (2026-09-28)
 
 The owner clarified that each retry fully terminated the app by swiping it away in the app switcher. Treat these as intermittent cold-launch failures, not simple foreground-return failures. A host-only attachment/geometry candidate is being prepared without further changes to the private RXTikTok library; device success remains unverified.
 
-Latest owner batch confirms public-profile/video playback and Explore work. For You loaded on two reopenings but failed on subsequent ones, sometimes with bottom navigation present; the horizontal feed-tab strip remains intermittently constrained. Usability is partial/intermittent, not accepted. The exact reopen sequence (process restart versus foreground return) remains to be clarified; IMG_6698 shows loaded content inside Photos rather than the final failing guest state.
+Latest owner batch confirms public-profile/video playback and Explore work. For You loaded on two reopenings but failed on subsequent ones, sometimes with bottom navigation present; the horizontal feed-tab strip remains intermittently constrained. Usability is partial/intermittent, not accepted. The subsequent clarification above establishes full process restarts; IMG_6698 shows loaded content inside Photos rather than the final failing guest state.
 
 Subsequent owner test: tapping For You revealed Search, and tapping Search opened its screen. This establishes that interaction/navigation sequence, not content-loading or feature completeness. Diagnose public-content loading, return-to-feed behavior and rotation on the existing candidate before choosing a further initialization or layout change.
 

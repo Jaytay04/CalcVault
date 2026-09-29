@@ -1,5 +1,13 @@
 # CalcVault test report
 
+## Research host layout 20.1 build and package gate (2026-09-28)
+
+- PASS: [Actions run 36499814804](https://github.com/Jaytay04/CalcVault/actions/runs/36499814804), source `a213532`: native contract/Keychain/migration/lifecycle tests, both target builds, package signature checks, synthetic guest visibility, explicit-lock process exit and pending-launch late-callback rejection. The simulator is not a physical sandbox verdict. The post-lock screenshot shows the calculator cover.
+- Geometry evidence: view/content bounds and content frame agree at 402 by 717.67 points within a 402 by 874 window; content-window attachment changes from 0 to 1 before the guest-visible marker. This validates the synthetic attached path, not TikTok's feed initialization or physical rotation.
+- Downloaded synthetic host SHA-256 `c342ff89862106772e18b9b6820b610d2380dbdcccdcef543bd507e22f384111` matches the runner checksum. Private merged base SHA-256 `17102794873a855d8995928ffc2b1ba6611b97dd52b136c2793fbe4d524f13fa`.
+- Separate local phone candidate: `build/private-native-guest-rx166/CalcVault-native-TikTok-research-layout1.ipa`, 696,268,593 bytes, SHA-256 `a4c8d9b9d94a1f6ec5b3f74ecf1b769236d6300f7cfe6159b5172549cedda705`. Existing 24-byte guest startup change reapplied without any additional guest change. Independent full ZIP readback: 2,529 files; all 2,424 guest files identical to local-init-r1, 104 retained host files identical to CI, replacement descriptor matches guest metadata, one existing LiveProcess extension, no private signing-material suffixes. Original IPA, prepared ZIP and local-init-r1 hashes remain unchanged. Initial independent host-count assertion included the intentionally replaced descriptor as a retained file; corrected classification verifies the 104 retained files and descriptor separately.
+- Physical install/signing, five cold-launch trials, For You, feed-tab sizing, rotation and real-guest lock/background audio checks: NOT RUN. Candidate is a host-layout experiment, not a proven fix or security certification. Keep no-account testing and existing disposable research app only; do not modify a populated production vault.
+
 ## Research host layout 20.1 source gate (2026-09-28)
 
 - Local PASS: 20 research adapter/packaging tests (including five new geometry-transform cases), plus 118 private-package tooling regressions. Source tests cover exact anchors, unchanged inputs/unowned files, containment order, explicit sizing, nonempty/attached/revoked guards and bounded allowlisted diagnostics. They do not execute UIKit.
