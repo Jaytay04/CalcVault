@@ -97,6 +97,8 @@ final class CVLPLifecycleModel: NSObject, ObservableObject {
 #if targetEnvironment(simulator)
                 if ProcessInfo.processInfo.environment["CVLP_LIFECYCLE_AUTOTEST"] == "lock" {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 4) { self.lock(reason: "simulator explicit lock") }
+                } else if ProcessInfo.processInfo.environment["CVLP_LIFECYCLE_AUTOTEST"] == "diagnostic-deadline" {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 35) { self.lock(reason: "simulator diagnostic deadline test") }
                 }
 #endif
             } else { lock(reason: "guest launch failed") }

@@ -107,7 +107,7 @@ def transform(sources):
 ''')
     probe = once(probe, 'Guest staging: allowlisted bundle metadata and signed payload copied to the synthetic guest folder.',
                  'Guest selection: fixed immutable framework; no guest code or resources copied into Documents.')
-    probe = probe.replace('Build marker: build19.', 'Build marker: build20-framework-diagnostics1.')
+    probe = probe.replace('Build marker: build19.', 'Build marker: build20-framework-diagnostics2.')
     result[FILES[1]] = probe
     result[FILES[2]] = once(result[FILES[2]], '#import "CVLPProbe.h"',
                            '#import "CVLPProbe.h"\n#import "CVLPFrameworkGuest.h"')
@@ -132,7 +132,7 @@ def transform(sources):
     ];''')
     result[FILES[4]] = scene
     app = result[FILES[5]]
-    app = app.replace('Build 19', 'Build 20 framework startup diagnostics 1').replace('Native lifecycle test · 19', 'Guest startup test · 20.2')
+    app = app.replace('Build 19', 'Build 20 framework startup diagnostics 2').replace('Native lifecycle test · 19', 'Guest startup test · 20.3')
     app = once(app, 'Synthetic data only. Restart the app for each new launch test. The test tone starts only when tapped inside the guest.',
                'Research only. Do not sign in or enter personal data. Restart the app for each new launch test. Boundary fixtures are synthetic; guest behavior is unverified.')
     result[FILES[5]] = app

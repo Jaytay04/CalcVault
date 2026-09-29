@@ -2,9 +2,17 @@
 
 ## Opt-in Build 20 framework route
 
+### Sampling diagnostics 20.3
+
+The current route is labeled `Guest startup test · 20.3`, marker `build20-framework-diagnostics2`. This is still a diagnostic, not a feed repair. Observations include a sequence number, elapsed monotonic time, an installation marker and one terminal stop reason. Six notification-triggered samples are allowed; scheduled samples and the terminal record share the original sixteen-event limit. All original inactive, background and scene-deactivation stops remain in place, with no restart after stopping.
+
+Dispatch samples are supplemented by three one-shot [run-loop timers](https://developer.apple.com/documentation/foundation/timer) in [common modes](https://developer.apple.com/documentation/foundation/runloop/run_loop_modes), plus an independent terminal timer. Neither scheduler guarantees prompt execution if the main thread is occupied. Timers are invalidated on stop; samples beyond the bounded deadline are rejected. A killed process may not write a terminal record. A missing record alone does not prove a particular stop cause or that no guest window exists.
+
+CI retains the ordinary four-second lock and pending-launch race checks. A separate simulator-only deadline mode waits thirty-five seconds before calling the same lock action, so the thirty-second diagnostic limit, both schedulers and the terminal record can be checked. This automatic test delay is not compiled into the phone behavior and never defers explicit or inactive/background locking. No entitlement, guest-code, layout or production boundary changes are included.
+
 ### Startup diagnostics 20.2
 
-The current framework route is labeled `Guest startup test · 20.2`, marker `build20-framework-diagnostics1`, with package version and identities unchanged. The owner still observed the black/clipped feed on 20.1 despite consistent attached host dimensions. This revision is a diagnostic, not a feed fix.
+The prior framework route was labeled `Guest startup test · 20.2`, marker `build20-framework-diagnostics1`, with package version and identities unchanged. The owner still observed the black/clipped feed on 20.1 despite consistent attached host dimensions. This revision was a diagnostic, not a feed fix.
 
 Guest observations use public launch, scene and window notifications plus a bounded startup sampling window. They report delegate scene support, scene activation and dimensions, window association/bounds/safe area, and already-loaded root-view dimensions. They do not resize windows, load TweakLoader, inspect content/preferences, or extend bookmark/Keychain access. Host geometry additionally records the scene settings and presentation surface. Reports are observations from an untrusted guest process, not security attestations.
 

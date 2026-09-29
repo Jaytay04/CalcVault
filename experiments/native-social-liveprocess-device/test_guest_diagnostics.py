@@ -101,10 +101,20 @@ class GuestDiagnosticsTests(unittest.TestCase):
 
     def test_helper_uses_bounded_allowlisted_public_observations(self):
         helper = Path(__file__).with_name("CVLPGuestDiagnostics.h").read_text(encoding="utf-8")
-        self.assertIn('phase=armed mainQueuePending=1', helper)
+        self.assertIn('appendPhase:@"armed" fields:@"mainQueuePending=1"', helper)
         self.assertIn("CVLPGuestDiagnosticsMaximumEvents = 16", helper)
+        self.assertIn("CVLPGuestDiagnosticsMaximumNotificationSamples = 6", helper)
         self.assertIn("CVLPGuestDiagnosticsDeadline = 30.0", helper)
+        self.assertIn("CVLPGuestDiagnosticsFinalSampleGrace = 0.25", helper)
         self.assertIn("@[@1, @3, @10, @30]", helper)
+        self.assertIn("@[@2, @8, @30]", helper)
+        self.assertIn('runloop-2s\", @"runloop-8s\", @"runloop-30s', helper)
+        self.assertIn("addTimer:timer forMode:NSRunLoopCommonModes", helper)
+        self.assertIn("repeats:NO", helper)
+        self.assertIn("dispatchScheduled=4 runLoopScheduled=3 runLoopTerminalScheduled=1 notificationLimit=%lu", helper)
+        self.assertIn('appendPhase:@"installed"', helper)
+        self.assertIn("runLoopTerminalTimer = [NSTimer timerWithTimeInterval:runLoopTerminalDelay repeats:NO", helper)
+        self.assertIn("addTimer:runLoopTerminalTimer forMode:NSRunLoopCommonModes", helper)
         self.assertIn("sampledScenes.count >= 2", helper)
         self.assertIn("windows.count < 3", helper)
         self.assertIn("line.length > 2048", helper)
@@ -121,7 +131,36 @@ class GuestDiagnosticsTests(unittest.TestCase):
         self.assertIn("notification.object isKindOfClass:UIWindow.class", helper)
         self.assertIn("respondsToSelector:@selector(window)", helper)
         self.assertNotIn("performSelector", helper)
-        self.assertNotIn("UIApplication.sharedApplication", helper[:helper.index("- (void)snapshot:")])
+        implementation = helper.index("@implementation CVLPGuestGeometryDiagnostics")
+        snapshot = helper.index("- (BOOL)snapshot:", implementation)
+        self.assertNotIn("UIApplication.sharedApplication", helper[implementation:snapshot])
+
+    def test_scheduler_terminal_contract_is_bounded_and_fixed(self):
+        helper = Path(__file__).with_name("CVLPGuestDiagnostics.h").read_text(encoding="utf-8")
+        for reason in (
+            'return @"app-inactive";',
+            'return @"app-background";',
+            'return @"scene-deactivated";',
+            'return @"deadline";',
+            'return @"event-limit";',
+        ):
+            self.assertIn(reason, helper)
+        self.assertIn("phase=stopped reason=%@ sequence=%lu elapsedMs=%llu dispatchSamples=%lu runLoopSamples=%lu notificationSamples=%lu", helper)
+        self.assertIn("phase=%@ sequence=%lu elapsedMs=%llu%@", helper)
+        self.assertIn("self.eventCount >= CVLPGuestDiagnosticsMaximumEvents - 1", helper)
+        self.assertIn("[timer invalidate]", helper)
+        self.assertIn("if (self.stopped) { return; }", helper)
+        self.assertIn("elapsed > CVLPGuestDiagnosticsDeadline + CVLPGuestDiagnosticsFinalSampleGrace", helper)
+
+        implementation = helper.index("@implementation CVLPGuestGeometryDiagnostics")
+        stop = helper.index("- (void)stopWithReason:", implementation)
+        terminal = helper.index("[CVLPProbe recordGuestDiagnostic:line];", stop)
+        cleanup = helper.index("[timer invalidate]", stop)
+        self.assertLess(terminal, cleanup)
+        self.assertIn("__weak typeof(self) weakSelf = self;", helper)
+        self.assertIn("source:CVLPGuestDiagnosticsSampleSourceDispatch", helper)
+        self.assertIn("source:CVLPGuestDiagnosticsSampleSourceRunLoop", helper)
+        self.assertIn("source:CVLPGuestDiagnosticsSampleSourceNotification", helper)
 
         emitted_fields = helper[helper.index('NSString *line = [NSString stringWithFormat:'):]
         for forbidden in ("url=", "cookie=", "password=", "path=", "text=", "preferences="):
