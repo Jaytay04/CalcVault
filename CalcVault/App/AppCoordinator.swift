@@ -96,6 +96,13 @@ public final class AppCoordinator: ObservableObject {
     public let lifecycle: SessionLifecycleCoordinator
     public let calculator: CalculatorViewModel
 
+    /// Diagnostic only. No guest launch capability is granted by this model.
+    public lazy var nativeGuestPreflight = NativeGuestPreflightModel(lifecycle: lifecycle) {
+        try await Task.detached(priority: .userInitiated) {
+            try NativeGuestCredentialInventory.checkLegacyAbsence()
+        }.value
+    }
+
     @Published public private(set) var lifecycleState: LifecycleState = .calculatorLocked
     @Published public private(set) var setupState: AppSetupState = .loading
     @Published public private(set) var authenticationMessage: String?

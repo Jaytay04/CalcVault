@@ -8,6 +8,191 @@ final class HostOnlyKeychainStorageTests: XCTestCase {
     private let baseBundleIdentifier = "com.jaylintaylor.calcvault"
     private let suffix = "sidestore.fixture"
 
+    func testLegacyCopiesAreDetectedInEverySupportedGroupForEachProtection() throws {
+        let groups = try makeSideStoreGroups()
+
+        for protection in [KeychainMigrationProtection.whenUnlockedDeviceOnly, .biometryCurrentSet] {
+            for presentGroup in groups.legacyGroups {
+                let backend = MemoryHostOnlyKeychainBackend()
+                let item = makeItem(protection: protection)
+                backend.seed(Data("legacy fixture".utf8), item: item, group: presentGroup)
+                let storage = makeStorage(groups: groups, backend: backend)
+
+                XCTAssertThrowsError(try storage.assertNoLegacyCopies([item])) { error in
+                    XCTAssertEqual(error as? HostOnlyKeychainStorageError, .legacyCredentialPresent)
+                }
+                XCTAssertEqual(
+                    backend.operations.filter { $0.kind == .contains }.map(\.group),
+                    groups.legacyGroups
+                )
+                XCTAssertTrue(backend.operations.allSatisfy { $0.item == item })
+                XCTAssertFalse(backend.operations.contains { $0.group == groups.hostOnly })
+                XCTAssertTrue(backend.operations.allSatisfy { $0.kind == .contains })
+            }
+        }
+    }
+
+    func testLegacyCopyIsRejectedWhenMatchingHostOnlyCopyAlsoExists() throws {
+        let groups = try makeSideStoreGroups()
+        let backend = MemoryHostOnlyKeychainBackend()
+        let item = makeItem()
+        let data = Data("same identity fixture".utf8)
+        backend.seed(data, item: item, group: groups.legacyGroups[0])
+        backend.seed(data, item: item, group: groups.hostOnly)
+        let storage = makeStorage(groups: groups, backend: backend)
+
+        XCTAssertThrowsError(try storage.assertNoLegacyCopies([item])) { error in
+            XCTAssertEqual(error as? HostOnlyKeychainStorageError, .legacyCredentialPresent)
+        }
+
+        XCTAssertEqual(backend.operations.filter { $0.kind == .contains }.map(\.group), groups.legacyGroups)
+        XCTAssertFalse(backend.operations.contains { $0.group == groups.hostOnly })
+        XCTAssertEqual(backend.values[ScopedCredential(item: item, group: groups.legacyGroups[0])], data)
+        XCTAssertEqual(backend.values[ScopedCredential(item: item, group: groups.hostOnly)], data)
+    }
+
+    func testAllAbsentInventoryChecksEveryIdentityAndLegacyGroupWithoutReadsOrMutation() throws {
+        let groups = try makeSideStoreGroups()
+        let backend = MemoryHostOnlyKeychainBackend()
+        let items = [makeItem(account: "first"), makeItem(account: "second", protection: .biometryCurrentSet)]
+        var groupResolutionCalls = 0
+        var backendContexts: [LAContext?] = []
+        let storage = HostOnlyKeychainStorage(
+            groups: {
+                groupResolutionCalls += 1
+                return groups
+            },
+            backend: { context in
+                backendContexts.append(context)
+                return backend
+            }
+        )
+
+        XCTAssertNoThrow(try storage.assertNoLegacyCopies(items))
+
+        XCTAssertEqual(groupResolutionCalls, 1)
+        XCTAssertEqual(backendContexts.count, 1)
+        XCTAssertNil(backendContexts[0])
+        let queries = backend.operations.filter { $0.kind == .contains }
+        XCTAssertEqual(queries.count, items.count * groups.legacyGroups.count)
+        XCTAssertEqual(
+            queries.map { "\($0.item.service)|\($0.item.account)|\($0.group)" },
+            items.flatMap { item in groups.legacyGroups.map { "\(item.service)|\(item.account)|\($0)" } }
+        )
+        XCTAssertTrue(backend.operations.allSatisfy { $0.kind == .contains })
+        XCTAssertFalse(backend.operations.contains { $0.group == groups.hostOnly })
+        XCTAssertTrue(backend.values.isEmpty)
+    }
+
+    func testInvalidInventoriesFailBeforeGroupResolutionOrBackendConstruction() throws {
+        let duplicateIdentityWithDifferentProtection = [
+            makeItem(service: "com.example.exact", account: "root"),
+            makeItem(service: "com.example.exact", account: "root", protection: .biometryCurrentSet)
+        ]
+        let invalidInventories: [[KeychainMigrationItem]] = [
+            [],
+            [makeItem(service: "", account: "account")],
+            [makeItem(service: "service", account: "")],
+            duplicateIdentityWithDifferentProtection
+        ]
+
+        for items in invalidInventories {
+            let backend = MemoryHostOnlyKeychainBackend()
+            var groupResolutionCalls = 0
+            var backendFactoryCalls = 0
+            let storage = HostOnlyKeychainStorage(
+                groups: {
+                    groupResolutionCalls += 1
+                    return try self.makeSingleLegacyGroups()
+                },
+                backend: { _ in
+                    backendFactoryCalls += 1
+                    return backend
+                }
+            )
+
+            XCTAssertThrowsError(try storage.assertNoLegacyCopies(items)) { error in
+                XCTAssertEqual(error as? HostOnlyKeychainStorageError, .invalidInventory)
+            }
+            XCTAssertEqual(groupResolutionCalls, 0)
+            XCTAssertEqual(backendFactoryCalls, 0)
+            XCTAssertTrue(backend.operations.isEmpty)
+        }
+    }
+
+    func testContainmentStatusFailurePropagatesWithoutTreatingItemAsAbsent() throws {
+        let groups = try makeSideStoreGroups()
+        let backend = MemoryHostOnlyKeychainBackend()
+        let item = makeItem()
+        backend.failContainsFor = ScopedCredential(item: item, group: groups.legacyGroups[0])
+        let storage = makeStorage(groups: groups, backend: backend)
+
+        XCTAssertThrowsError(try storage.assertNoLegacyCopies([item])) { error in
+            XCTAssertEqual(error as? HostOnlyKeychainStorageError, .unexpectedStatus(-50))
+        }
+
+        XCTAssertEqual(backend.operations.map(\.kind), [.contains])
+        XCTAssertTrue(backend.values.isEmpty)
+    }
+
+    func testIdentityResolutionFailurePreventsBackendConstruction() throws {
+        let backend = MemoryHostOnlyKeychainBackend()
+        var backendFactoryCalls = 0
+        let storage = HostOnlyKeychainStorage(
+            groups: { throw HostOnlyKeychainStorageError.identityUnavailable },
+            backend: { _ in
+                backendFactoryCalls += 1
+                return backend
+            }
+        )
+
+        XCTAssertThrowsError(try storage.assertNoLegacyCopies([makeItem()])) { error in
+            XCTAssertEqual(error as? HostOnlyKeychainStorageError, .identityUnavailable)
+        }
+
+        XCTAssertEqual(backendFactoryCalls, 0)
+        XCTAssertTrue(backend.operations.isEmpty)
+    }
+
+    func testPreflightRescansInsteadOfCachingAnEarlierAbsence() throws {
+        let groups = try makeSideStoreGroups()
+        let backend = MemoryHostOnlyKeychainBackend()
+        let item = makeItem()
+        var groupResolutionCalls = 0
+        let storage = HostOnlyKeychainStorage(
+            groups: {
+                groupResolutionCalls += 1
+                return groups
+            },
+            backend: { _ in backend }
+        )
+
+        XCTAssertNoThrow(try storage.assertNoLegacyCopies([item]))
+        backend.seed(Data("appeared after first scan".utf8), item: item, group: groups.legacyGroups[1])
+        XCTAssertThrowsError(try storage.assertNoLegacyCopies([item])) { error in
+            XCTAssertEqual(error as? HostOnlyKeychainStorageError, .legacyCredentialPresent)
+        }
+
+        XCTAssertEqual(groupResolutionCalls, 2)
+        XCTAssertEqual(backend.operations.filter { $0.kind == .contains }.count, 4)
+    }
+
+    func testUnrelatedLegacyItemRemainsUntouchedByPreflight() throws {
+        let groups = try makeSideStoreGroups()
+        let backend = MemoryHostOnlyKeychainBackend()
+        let requestedItem = makeItem(account: "requested")
+        let unrelatedItem = makeItem(account: "unrelated")
+        let unrelatedData = Data("unrelated fixture".utf8)
+        backend.seed(unrelatedData, item: unrelatedItem, group: groups.legacyGroups[0])
+        let storage = makeStorage(groups: groups, backend: backend)
+
+        XCTAssertNoThrow(try storage.assertNoLegacyCopies([requestedItem]))
+
+        XCTAssertEqual(backend.values[ScopedCredential(item: unrelatedItem, group: groups.legacyGroups[0])], unrelatedData)
+        XCTAssertTrue(backend.operations.allSatisfy { $0.kind == .contains && $0.item == requestedItem })
+        XCTAssertEqual(backend.operations.map(\.group), groups.legacyGroups)
+    }
+
     func testNewWriteUsesOnlyHostOnlyGroupAndPreservesProtection() throws {
         let groups = try makeSingleLegacyGroups()
         let backend = MemoryHostOnlyKeychainBackend()
@@ -495,6 +680,7 @@ private final class MemoryHostOnlyKeychainBackend: HostOnlyKeychainBackend {
     var operations: [BackendOperation] = []
     var failNextInsert = false
     var failNextRemovalForGroups: Set<String> = []
+    var failContainsFor: ScopedCredential?
 
     func seed(_ data: Data, item: KeychainMigrationItem, group: String) {
         values[ScopedCredential(item: item, group: group)] = data
@@ -526,6 +712,9 @@ private final class MemoryHostOnlyKeychainBackend: HostOnlyKeychainBackend {
 
     func contains(_ item: KeychainMigrationItem, accessGroup: String) throws -> Bool {
         operations.append(BackendOperation(kind: .contains, item: item, group: accessGroup))
+        if failContainsFor == ScopedCredential(item: item, group: accessGroup) {
+            throw HostOnlyKeychainStorageError.unexpectedStatus(-50)
+        }
         return values[ScopedCredential(item: item, group: accessGroup)] != nil
     }
 

@@ -17,6 +17,13 @@ mkdir -p "$artifact_dir"
 
 echo "Building a SideStore re-signing candidate with an ad-hoc signature; this is not an installable signed IPA."
 
+set --
+case "${CALCVAULT_NATIVE_PREFLIGHT:-0}" in
+  0) ;;
+  1) set -- CURRENT_PROJECT_VERSION=21 ;;
+  *) echo "error: unsupported native preflight selection" >&2; exit 1 ;;
+esac
+
 xcodebuild \
   -project "$root_dir/CalcVault.xcodeproj" \
   -scheme CalcVault \
@@ -25,6 +32,7 @@ xcodebuild \
   -destination 'generic/platform=iOS' \
   -derivedDataPath "$derived_data" \
   CODE_SIGNING_ALLOWED=NO \
+  "$@" \
   build
 
 app_path="$derived_data/Build/Products/Release-iphoneos/CalcVault.app"
@@ -39,6 +47,13 @@ mkdir -p "$staging_dir/Payload"
 ditto "$app_path" "$staging_dir/Payload/CalcVault.app"
 
 staged_app="$staging_dir/Payload/CalcVault.app"
+# Mark only the staged candidate, before signing; do not contaminate cached
+# build products used by a later default (non-preflight) package.
+if [ "${CALCVAULT_NATIVE_PREFLIGHT:-0}" = 1 ]; then
+  /usr/libexec/PlistBuddy -c 'Add :CVNativeIntegrationStage string credential-preflight-21' "$staged_app/Info.plist"
+  test "$(/usr/libexec/PlistBuddy -c 'Print :CVNativeIntegrationStage' "$staged_app/Info.plist")" = credential-preflight-21
+  test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$staged_app/Info.plist")" = 21
+fi
 # Xcode leaves the device product unsigned. Sign nested code first, then sign the
 # host with its explicit entitlement blob so SideSign can inspect and replace it.
 codesign --force --deep --sign - "$staged_app"

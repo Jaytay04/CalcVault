@@ -1,6 +1,16 @@
 # ADR 0003: Isolated native-social guest research
 
-Status: experimental authorization only, 2026-09-25. Not approved for the shipping CalcVault target.
+Status: separate integration candidate authorized after owner acceptance of portrait research 20.6. This is not production/security acceptance.
+
+## Integration candidate 21: credential preflight first
+
+The owner explicitly approved a separate full-CalcVault integration candidate, retaining the known-good 20.6 fallback, isolated native TikTok and the existing X/Instagram browser/downloaders. This extends the original research-only authorization for that reviewed integration effort; it does not permit additional guest products, broad bookmarks, credential transfer or same-process guest execution.
+
+The first slice adds a non-launching credential preflight to the existing CalcVault target. The fixed inventory includes navigation sequence, passphrase envelope, vault initialization marker and biometric root, including when biometrics are currently disabled. Each exact identity is checked in every supported legacy access group under the credential-operation lock. Existing group-discovery positive controls may create/read/remove their unique non-secret fixtures; the absence scan neither reads credential values nor migrates, overwrites or deletes credentials. Presence, inaccessible state, malformed inventory and identity failures all block the check. It does not inspect destination protection or grant a guest permit.
+
+The diagnostic result belongs only to its initiating authenticated session/generation and request. Lock, background, inactive transition or a new session invalidates it, and late completions must not republish success. A new request rescans; no persisted readiness flag is created. The optional Build 21 Security section explicitly says native execution is disabled. Standard builds hide the section. Existing encryption, browser/downloader routes, entry sequence and authentication remain unchanged.
+
+This separates credential preflight from runtime integration. The current research host and CalcVault have separate app entry points and lifecycle owners; the eventual bridge must retain one CalcVault authentication/lifecycle authority, bind guest requests to its session, synchronously cover and revoke on lock, prevent late reattachment and validate shutdown before reuse. The existing immutable-framework research loader, narrow bookmarks, no-export signing and portrait behavior remain the baseline. Destination credential policy, signed-phone legacy absence, runtime dependency closure and integrated isolation remain gates, not assumptions. Do not interpret a passed preflight as authorization for real account use or production vault trust.
 
 ## Current checkpoint: Build 20 and private guest packaging (2026-09-28)
 

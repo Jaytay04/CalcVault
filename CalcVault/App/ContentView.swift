@@ -269,6 +269,9 @@ private struct PrivateAreaView: View {
                         Text("Build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown")")
                             .foregroundStyle(.secondary)
                     }
+                    if Bundle.main.object(forInfoDictionaryKey: "CVNativeIntegrationStage") as? String == "credential-preflight-21" {
+                        NativeGuestPreflightSection(model: coordinator.nativeGuestPreflight)
+                    }
                 }
                 .navigationTitle("Security")
                 .navigationBarTitleDisplayMode(.inline)

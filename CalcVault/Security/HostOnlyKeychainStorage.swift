@@ -23,6 +23,8 @@ public enum HostOnlyKeychainStorageError: Error, Equatable, LocalizedError {
     case identityUnavailable
     case duplicateItem
     case invalidItem
+    case invalidInventory
+    case legacyCredentialPresent
     case protectionMismatch
     case unexpectedStatus(Int32)
 
@@ -34,12 +36,21 @@ public enum HostOnlyKeychainStorageError: Error, Equatable, LocalizedError {
             return "Credentials already exist and were not overwritten."
         case .invalidItem:
             return "The stored credential is unavailable or invalid. It was not replaced."
+        case .invalidInventory:
+            return "The credential inventory is empty or contains an invalid or duplicate identity."
+        case .legacyCredentialPresent:
+            return "A credential copy exists in a supported legacy Keychain group."
         case .protectionMismatch:
             return "The credential protection does not match the required policy. Existing credentials were not replaced."
         case .unexpectedStatus(let status):
             return "Protected Keychain operation failed (status \(status)). Existing configuration was not replaced."
         }
     }
+}
+
+private struct KeychainCredentialIdentity: Hashable {
+    let service: String
+    let account: String
 }
 
 public protocol HostOnlyKeychainBackend: KeychainMigrationStore {
@@ -83,6 +94,43 @@ public final class HostOnlyKeychainStorage: @unchecked Sendable {
                 }
             }
             try store.insert(data, item: item, accessGroup: scope.hostOnly)
+        }
+    }
+
+    /// Performs a point-in-time, metadata-only check that none of the supplied
+    /// credential identities exists in a supported legacy access group. It
+    /// does not read credential data or inspect host-only destination state.
+    /// Success is not guest authorization, guest isolation, or destination
+    /// protection; integration must separately require an active authenticated
+    /// session and valid destination state.
+    public func assertNoLegacyCopies(_ items: [KeychainMigrationItem]) throws {
+        try locked {
+            guard !items.isEmpty else { throw HostOnlyKeychainStorageError.invalidInventory }
+
+            var identities = Set<KeychainCredentialIdentity>()
+            for item in items {
+                guard !item.service.isEmpty, !item.account.isEmpty else {
+                    throw HostOnlyKeychainStorageError.invalidInventory
+                }
+                let identity = KeychainCredentialIdentity(service: item.service, account: item.account)
+                guard identities.insert(identity).inserted else {
+                    throw HostOnlyKeychainStorageError.invalidInventory
+                }
+            }
+
+            let scope = try groups()
+            let store = backend(nil)
+            var foundLegacyCopy = false
+            for item in items {
+                for group in scope.legacyGroups {
+                    if try store.contains(item, accessGroup: group) {
+                        foundLegacyCopy = true
+                    }
+                }
+            }
+            guard !foundLegacyCopy else {
+                throw HostOnlyKeychainStorageError.legacyCredentialPresent
+            }
         }
     }
 

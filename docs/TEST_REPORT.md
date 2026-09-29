@@ -1,5 +1,11 @@
 # CalcVault test report
 
+## Integration 21 credential-preflight candidate
+
+- Owner authorized a separate integration candidate after 20.6 functional acceptance. This first candidate contains no LiveProcess extension or real guest and cannot launch native TikTok; it adds only an opt-in Security diagnostic to full CalcVault.
+- New coverage is being added for exact legacy-item checks, metadata-only backend use, error propagation, no mutation, repeated scans, and session/cancellation races. Inventory covers all four known credential identities independently of biometric preference. Destination policy and arbitrary historical identities are not certified by this narrow check.
+- Native compilation, test execution and signed-phone legacy-absence behavior remain NOT RUN at this source checkpoint. No installed data or original IPA changed. The 20.6 private artifact remains the fallback.
+
 ## Portrait 20.6 owner acceptance and integration review
 
 - Owner-reported PASS: portrait retention when rotating both ways during playback; two requested cold relaunches with working video/audio/layout; explicit Lock and app-switcher transitions stop audio and return the calculator. Owner response was "Everything works"; no new raw logs were supplied, so this is functional owner evidence only.

@@ -2,6 +2,11 @@ name: iOS build (manual)
 
 on:
   workflow_dispatch:
+    inputs:
+      native_preflight:
+        description: 'Build 21 credential preflight only; native guest execution remains disabled'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -27,6 +32,8 @@ jobs:
       - name: Test host credential entitlement template
         run: python3 -m unittest discover -s scripts -p test_credential_entitlements.py -v
       - name: Build unsigned device IPA
+        env:
+          CALCVAULT_NATIVE_PREFLIGHT: ${{ inputs.native_preflight && '1' || '0' }}
         run: sh scripts/build-unsigned-ipa.sh
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v6
