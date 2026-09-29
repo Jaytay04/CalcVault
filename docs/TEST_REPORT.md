@@ -1,5 +1,12 @@
 # CalcVault test report
 
+## Portrait 20.6 owner acceptance and integration review
+
+- Owner-reported PASS: portrait retention when rotating both ways during playback; two requested cold relaunches with working video/audio/layout; explicit Lock and app-switcher transitions stop audio and return the calculator. Owner response was "Everything works"; no new raw logs were supplied, so this is functional owner evidence only.
+- Scope: preserve the 20.6 native research baseline. This batch does not establish native Highlights/Friends, account persistence, refresh, downloader handoff, production vault isolation or full-app integration.
+- Read-only source finding: `Phase2CredentialManager.unlock(passphrase:)` loads the passphrase envelope and returns decrypted root bytes without querying the biometric store. Only `unlockWithBiometrics(context:)` reads that item and therefore invokes its host-only migration path. A previous biometric copy can remain in a supported legacy access group after passphrase-only use. Actual presence on the owner's phone was not measured. `HostOnlyKeychainStorage` explicitly defers guest authorization and legacy-absence checks to future integration; production `AppCoordinator` has no native guest lifecycle integration.
+- No runtime code, signing identity, installed app or IPA changed in this follow-up. ADR 0003's research-only boundary remains in force; a separate integration candidate requires review before enabling a guest alongside production vault state.
+
 ## Portrait 20.6 native validation (2026-09-29)
 
 - PASS: [Actions run 36635559843](https://github.com/Jaytay04/CalcVault/actions/runs/36635559843), source `d60e7732eebafc8346e7a635e3cb0ce8019b17af`, 18m33s. Device/simulator builds, native contracts, package signatures, startup/lock/exit, pending-launch cancellation, invalid-geometry rejection, diagnostic deadline and legacy baseline passed.
