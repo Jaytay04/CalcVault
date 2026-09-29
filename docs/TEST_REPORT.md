@@ -1,5 +1,12 @@
 # CalcVault test report
 
+## Portrait 20.6 native validation (2026-09-29)
+
+- PASS: [Actions run 36635559843](https://github.com/Jaytay04/CalcVault/actions/runs/36635559843), source `d60e7732eebafc8346e7a635e3cb0ce8019b17af`, 18m33s. Device/simulator builds, native contracts, package signatures, startup/lock/exit, pending-launch cancellation, invalid-geometry rejection, diagnostic deadline and legacy baseline passed.
+- Downloaded portrait log independently confirms landscape requested at 22:03:33.824, rejected at 22:03:33.826, portrait host retained at 22:03:38.024, kill requested at 22:03:38.041 and process-group absence observed at 22:03:39.092. These are synthetic simulator observations, not physical-device or security acceptance.
+- Independent downloaded-log verifiers PASS: initial synthetic scene/window nonzero before root assignment; 15 bounded guest observations, both schedulers and terminal deadline. Synthetic host SHA-256 matches the runner checksum: `e6e97c116c30fd7a94b835aa90929fb4ab87b98da44911ce912b1d94c7a82a9d`.
+- Local private assembly readback PASS: CRC, 2,529 unique files, 2,424 guest files byte-identical to the prior candidate, 104 retained host files matching CI and unchanged guest descriptor. All three host orientation arrays are portrait-only; one existing LiveProcess extension; no signing-material suffixes. Private binaries remain outside public source and CI. Fresh SideStore signing, phone rotation retention, playback and lock/app-switcher acceptance remain pending.
+
 Portrait 20.6 local validation: 54 research tests and 118 package-tool tests PASS; YAML parse and diff checks PASS. Fresh pinned-source preparation PASS. Prepared AppSceneViewController.m, CVLPGuestSession.m and CVLPGuestDiagnostics.h are text-identical to the working 20.5 prepared files. Landscape experiment is not included. Native CI and physical-device checks remain pending.
 
 Portrait 20.6 implementation: Owner explicitly approved portrait-only native TikTok. The previous unbuilt landscape adapter, guest logging and incomplete parser were removed, retaining the working 20.5 runtime geometry and lifecycle. Only the opt-in framework host's orientation metadata changes; simulator-only code requests landscape, checks rejection and portrait retention, then calls existing lock. Packaging tests verify all orientation variants are portrait and source guest metadata is unchanged. Production app/browser sources untouched. Native/phone result pending.
