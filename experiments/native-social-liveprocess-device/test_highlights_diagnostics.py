@@ -128,6 +128,9 @@ class HighlightsDiagnosticsSourceTests(unittest.TestCase):
         self.assertIn('parts.count != 32', self.header)
         self.assertIn('hasPrefix:@"CVLP_HIGHLIGHTS "', self.header)
         self.assertIn('containsObject:phase', self.header)
+        start = self.header.split('- (void)startOnMainQueue {', 1)[1].split('- (void)scheduleSample:', 1)[0]
+        self.assertNotIn('CVLPHighlightsSampleTreeSafely()', start)
+        self.assertIn('initialTree.truncated = 1;', start)
 
     def test_view_walk_is_read_only_shallow_bounded_and_content_free(self):
         self.assertIn("CVLPHighlightsMaximumTreeNodes = 1499", self.header)

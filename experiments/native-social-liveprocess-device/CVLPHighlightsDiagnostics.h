@@ -623,7 +623,11 @@ static BOOL CVLPHighlightsLineIsSanitized(NSString *line) {
             [weakSelf stopWithReason:CVLPHighlightsStopSceneDeactivated];
         }];
 
-    [self appendLineForPhase:@"start" sequence:0 reason:-1 tree:CVLPHighlightsSampleTreeSafely()];
+    // Startup precedes guest appMain. Do not ask UIKit for its application or
+    // windows until the first scheduled sample after the guest has started.
+    CVLPHighlightsTreeSummary initialTree = CVLPHighlightsEmptyTree();
+    initialTree.truncated = 1;
+    [self appendLineForPhase:@"start" sequence:0 reason:-1 tree:initialTree];
     [self scheduleSample:1];
 }
 
