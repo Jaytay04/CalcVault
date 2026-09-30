@@ -11,6 +11,10 @@ on:
         description: 'Build the Build 22 CalcVaultKit integration with synthetic guest only'
         type: boolean
         default: false
+      highlights_diagnostics:
+        description: 'Enable bounded Highlights observations (requires integration_guest)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -506,3 +510,5 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/native-social-integration.yml
+    with:
+      highlights_diagnostics: ${{ inputs.highlights_diagnostics }}

@@ -64,6 +64,9 @@ class HighlightsAdapterTests(unittest.TestCase):
         workflow = (root.parents[1] / '.github/workflows/native-social-integration.yml').read_text()
         self.assertEqual(workflow.count('default: false'), 2)
         self.assertIn('if: inputs.highlights_diagnostics', workflow)
+        entry = (root.parents[1] / '.github/workflows/native-social-liveprocess-device.yml').read_text()
+        self.assertIn('highlights_diagnostics: ${{ inputs.highlights_diagnostics }}', entry)
+        self.assertIn('if: ${{ inputs.integration_guest }}', entry)
 
 
 if __name__ == '__main__':

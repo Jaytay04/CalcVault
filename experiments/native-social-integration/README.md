@@ -117,7 +117,9 @@ audio cessation. Do not mistake package checks for a successful device test.
 
 ## Opt-in Highlights diagnostic candidate
 
-The manual `native-social-integration.yml` input `highlights_diagnostics=true`
+Dispatch the registered `native-social-liveprocess-device.yml` workflow with
+`integration_guest=true` and `highlights_diagnostics=true`. Its reusable
+`native-social-integration.yml` workflow receives the default-off input, which
 adds only the approved observer to generated integration-host sources. Its default
 is false. The report marker is `integration-23-highlights1`; the containing app
 identity/build contract and `integration-native-23` data directory stay unchanged.
