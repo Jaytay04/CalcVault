@@ -1,5 +1,150 @@
 # CalcVault test report
 
+## Opt-in Highlights observer preparation (2026-09-30)
+
+Owner approved a separate diagnostic candidate after the RX-disabled comparison.
+The default-off adapter changes only the generated probe import/start, strict
+report-line admission and diagnostic marker. Existing credential, bookmark,
+revocation, identity, portrait and guest-data settings remain unchanged. The
+proprietary guest and RX library are not modified or included in public CI.
+
+Local integration adapter tests: 40 PASS. Device-adapter/source-contract tests:
+62 PASS, including eight new observer checks. Shared packaging-tool tests: 118 PASS. These
+are source/package tests, not iOS compilation or device acceptance. Bash syntax,
+workflow YAML and pinned-source transform replay passed. Native observer fixture,
+SDK compilation, private assembly and phone measurements remain pending at this
+checkpoint. A separate strict numeric-only report format excludes arbitrary
+profile/account strings; unobserved calls must remain unknown. This does not
+establish a cause or fix for missing Highlights.
+
+Pre-build review corrected numeric-field validation, terminal emission, incomplete
+view observations and resolved-method selection. A synchronized publication gate
+captures the implementation actually displaced at installation; wrappers release
+that gate before forwarding into guest code. The native fixture includes a
+deterministic intervening-hook case, original-call/return/exception preservation,
+unknown-versus-false, wrong-ABI/inherited/ambiguous/missing skips, report rejection,
+counter/deadline limits and post-stop forwarding. Native execution is still
+pending. UIKit tree traversal is source-reviewed, not exercised by that fixture.
+
+## Highlights comparison result and decoded metadata (2026-09-30)
+
+Owner reports the temporary RX-disabled comparison shows the same profile screen
+as the prior screenshot. Highlights remain owner-observed FAIL; a new explicit
+playback, Lock/Home, refresh or boundary test was not supplied. This supersedes
+the pending profile-display/Highlights status of the assembly entry below, not
+its other pending device checks. Current RX-library removal alone did not restore
+the row. Previously persisted settings, the 43.9.0 versus 47.0.0 client mismatch,
+configuration/data eligibility and hosted-runtime differences remain possible.
+
+Read-only offline inspection progressed beyond static class-name presence. An
+ignored local helper emulated only the bounded metadata decompressor and nearby
+helpers, using synthetic memory, a fixed execution limit and fail-closed unknown
+imports. Successful decodes used an emulated memory-copy import; no app startup,
+device process, network, credentials, feature override or licensing code ran.
+Decoded metadata remained in memory; no expanded private binary was saved or
+published. Local decoder/disassembly dependencies already existed; no dependency
+was installed. This is static-analysis evidence, not a phone test.
+
+Recovered Objective-C method entries identify
+`enableStoryHighlightConsumption` at image-relative address `0x26df4488` and
+`enableStoryHighlightCreation` at `0x27002850`. Following the consumption method's
+indirection reaches initialization referencing the decoded key
+`enable_story_highlight_consumption`; the separate creation initializer references
+`enable_story_highlight_creation`. A decoded 19-entry collection method list
+includes `componentMount`, `loadComponentView`, `updateUI`, `viewHeight`, collection
+data-source methods and `onStoryHighlightChangeNotification:`. Additional metadata
+contains `storyHighlightInfo`, `hasStoryHighlightInfo` and
+`isNonEmptyStoryHighlight:`. Not every metadata reference is a callable method:
+property/protocol records were distinguished from valid implementation addresses.
+These findings support existing feature/configuration/data paths, but do not
+establish effective boolean values, remote responses, whether the component is
+instantiated, its device frame, or the precise condition suppressing the row.
+No feature flag was changed and no private endpoint was called.
+
+Public-source comparison found profile count/image-copy/verification customizations
+in [BHTikTok++](https://github.com/raulsaeed/BHTikTokPlusPlus/blob/main/Tweak.x),
+and no explicit Highlights switch in the inspected
+[RX English labels](https://github.com/raulsaeed/RXTikTok-Localization/blob/main/en.lproj/Localizable.strings).
+Public Story-related code exists; it is not evidence of a Highlights display hook.
+The public source is not the exact closed RX 1.6.6 implementation, and absent
+readable names cannot prove absent behavior.
+
+No runtime modification, new IPA, signing, upload or device acceptance occurred
+in this investigation. Proposed next decision: owner approval for a bounded
+read-only guest diagnostic candidate reporting only configuration booleans,
+model-presence booleans and component visibility/geometry. Such a candidate must
+avoid user/profile strings, media, URLs, credentials and response bodies; preserve
+all credential/session/isolation gates; and never force eligibility or fetch
+undocumented endpoints. This diagnostic is not implemented or promised to fix
+Highlights.
+
+## Temporary RX-disabled comparison assembly (2026-09-30)
+
+Private delivery PASS: repository privacy checked immediately before upload;
+new comparison IPA and checksum uploaded as a separate prerelease without
+replacing the RX-enabled fallback. GitHub reports uploaded state and the exact
+locally verified IPA SHA-256 and size. Private locations and asset identifiers
+are omitted here. Device signing/install and feature acceptance remain NOT RUN.
+
+Owner explicitly approved this diagnostic variant, not permanent RX removal.
+Implemented a local digest-pinned omission-only packager with bounded archive and
+Mach-O checks, full output readback and no-overwrite publication. Static review
+of the real input covers 37 Mach-O members / 40 slices, including the three
+universal libraries. The only RX dependency is the guest executable's exact weak
+load command; RX's own install-name record is separately validated. An additional
+read-only check found no RX-ordinal entries among the guest executable's 48
+undefined symbols or its normal/weak/lazy bind actions. These observations do
+not establish runtime compatibility.
+
+Actual local assembly PASS. Independent verification without importing the
+packager confirms exactly one omitted library, 2,547 remaining files byte-for-byte
+and permission-attribute identical to the original, unchanged host/guest metadata,
+one app/one existing extension and no signing exports. All 36 retained Mach-O
+files remain unchanged; the original whole-IPA digest is unchanged. The existing
+data-directory constant, descriptor, credential gates, browsers and lock behavior
+code are therefore unchanged, not independently device-retested. No new Xcode
+compilation was needed or claimed. This candidate keeps stale copied signature
+metadata and requires SideStore re-signing; actual startup, Highlights, playback
+and lifecycle results are NOT RUN. Existing package-tool tests (118) and merger
+tests (10) and focused variant tests (13) PASS. The final suite covers wrong input,
+identity/version, missing/aliased RX, strong/duplicate/alternate dependency paths,
+an RX dependency in another binary, mixed-fat strong dependency, malformed fat
+ranges and load commands, armv7/arm64 retained-byte preservation, unsafe ZIP paths,
+in-place/existing-output rejection and no publication after verification failure.
+Independent source review found no hard packaging blocker after fixing an early
+output-validation error that incorrectly required the intentionally omitted file.
+The final dependency gate passes for both the real input (37 files/40 slices) and
+output (36 files/39 slices); current full output validation and separate readback
+also pass. Real existing-output refusal was exercised without replacing it.
+No private payload, screenshot, account data or release location
+is added to public source.
+
+## Highlights host/add-on static investigation (2026-09-30)
+
+Read-only review of the fixed guest bootstrap and adapter found no explicit device-idiom, country/region or profile-feature override. The optional SDK override has no configured value. Bounds/safe-area propagation and the paired screenshots do not establish a viewport crop. Install-specific preferences, guest behavior and hosted-scene differences remain unexcluded. Independent source review initially identified disabled TweakLoader as a possible add-on loading difference; direct package inspection narrows that hypothesis: NativeGuest contains an LC_LOAD_WEAK_DYLIB reference to its bundled RX dylib. This proves a direct load dependency, not successful runtime initialization, and does not depend on TweakLoader injection.
+
+Bounded offline metadata inspection identifies Story Highlights classes but finds empty on-disk method-list fields for the selected profile components alongside compressed/restored Objective-C metadata sections. Activation conditions are not established by this inspection. Readable RX names include profile menu/customization and anonymous-profile settings, without a verified Highlights switch; absent readable names do not prove absent behavior. No proprietary initializer was executed, remote feature flag forced, session captured or licensing code changed. No fix, new IPA, device result or security acceptance is claimed. A controlled temporary comparison disabling RX while holding the TikTok version/container constant is an approval-dependent next test, not a proposed permanent removal or a proven fix. Prior working artifacts remain untouched.
+
+## Highlights paired screenshot evidence (2026-09-30)
+
+Inspected both local owner screenshots; owner explicitly identifies the first as official TikTok and the second as native TikTok in CalcVault. Same visible profile and counts, with different header arrangements: official left-aligned header/right avatar plus a Highlight row above content tabs; embedded centered avatar/header/bio, then content tabs with no visible Highlight row. Both grids have three columns; the embedded screenshot also has stacked-media badges. The region where a Highlight row would sit is on-screen, so an overall screen-height crop is not supported by these images. They cannot distinguish omitted data, component eligibility, zero-height/hidden internal views or an add-on effect. Static Highlights identifiers alone do not resolve that distinction. No screenshot content, profile identifiers, account state or media are saved into source/fixtures. No executable changes or new build; documentation diff check only.
+
+## Highlights static capability lead (2026-09-30)
+
+The owner-supplied package remains the latest visible release in the project's [public channel](https://t.me/s/BHTikTokPlusPlus): RXTikTok 1.6.6 / TikTok 43.9.0. A new-version-only plan is not actionable. Read-only ZIP inspection of the delivered Build 23 English localization resources and public [RX labels](https://github.com/raulsaeed/RXTikTok-Localization/blob/main/en.lproj/Localizable.strings) found no explicit Highlights setting. Absence of a label does not prove absence of an internal setting. The small main executable and RX dylib had no matches for the bounded StoryHighlight/HighlightStory spelling search; a streaming scan of the 560,847,136-byte MusicallyCore found 246 distinct matching static identifiers. Relevant examples: TTKProfileStoryHighlightComponent, TTKProfileStoryHighlightCollectionComponent, TTKProfileBizDataStoryHighlightInfoModel and ProfileStoryHighlightCollectionViewCell. These identify apparent feature components, not their runtime activation, successful data fetch or UI visibility. No private session data, network interception, proprietary code upload, binary patch, signing or new build occurred. An initially slow regex scan was cancelled and replaced by bounded chunked literal-pattern inspection. The missing native row still requires runtime/layout diagnosis; neither a confirmed fix nor version incompatibility is established.
+
+## Highlights version comparison (2026-09-30)
+
+Owner-reported official client version: 47.0.0. Independently inspected delivered guest: 43.9.0 / build 439042. Same-account/same-profile behavior differs, but version, modification and runtime differences are not yet controlled. Updating to a matching version is a proposed comparison, not a confirmed fix. Immediate Downloads-directory inspection found no matching TikTok IPA available for the new review. No download, replacement, pin relaxation, build or device test was performed. A newly supplied candidate must pass its own bounded package and dependency review before any signing/install instructions; current working artifacts and guest data remain unchanged.
+
+## Integration 23 Highlights follow-up (2026-09-30)
+
+Owner confirms both clients use the same account and target profile; official TikTok displays Highlights while the native guest does not. This supersedes the comparison-state uncertainty below, but does not identify the cause. Read-only ZIP/plist inspection of the delivered local candidate confirms CFBundleShortVersionString 43.9.0, CFBundleVersion 439042, device families 1/2 and portrait main orientation. Reviewed integration adapter/package changes do not implement Highlights-specific UI behavior. The proprietary guest, its add-on and the container remain distinct from the official-client baseline; unchanged packaged guest bytes do not rule out their compatibility effects. Official installed version remains unknown; request that comparison before selecting a new guest or changing initialization. Public-source searching yielded no verified, package-specific Highlights setting or fix. No executable changes, new build or additional phone test this slice. Documentation diff check only.
+
+## Integration 23 owner feature feedback (2026-09-30)
+
+Owner: "Highlights still do not appear. other than that everything works" in response to the delivered three-part phone test batch. Highlights: owner-reported FAIL. Remaining requested native feed/media/search/profile/Friends/portrait, explicit Lock, Home/return and X/Instagram/downloading checks: bounded owner-reported PASS, without independent capture or a new boundary report. This does not certify isolation, signing refresh or unrequested features. Same signed-in account and same target profile versus official TikTok are not yet established. Source inspection confirms the native selection pins build 439042; the integration merger preserves guest files and uses fresh guest data. Missing Highlights therefore remains an undiagnosed native compatibility issue, not an established web-only gap or proof of a specific account/version/tweak cause. No executable changes or new build in this feedback slice.
+
 ## Integration 23 private native candidate (2026-09-30)
 
 Delivery verified in the owner-authorized private destination after checking its visibility immediately before upload. The new prerelease is published, not a draft; the uploaded IPA's server-reported size and digest match the local candidate, and its portable checksum sidecar is present. Private location and asset identifiers are intentionally omitted from this public entry. No existing release was replaced. This completes delivery, not signed-phone acceptance: install/re-sign in place using SideStore .cv1 with the existing extension retained, then test native feed/video/search/profile/portrait and explicit Lock; separately cold-launch and test Home/return; check X, Instagram and downloading. Highlights/Friends need separate owner observation after manual sign-in. Fresh exact guest data directory does not copy or delete prior sessions, and remains outside vault encryption. Restart the containing app before another native launch after revocation.

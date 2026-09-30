@@ -47,8 +47,6 @@ build_target() {
 
 sim_products="$work/kit-iphonesimulator/Build/Products/Release-iphonesimulator"
 device_products="$work/kit-iphoneos/Build/Products/Release-iphoneos"
-build_target iphonesimulator 'generic/platform=iOS Simulator' "$sim_products"
-build_target iphoneos 'generic/platform=iOS' "$device_products"
 
 simulator="$(xcrun simctl list devices available -j | jq -r '[.devices[][] | select(.name | startswith("iPhone")) | .udid][0] // empty')"
 test -n "$simulator"
@@ -56,6 +54,34 @@ if ! xcrun simctl boot "$simulator"; then
     xcrun simctl bootstatus "$simulator" -b
 fi
 xcrun simctl bootstatus "$simulator" -b
+
+if [[ "${CV_HIGHLIGHTS_DIAGNOSTICS:-0}" == 1 ]]; then
+    # Synthetic Objective-C fixtures exercise exact-ABI pass-through observation;
+    # no proprietary guest, account or network is used by this executable.
+    fixture_app="$work/HighlightsDiagnosticsFixture.app"
+    mkdir -p "$fixture_app"
+    cp "$device_project/HighlightsDiagnosticsFixture-Info.plist" "$fixture_app/Info.plist"
+    xcrun --sdk iphonesimulator clang -arch arm64 -mios-simulator-version-min=18.0 \
+        -fobjc-arc -fblocks -framework Foundation -framework UIKit -framework QuartzCore \
+        -I "$device_project" -I "$upstream/LiveContainer" \
+        "$device_project/HighlightsDiagnosticsFixture.m" \
+        -o "$fixture_app/HighlightsDiagnosticsFixture" > "$logs/highlights-fixture-compile.log" 2>&1 || {
+            tail -n 100 "$logs/highlights-fixture-compile.log"
+            exit 1
+        }
+    codesign --force --sign - "$fixture_app"
+    xcrun simctl install "$simulator" "$fixture_app"
+    xcrun simctl launch --terminate-running-process --console "$simulator" \
+        org.example.synthetic.highlights-observer-tests \
+        > "$evidence/highlights-fixture.log" 2>&1 || {
+            cat "$evidence/highlights-fixture.log"
+            exit 1
+        }
+    grep -q '^CV_HIGHLIGHTS_FIXTURE_PASS$' "$evidence/highlights-fixture.log"
+fi
+
+build_target iphonesimulator 'generic/platform=iOS Simulator' "$sim_products"
+build_target iphoneos 'generic/platform=iOS' "$device_products"
 
 raw_sim_host="$work/host-iphonesimulator/Build/Products/Debug-iphonesimulator/LiveContainer.app"
 codesign --force --deep --sign - "$raw_sim_host"

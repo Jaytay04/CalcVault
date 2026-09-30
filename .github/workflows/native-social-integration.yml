@@ -2,7 +2,16 @@ name: CalcVault native integration 23 (synthetic host for private candidate, man
 
 on:
   workflow_dispatch:
+    inputs:
+      highlights_diagnostics:
+        description: 'Enable bounded, content-free Highlights observations (synthetic CI only)'
+        type: boolean
+        default: false
   workflow_call:
+    inputs:
+      highlights_diagnostics:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -32,18 +41,26 @@ jobs:
           python3 experiments/native-social-integration/prepare-integration.py "$source"
           echo "CV_INTEGRATION_UPSTREAM=$source" >> "$GITHUB_ENV"
 
+      - name: Prepare opt-in Highlights diagnostic adapter
+        if: inputs.highlights_diagnostics
+        run: python3 experiments/native-social-integration/prepare-highlights.py "$CV_INTEGRATION_UPSTREAM"
+
       - name: Test synthetic integration adapter
-        run: python3 -m unittest discover -s experiments/native-social-integration -p 'test_*.py' -v
+        run: |
+          python3 -m unittest discover -s experiments/native-social-integration -p 'test_*.py' -v
+          python3 -m unittest discover -s experiments/native-social-liveprocess-device -p 'test_*.py' -v
 
       - name: Build, stage, sign, and verify Build 23 fixtures
         shell: bash
+        env:
+          CV_HIGHLIGHTS_DIAGNOSTICS: ${{ inputs.highlights_diagnostics && '1' || '0' }}
         run: bash experiments/native-social-integration/build.sh "$CV_INTEGRATION_UPSTREAM" "$RUNNER_TEMP/cv-integration"
 
       - name: Upload ad-hoc re-signable device IPA and checksum
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: calcvault-integration-host-23
+          name: calcvault-integration-host-23${{ inputs.highlights_diagnostics && '-highlights1' || '' }}
           path: |
             ${{ runner.temp }}/cv-integration/output/CalcVault-integration-host-23.ipa
             ${{ runner.temp }}/cv-integration/output/CalcVault-integration-host-23.ipa.sha256
@@ -54,7 +71,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: calcvault-integration-host-23-evidence
+          name: calcvault-integration-host-23${{ inputs.highlights_diagnostics && '-highlights1' || '' }}-evidence
           path: |
             ${{ runner.temp }}/integration-xcode-version.log
             ${{ runner.temp }}/cv-integration/logs/

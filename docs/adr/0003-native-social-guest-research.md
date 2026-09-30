@@ -4,6 +4,45 @@ Status: separate integration candidate authorized after owner acceptance of port
 
 ## Integration candidate 23: private immutable TikTok guest
 
+### Opt-in Highlights observations (2026-09-30)
+
+After the RX-disabled comparison did not reveal Highlights, the owner approved a
+read-only diagnostic candidate checking feature eligibility, model presence and
+component layout. This remains within the separately approved native-runtime
+research exception below, not the original web-only production architecture.
+The implementation may use narrow pass-through instrumentation of existing
+guest calls: fixed method signatures, original invocation exactly once, unchanged
+arguments/results, scalar observations only. It must not call private endpoints,
+force feature settings, bypass licensing, collect profile/account content, alter
+credentials/bookmarks or relax session/lifecycle checks. An unobserved value is
+unknown, never an inferred false result. Instrumentation itself is experimental
+and must pass synthetic forwarding/privacy/stop tests before device delivery.
+
+Ordinary builds remain unchanged; enable this only through the manual opt-in
+build input. Retain RX and every immutable guest byte from the approved baseline,
+the existing identity/data-directory setting, portrait policy and browser routes.
+Keep the working IPA available. Public CI contains only the observer and synthetic
+fixtures; proprietary assembly stays local. Existing private delivery authority
+does not permit publishing guest content or private release locations in public
+source. Phone results and a Highlights fix remain unverified until owner testing.
+
+### Temporary RX-disabled comparison (2026-09-30)
+
+The owner explicitly approved a temporary comparison candidate to investigate
+missing Story Highlights. This narrowly permits omitting the single bundled RX
+dylib from a new copy of the approved Build 23 IPA. Keep every other member byte,
+including the guest executable, descriptor, host and extension, unchanged. Static
+inspection identifies a direct weak dependency on that library; package checks
+must reject a strong or additional RX dependency. Do not patch licensing or
+feature eligibility, introduce replacement code, or weaken runtime gates.
+
+The working IPA remains preserved. The comparison keeps the existing app identity
+and `integration-native-23` data-directory setting so it can be tested in place
+without another Home Screen app. No data is copied or cleared; ordinary guest use
+can still update its own preferences/cache. RX features are unavailable in this
+temporary package. SideStore must re-sign it; package verification is not phone
+launch acceptance. Preserve the existing X/Instagram browser and downloaders.
+
 Following the supplied 22.2 combined synthetic report and owner confirmations,
 the owner requested continuing to the combined native candidate. Public builds
 remain synthetic. Local packaging may copy only the already prepared, digest-pinned

@@ -89,3 +89,65 @@ match the pinned source before signing; subsequent SideStore signing necessarily
 refreshes signatures. Do not upload the input or merged IPA to public CI/source.
 Keep the previous artifacts unchanged and publish only to the verified-private
 download repository when authorized.
+
+## Temporary RX-disabled comparison
+
+The owner approved a narrowly scoped Highlights comparison using the delivered
+Build 23 package. `prepare-rx-disabled.py INPUT.ipa NEW_OUTPUT.ipa` accepts only
+the digest-pinned input and omits exactly the bundled RX dylib. It does not patch
+the guest executable or licensing, rewrite metadata, add code, change the guest
+data directory, or modify either an existing output or the original IPA.
+Every remaining member is stream-copied and digest-verified before publication.
+The fixed host/guest identity checks and exactly one weak RX dependency must pass.
+
+The optional dependency is not proof that the guest will launch without RX:
+[Apple's weak-linking guidance](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPFrameworks/Concepts/WeakLinking.html)
+requires callers to tolerate unavailable symbols. The signed-phone comparison
+must establish actual startup and behavior. Copied signature metadata is not a
+valid final signature; SideStore must re-sign the whole candidate.
+
+Install in place without deleting CalcVault. The host still reports Build 23;
+identify this candidate by its RX-disabled artifact name and checksum. This
+comparison intentionally keeps the existing guest data-directory setting and
+does not clear preferences or sessions. It isolates current RX library loading,
+not all possible effects of previously stored preferences or remote rollout
+state. Preserve the known-good download so RX can be restored afterward.
+Check the same profile/account for Highlights, playback/layout and Lock/Home
+audio cessation. Do not mistake package checks for a successful device test.
+
+## Opt-in Highlights diagnostic candidate
+
+The manual `native-social-integration.yml` input `highlights_diagnostics=true`
+adds only the approved observer to generated integration-host sources. Its default
+is false. The report marker is `integration-23-highlights1`; the containing app
+identity/build contract and `integration-native-23` data directory stay unchanged.
+Public CI still builds synthetic code only. Use the existing pinned local merger
+to retain all RX-enabled guest bytes; preserve both previous candidate IPAs.
+
+The observer aggregates only results of naturally occurring, exact-signature
+Highlights calls and bounded view geometry. It does not invoke a provider API,
+force configuration, fetch data, copy sessions or collect profile/media strings.
+No observed call means unknown, not false. Swift direct calls may bypass Objective-C
+instrumentation; no mounted component or visible cell observation alone cannot
+prove missing server data or a disabled feature. A non-nil model does not establish
+a nonempty or eligible Highlights collection. Synthetic tests and compilation
+cannot establish real TikTok compatibility.
+
+Each `CVLP_HIGHLIGHTS` line uses a fixed numeric schema. Indices 0 through 5 map
+to consumption eligibility, creation eligibility, model presence, component mount,
+collection UI update and collection height. `st` is installation status (0 unknown,
+1 installed, 2 missing, 3 inherited/skipped, 4 ABI mismatch, 5 ambiguous,
+6 incomplete lookup, 7 installation failure); `c` is a saturating call count.
+`l0`/`l1`/`l2` are last observed booleans, with -1 meaning unknown. `l5` is the
+last finite height; `l3`/`l4` are unused. Tree fields report traversal/window/row
+counts and the first matched cell's own hidden/alpha/size values. They do not
+establish effective visibility through ancestors or server eligibility. `trunc=1`
+or `err=1` means the tree observation is incomplete; zero matched rows must not
+be interpreted as proof that no Highlights implementation exists.
+
+For a diagnostic phone run, open native TikTok and navigate to the comparison
+profile within two minutes. Leave it visible for at least 15 seconds, then Lock.
+Unlock CalcVault and refresh the native report; provide the `CVLP_HIGHLIGHTS`
+lines, the report marker, and whether playback stopped/calculator cover appeared.
+Repeat after a cold launch if the first run did not reach the profile in time.
+Do not clear data, change accounts or supply profile content for this check.
