@@ -7,12 +7,17 @@ on:
         description: 'Build 20 immutable-framework route with generated synthetic guest only'
         type: boolean
         default: false
+      integration_guest:
+        description: 'Build the Build 22 CalcVaultKit integration with synthetic guest only'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   build-probe:
+    if: ${{ !inputs.integration_guest }}
     runs-on: macos-26
     timeout-minutes: 45
     steps:
@@ -462,6 +467,7 @@ jobs:
             ${{ runner.temp }}/cvlp-package/SyntheticLiveProcess-device-probe.ipa.sha256
           if-no-files-found: error
           retention-days: 7
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -494,3 +500,9 @@ jobs:
             ${{ runner.temp }}/cvlp-legacy-extension-entitlements.plist
           if-no-files-found: ignore
           retention-days: 7
+
+  build-integration:
+    if: ${{ inputs.integration_guest }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/native-social-integration.yml

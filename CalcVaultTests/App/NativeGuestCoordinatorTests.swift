@@ -153,13 +153,15 @@ final class NativeGuestCoordinatorTests: XCTestCase {
         lifecycle.lock()
         XCTAssertFalse(coordinator.showingGuest)
         XCTAssertNil(coordinator.viewController)
-        XCTAssertEqual(runtime.revokeCount, 1)
+        // lock() publishes .locking and then .calculatorLocked. Both must
+        // synchronously revoke; the runtime contract is intentionally idempotent.
+        XCTAssertEqual(runtime.revokeCount, 2)
         XCTAssertEqual(coordinator.state, .ended)
 
         runtime.completeStart(true)
         XCTAssertEqual(coordinator.state, .ended)
         XCTAssertFalse(coordinator.showingGuest)
-        XCTAssertGreaterThanOrEqual(runtime.revokeCount, 2)
+        XCTAssertEqual(runtime.revokeCount, 3)
     }
 
     func testRunningGuestIsHiddenAndRevokedOnLock() async throws {
@@ -179,7 +181,7 @@ final class NativeGuestCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.state, .ended)
         XCTAssertFalse(coordinator.showingGuest)
         XCTAssertNil(coordinator.viewController)
-        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertEqual(runtime.revokeCount, 2)
     }
 
     func testRetainedSummaryReturnsAfterReauthenticationWithoutRestoringController() async throws {

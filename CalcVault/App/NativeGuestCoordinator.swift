@@ -3,7 +3,8 @@ import Foundation
 import UIKit
 
 /// A runtime adapter must make its guest surface noninteractive synchronously
-/// before stopping or releasing any underlying work in `revoke()`.
+/// before stopping or releasing any underlying work in `revoke()`. Revocation
+/// must be idempotent: locking and locked transitions both invalidate access.
 @MainActor
 public protocol NativeGuestRuntime: AnyObject {
     var viewController: UIViewController { get }

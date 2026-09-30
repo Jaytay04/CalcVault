@@ -2,7 +2,9 @@
 
 ## Integration 22 combined synthetic candidate (2026-09-29)
 
-Implementation is in progress, not device acceptance. Nine local Python adapter/staging tests PASS; the adapter also dry-ran against the prepared pinned upstream source without writing it. Tests reject anchor drift, unapproved guest identity, extra extensions and repeated Kit embedding. Native compilation, new Swift tests, framework dependency closure, signed-phone boundary/lifecycle, browser compatibility and SideStore refresh remain pending at this checkpoint. The immutable synthetic guest is the only CI payload; working private native research 20.6 remains unchanged.
+Implementation is in progress, not device acceptance. Ten local Python adapter/staging tests and four credential-entitlement tests PASS; the adapter also dry-ran against seven prepared pinned upstream files without writing them. YAML parsing and Bash syntax checks PASS. Tests reject anchor drift, unapproved guest identity, extra extensions and repeated Kit embedding. New synthetic data uses a separate exact directory from the existing 20.6 guest. Native compilation, framework dependency closure, signed-phone boundary/lifecycle, browser compatibility and SideStore refresh remain pending at this checkpoint. The immutable synthetic guest is the only CI payload; working private native research 20.6 remains unchanged.
+
+CI 36648081850 failed compilation due to a nested weak capture in the cancellation handler; corrected in 242b9b2. CI 36648342744 then compiled and ran 203 tests, with two new test failures: each expected one runtime revoke, but SessionLifecycleCoordinator.lock publishes both locking and calculatorLocked, correctly causing two synchronous revocations. The assertions now require both revocations and a third if the revoked start callback arrives late; runtime protections were not relaxed. A corrected full rerun is pending. Independent source review found no blocker in metadata-only validation/session checks, scoped synthetic data paths or the reduced host delegate; signed-device evidence remains mandatory.
 
 ## Integration 21 credential-preflight candidate
 

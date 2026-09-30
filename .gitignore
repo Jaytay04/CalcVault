@@ -4,6 +4,7 @@ __pycache__/
 build/
 DerivedData/
 CalcVault.xcodeproj/
+CalcVaultKit.xcodeproj/
 *.xcuserstate
 xcuserdata/
 *.ipa

@@ -1,0 +1,33 @@
+name: CalcVaultKit
+options:
+  minimumXcodeGenVersion: 2.46.0
+  deploymentTarget:
+    iOS: "18.0"
+packages:
+  Sodium:
+    url: https://github.com/jedisct1/swift-sodium.git
+    exactVersion: 0.11.0
+targets:
+  CalcVaultKit:
+    type: framework
+    platform: iOS
+    sources:
+      - path: ../../CalcVault
+        excludes:
+          - App/CalcVaultApp.swift
+    dependencies:
+      - package: Sodium
+        product: Sodium
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jaylintaylor.calcvault.kit
+        GENERATE_INFOPLIST_FILE: YES
+        DEFINES_MODULE: YES
+        SWIFT_VERSION: "6.0"
+        CODE_SIGNING_ALLOWED: NO
+        TARGETED_DEVICE_FAMILY: "1"
+schemes:
+  CalcVaultKit:
+    build:
+      targets:
+        CalcVaultKit: all

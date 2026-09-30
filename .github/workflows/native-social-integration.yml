@@ -1,0 +1,63 @@
+name: CalcVault native integration 22 (synthetic, manual)
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build-integration:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Select pinned toolchain and prepare synthetic upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+          xcodebuild -version | tee "$RUNNER_TEMP/integration-xcode-version.log"
+          test "$(uname -m)" = arm64
+          brew install xcodegen
+          test "$(xcodegen version | awk '{print $2}')" = 2.46.0
+          source="$RUNNER_TEMP/cvlp-integration-upstream"
+          git clone --depth 1 --branch 3.8.0 --recurse-submodules \
+            https://github.com/LiveContainer/LiveContainer.git "$source"
+          test "$(git -C "$source" rev-parse HEAD)" = e370a92dfc03ce109ebce00ed4a7cfc64ad1c801
+          python3 experiments/native-social-liveprocess-device/prepare-upstream.py "$source"
+          python3 experiments/native-social-liveprocess-device/prepare-framework-guest.py "$source"
+          python3 experiments/native-social-integration/prepare-integration.py "$source"
+          echo "CV_INTEGRATION_UPSTREAM=$source" >> "$GITHUB_ENV"
+
+      - name: Test synthetic integration adapter
+        run: python3 -m unittest discover -s experiments/native-social-integration -p 'test_*.py' -v
+
+      - name: Build, stage, sign, and verify Build 22 fixtures
+        shell: bash
+        run: bash experiments/native-social-integration/build.sh "$CV_INTEGRATION_UPSTREAM" "$RUNNER_TEMP/cv-integration"
+
+      - name: Upload ad-hoc re-signable device IPA and checksum
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: calcvault-integration-synthetic-22
+          path: |
+            ${{ runner.temp }}/cv-integration/output/CalcVault-integration-synthetic-22.ipa
+            ${{ runner.temp }}/cv-integration/output/CalcVault-integration-synthetic-22.ipa.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload bounded synthetic build and simulator diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: calcvault-integration-synthetic-22-evidence
+          path: |
+            ${{ runner.temp }}/integration-xcode-version.log
+            ${{ runner.temp }}/cv-integration/logs/
+            ${{ runner.temp }}/cv-integration/evidence/
+          if-no-files-found: ignore
+          retention-days: 7
