@@ -2,6 +2,19 @@
 
 ## Opt-in Highlights observer preparation (2026-09-30)
 
+First native fixture run `36783600679` at `2ed8932` compiled and launched the
+synthetic observer fixture but FAILED `feature_owner_unique_hook`; no host IPA
+was built or delivered. A numeric-diagnostic rerun was dispatched separately.
+Independent review of [Apple's Objective-C runtime](https://github.com/apple-oss-distributions/objc4/blob/main/runtime/objc-runtime-new.mm)
+then found a separate passive-observation defect: `class_getInstanceMethod`
+uses `LOOKUP_RESOLVER`, and broad absent-selector lookups can invoke dynamic
+method resolvers. Replaced class and instance discovery with direct own-method
+metadata lists, rejecting duplicate declarations and using a capped superclass
+metadata walk for inherited status. Added a synthetic resolver trap requiring
+zero resolver calls and no added declaration. The original failure's precise
+classification was not established by its first fixed-token log. Corrected
+native fixture/build and real-device behavior are still pending.
+
 Owner approved a separate diagnostic candidate after the RX-disabled comparison.
 The default-off adapter changes only the generated probe import/start, strict
 report-line admission and diagnostic marker. Existing credential, bookmark,

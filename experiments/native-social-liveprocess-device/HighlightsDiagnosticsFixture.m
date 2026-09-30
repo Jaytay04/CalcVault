@@ -14,6 +14,22 @@ static id CVLPFixtureModelResult;
 static NSException *CVLPFixtureForwardedException;
 static NSMutableArray<NSString *> *CVLPFixtureDiagnosticLines;
 static NSUInteger CVLPFixtureDisplacedCalls;
+static NSUInteger CVLPFixtureResolverCalls;
+
+@interface CVLPFixtureResolverTrap : NSObject
+@end
+@implementation CVLPFixtureResolverTrap
++ (BOOL)resolveClassMethod:(SEL)selector {
+    (void)selector;
+    CVLPFixtureResolverCalls++;
+    return NO;
+}
++ (BOOL)resolveInstanceMethod:(SEL)selector {
+    (void)selector;
+    CVLPFixtureResolverCalls++;
+    return NO;
+}
+@end
 
 @interface CVLPFixtureChain : NSObject
 - (BOOL)chainFlag;
@@ -205,11 +221,16 @@ BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
     if (!CVLPFixtureRequire(wrongStatus == CVLPHighlightsInstallWrongABI &&
         method_getImplementation(wrongMethod) == wrongOriginal, @"wrong_abi_not_modified", failure)) { return NO; }
     CVLPHighlightsInstallStatus absentInstanceStatus = CVLPHighlightsInstallInstance(
-        CVLPFixtureAbsentTarget.class, sel_registerName("missingFixtureMethod"), "v", CVLPHighlightsMountTarget);
+        CVLPFixtureResolverTrap.class, sel_registerName("missingFixtureMethod"), "v", CVLPHighlightsMountTarget);
     CVLPHighlightsInstallStatus absentClassStatus = CVLPHighlightsInstallClassBoolean(
         sel_registerName("missingFixtureClassMethod"), CVLPHighlightsConsumptionTarget);
     if (!CVLPFixtureRequire(absentInstanceStatus == CVLPHighlightsInstallNotFound &&
         absentClassStatus == CVLPHighlightsInstallNotFound, @"absent_targets_report_not_found", failure)) { return NO; }
+    NSUInteger absentDeclarations = 0;
+    (void)CVLPHighlightsDeclaredMethod(CVLPFixtureResolverTrap.class,
+        sel_registerName("missingFixtureMethod"), &absentDeclarations);
+    if (!CVLPFixtureRequire(CVLPFixtureResolverCalls == 0 && absentDeclarations == 0,
+        @"discovery_never_invokes_resolvers", failure)) { return NO; }
 
     Class inheritedClass = objc_getClass("TTKProfileStoryHighlightComponent");
     Method inheritedOriginal = class_getInstanceMethod(CVLPFixtureMountBase.class, sel_registerName("componentMount"));

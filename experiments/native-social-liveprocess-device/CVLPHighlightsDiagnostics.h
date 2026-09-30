@@ -176,25 +176,39 @@ static BOOL CVLPHighlightsMethodHasExactSignature(Method method, const char *ret
     return matches;
 }
 
-static Method CVLPHighlightsOwnInstanceMethod(Class cls, SEL selector, BOOL *inherited) {
-    if (inherited != NULL) { *inherited = NO; }
-    if (cls == Nil) { return NULL; }
-    Method resolvedMethod = class_getInstanceMethod(cls, selector);
-    if (resolvedMethod == NULL) { return NULL; }
+// Do not query class_getInstanceMethod/class_getClassMethod for missing methods:
+// those APIs can invoke a guest's dynamic method resolver. Enumerate declarations.
+static Method _Nullable CVLPHighlightsDeclaredMethod(Class cls, SEL selector, NSUInteger *matches) {
+    *matches = 0;
     unsigned int count = 0;
     Method *methods = class_copyMethodList(cls, &count);
-    BOOL resolvedMethodIsOwn = NO;
+    Method selected = NULL;
     for (unsigned int index = 0; index < count; index++) {
-        if (methods[index] == resolvedMethod) {
-            resolvedMethodIsOwn = YES;
-            break;
+        if (method_getName(methods[index]) == selector) {
+            (*matches)++;
+            selected = methods[index];
         }
     }
     free(methods);
-    if (!resolvedMethodIsOwn && inherited != NULL) {
-        *inherited = YES;
+    return *matches == 1 ? selected : NULL;
+}
+
+static Method _Nullable CVLPHighlightsOwnInstanceMethod(Class _Nullable cls, SEL selector,
+    CVLPHighlightsInstallStatus *failureStatus) {
+    *failureStatus = CVLPHighlightsInstallNotFound;
+    if (cls == Nil) { return NULL; }
+    NSUInteger matches = 0;
+    Method method = CVLPHighlightsDeclaredMethod(cls, selector, &matches);
+    if (matches > 1) { *failureStatus = CVLPHighlightsInstallAmbiguous; return NULL; }
+    if (method != NULL) { return method; }
+    Class ancestor = class_getSuperclass(cls);
+    for (NSUInteger depth = 0; ancestor != Nil && depth < 64; depth++) {
+        (void)CVLPHighlightsDeclaredMethod(ancestor, selector, &matches);
+        if (matches != 0) { *failureStatus = CVLPHighlightsInstallInherited; return NULL; }
+        ancestor = class_getSuperclass(ancestor);
     }
-    return resolvedMethodIsOwn ? resolvedMethod : NULL;
+    if (ancestor != Nil) { *failureStatus = CVLPHighlightsInstallBoundedIncomplete; }
+    return NULL;
 }
 
 typedef struct {
@@ -226,11 +240,10 @@ static CVLPHighlightsClassMethodSearch CVLPHighlightsFindClassMethod(SEL selecto
             return result;
         }
         Class cls = classes[index];
-        Method method = class_getClassMethod(cls, selector);
-        Class superclass = class_getSuperclass(cls);
-        Method inherited = superclass != Nil ? class_getClassMethod(superclass, selector) : NULL;
-        if (method != NULL && method != inherited) {
-            result.matches++;
+        NSUInteger ownMatches = 0;
+        Method method = CVLPHighlightsDeclaredMethod(object_getClass(cls), selector, &ownMatches);
+        if (ownMatches != 0) {
+            result.matches += ownMatches;
             if (result.matches == 1) {
                 result.owner = cls;
                 result.method = method;
@@ -280,9 +293,9 @@ static CVLPHighlightsInstallStatus CVLPHighlightsInstallClassBoolean(SEL selecto
 static CVLPHighlightsInstallStatus CVLPHighlightsInstallInstance(Class cls, SEL selector, const char *returnEncoding,
     CVLPHighlightsTarget target) {
     if (cls == Nil) { return CVLPHighlightsInstallNotFound; }
-    BOOL inherited = NO;
-    Method method = CVLPHighlightsOwnInstanceMethod(cls, selector, &inherited);
-    if (method == NULL) { return inherited ? CVLPHighlightsInstallInherited : CVLPHighlightsInstallNotFound; }
+    CVLPHighlightsInstallStatus lookupFailure = CVLPHighlightsInstallNotFound;
+    Method method = CVLPHighlightsOwnInstanceMethod(cls, selector, &lookupFailure);
+    if (method == NULL) { return lookupFailure; }
     if (!CVLPHighlightsMethodHasExactSignature(method, returnEncoding)) { return CVLPHighlightsInstallWrongABI; }
 
     __block IMP original = method_getImplementation(method);
@@ -600,9 +613,9 @@ static BOOL CVLPHighlightsLineIsSanitized(NSString *line) {
     self->_installStatuses[CVLPHighlightsCreationTarget] =
         CVLPHighlightsInstallClassBoolean(sel_registerName("enableStoryHighlightCreation"), CVLPHighlightsCreationTarget);
 
-    Class modelClass = objc_getClass("TTKProfileBizDataStoryHighlightInfoModel");
-    Class componentClass = objc_getClass("TTKProfileStoryHighlightComponent");
-    Class collectionClass = objc_getClass("TTKProfileStoryHighlightCollectionComponent");
+    Class modelClass = objc_lookUpClass("TTKProfileBizDataStoryHighlightInfoModel");
+    Class componentClass = objc_lookUpClass("TTKProfileStoryHighlightComponent");
+    Class collectionClass = objc_lookUpClass("TTKProfileStoryHighlightCollectionComponent");
     self->_installStatuses[CVLPHighlightsModelTarget] = CVLPHighlightsInstallInstance(
         modelClass, sel_registerName("storyHighlightInfo"), "@", CVLPHighlightsModelTarget);
     self->_installStatuses[CVLPHighlightsMountTarget] = CVLPHighlightsInstallInstance(
