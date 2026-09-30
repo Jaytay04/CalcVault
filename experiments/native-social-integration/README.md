@@ -74,3 +74,18 @@ On the phone, unlock normally and use Security > Native integration test. After
 locking the synthetic guest, reauthenticate and choose Refresh native report.
 Restart CalcVault before another guest attempt. Use disposable vault fixtures;
 these observations are not a security certification.
+
+## Private assembly
+
+After verifying the CI host checksum and its build evidence, use the local
+`merge-private-guest.py` tool with the host IPA, the original known-good 20.6 IPA,
+a new output IPA path and `--host-sha256` set to the verified CI digest. The
+production CLI pins the 20.6 input digest internally; it offers no guest-digest
+override. Tests use disposable synthetic fixtures, never the private input.
+
+The output is a SideStore re-signing candidate. Its copied outer/nested signature
+metadata is not asserted valid after assembly. Readback proves guest file bytes
+match the pinned source before signing; subsequent SideStore signing necessarily
+refreshes signatures. Do not upload the input or merged IPA to public CI/source.
+Keep the previous artifacts unchanged and publish only to the verified-private
+download repository when authorized.
