@@ -150,6 +150,15 @@ BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
 
     CVLPHighlightsInstallStatus consumptionStatus = CVLPHighlightsInstallClassBoolean(
         sel_registerName("enableStoryHighlightConsumption"), CVLPHighlightsConsumptionTarget);
+    if (consumptionStatus != CVLPHighlightsInstallInstalled) {
+        CVLPHighlightsClassMethodSearch retry = CVLPHighlightsFindClassMethod(
+            sel_registerName("enableStoryHighlightConsumption"));
+        Method known = class_getClassMethod(CVLPFixtureFeatureOwner.class,
+            @selector(enableStoryHighlightConsumption));
+        fprintf(stderr, "CV_HIGHLIGHTS_FIXTURE_LOOKUP status=%d classes=%d retryComplete=%d retryMatches=%lu knownABI=%d\n",
+            consumptionStatus, objc_getClassList(NULL, 0), retry.complete,
+            (unsigned long)retry.matches, CVLPHighlightsMethodHasExactSignature(known, "B"));
+    }
     if (!CVLPFixtureRequire(consumptionStatus == CVLPHighlightsInstallInstalled, @"feature_owner_unique_hook", failure)) { return NO; }
     CVLPHighlightsInstallStatus creationStatus = CVLPHighlightsInstallClassBoolean(
         sel_registerName("enableStoryHighlightCreation"), CVLPHighlightsCreationTarget);

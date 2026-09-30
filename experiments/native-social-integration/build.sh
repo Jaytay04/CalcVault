@@ -77,7 +77,10 @@ if [[ "${CV_HIGHLIGHTS_DIAGNOSTICS:-0}" == 1 ]]; then
             cat "$evidence/highlights-fixture.log"
             exit 1
         }
-    grep -q '^CV_HIGHLIGHTS_FIXTURE_PASS$' "$evidence/highlights-fixture.log"
+    if ! grep -q '^CV_HIGHLIGHTS_FIXTURE_PASS$' "$evidence/highlights-fixture.log"; then
+        cat "$evidence/highlights-fixture.log"
+        exit 1
+    fi
 fi
 
 build_target iphonesimulator 'generic/platform=iOS Simulator' "$sim_products"
