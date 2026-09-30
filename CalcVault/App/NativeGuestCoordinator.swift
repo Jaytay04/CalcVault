@@ -156,7 +156,7 @@ public final class NativeGuestCoordinator: ObservableObject {
                         self?.finishCheck(request, succeeded: false)
                     }
                 }
-            } onCancel: {
+            } onCancel: { [weak self] in
                 Task { @MainActor [weak self] in
                     self?.cancelCheck(request)
                 }
