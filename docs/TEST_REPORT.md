@@ -1,5 +1,37 @@
 # CalcVault test report
 
+## Opt-in Highlights observer build and assembly (2026-09-30)
+
+Delivery complete: separate candidate and checksum uploaded to the verified-private
+download repository, with both server asset digests/sizes matching local files.
+Previous artifacts are preserved. Phone measurements remain pending.
+
+Actions run `36784930862` at `b33b98d` PASS: the corrected native observer
+fixture emitted `CV_HIGHLIGHTS_FIXTURE_PASS`; both SDK builds and synthetic
+signature, entitlement, linkage and ZIP gates completed. Local downloaded host
+digest matches the CI checksum. The earlier numeric rerun `36784597910` failed
+with status 6 (bounded/incomplete registry discovery); it did not establish
+whether the deadline or registry-count change caused that incomplete scan.
+Metadata-only discovery now passes the fixture, including the resolver trap.
+This supersedes the native-build pending entries below, not phone acceptance.
+
+Local private assembly and independent full-member readback PASS: 122 host files
+unchanged, 2,424 guest files plus the descriptor unchanged, RX present and
+byte-identical, only the two intended host Info.plist values changed. Source
+inputs are unchanged. One app and the existing single extension, portrait-only
+metadata, signing-export absence and the existing data-directory descriptor
+are preserved. The independent check initially looked for the marker in the app
+stub; archive inspection located the marker and observer in LiveContainerShared,
+and the corrected location-specific check passed. No package modification was
+needed. Private asset identifiers and digests are intentionally omitted here.
+
+The simulator screenshot is the expected fail-closed Configuration unavailable
+root under the ad-hoc signature, not a successful authenticated guest launch.
+The merged IPA requires SideStore re-signing. Real-guest observer installation,
+phone profile measurements, playback and revocation remain NOT RUN. UIKit tree
+sampling is not covered by the native forwarding fixture. Missing Highlights
+remain unresolved; no feature settings or licensing behavior were changed.
+
 ## Opt-in Highlights observer preparation (2026-09-30)
 
 First native fixture run `36783600679` at `2ed8932` compiled and launched the
