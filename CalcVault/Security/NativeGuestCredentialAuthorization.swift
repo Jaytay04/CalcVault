@@ -38,11 +38,16 @@ public final class NativeGuestBiometricAuthorization: NativeGuestCredentialAutho
 
     public convenience init() {
         self.init(context: LAContext(), storage: HostOnlyKeychainStorage()) { context, reason in
-            guard try await context.evaluatePolicy(
-                .deviceOwnerAuthenticationWithBiometrics,
-                localizedReason: reason
-            ) else {
-                throw NativeGuestCredentialAuthorizationError.authenticationRequired
+            // Register synchronously on the owning actor. The completion only
+            // transfers its result, not the mutable context, across executors.
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { success, error in
+                    if success {
+                        continuation.resume()
+                    } else {
+                        continuation.resume(throwing: error ?? NativeGuestCredentialAuthorizationError.authenticationRequired)
+                    }
+                }
             }
         }
     }

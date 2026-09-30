@@ -2,6 +2,8 @@
 
 ## Integration 22.2 authenticated preflight (2026-09-29)
 
+Second regression run 36667831965 at c3560be FAILED compilation under Xcode 16.4 Swift 6: the async LocalAuthentication overlay sent the actor-owned context across an executor boundary. The evaluator now registers the callback API synchronously and bridges only its success/error result with a checked continuation; the same context, biometrics-only policy, cancellation and full retry remain. The superseded combined run 36667834594 is not a release candidate.
+
 First native CI gate FAILED before tests: runs 36667579155 and 36667547882 at dec81b4 found the authorization factory optional was unwrapped only inside a catch scope, then invoked outside that scope. The correction unwraps it again in the enclosing guard before creating the prompt token. No validation or cancellation condition is removed. Corrected native runs pending.
 
 Local PASS: 12 adapter/staging tests, four entitlement-template tests, Bash syntax, workflow YAML and in-memory transformation of seven pinned prepared upstream files. Independent read-only review found no remaining launch/lifecycle blocker after the lifecycle-owned lock cleanup was added. The fixed inventory ordering and required/optional biometric retry cases are pinned by tests; same-context propagation and zero credential data reads/mutations have dedicated tests. Native compilation/test results remain pending in regression run 36667579155 and combined run 36667547882 at `dec81b46c8e9b0bd1465184eb377c9c1c0a0e8e5`. An initial regression dispatch returned HTTP 500 without creating a run; dispatch was retried only after checking the run inventory.
