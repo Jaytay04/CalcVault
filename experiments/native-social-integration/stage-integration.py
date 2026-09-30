@@ -28,9 +28,9 @@ def stage(host, kit):
     if target.exists():
         raise ValueError('kit_already_embedded')
     shutil.copytree(kit, target)
-    info['CFBundleVersion'] = '22'
+    info['CFBundleVersion'] = '22.1'
     info['CFBundleDisplayName'] = 'Calculator'
-    info['CVNativeIntegrationStage'] = 'synthetic-integration-22'
+    info['CVNativeIntegrationStage'] = 'synthetic-integration-22-diagnostics1'
     # The containing app is CalcVault, not the generic upstream file manager.
     # Do not expose its Documents directory or inherit broad network/background
     # exceptions. Guest extension metadata is intentionally untouched here.
@@ -40,7 +40,7 @@ def stage(host, kit):
     info.pop('UIBackgroundModes', None)
     info['NSFaceIDUsageDescription'] = 'Face ID verifies access to biometric-protected CalcVault key material.'
     (host / 'Info.plist').write_bytes(plistlib.dumps(info))
-    print('Integration 22 synthetic host staged; nested code and host require fresh signing')
+    print('Integration 22.1 synthetic host staged; nested code and host require fresh signing')
 
 
 if __name__ == '__main__':

@@ -1,5 +1,11 @@
 # CalcVault test report
 
+## Integration 22.1 launch diagnostics (2026-09-29)
+
+Owner-observed Build 22 launch: FAIL. UI reports "Launch blocked. Credentials or runtime prerequisites could not be verified."; Refresh native report returns only "Native guest could not be started." The nil-runtime fallback in NativeGuestCoordinator cannot distinguish failed credential validation from a throwing preparation factory. No guest-entry or boundary report was supplied, and no specific Keychain/signing fault is yet established.
+
+Diagnostic revision: preserve fixed stage/reason codes only within the authenticated report. Credential checks add opt-in sanitized operation context and numeric OSStatus without credential values, item identities, group names or raw errors. Runtime preparation maps exact known synthetic-fixture failures to an allowlisted enum; all other errors become unclassified. Lock hides the report, a new attempt clears it and stale callbacks cannot publish into a newer session. Existing credential queries, required-item rules, no-export check, runtime factory ordering, one-attempt limit and revoke policy are unchanged. Build marker 22.1 is distinct, with the same synthetic data directory and payload. Compilation, simulator tests and signed-phone reason remain pending.
+
 ## Integration 22 combined synthetic candidate (2026-09-29)
 
 Final build gate: [Run 36650186185](https://github.com/Jaytay04/CalcVault/actions/runs/36650186185) at `f51b73357b380c61165355191d16036bef8193ad` PASS in 17m19s using Xcode 26.6 (17F113). Ten adapter/staging tests, Kit/guest/host compilation for both SDKs, synthetic payload prepatching, nested signature checks, XML entitlement comparisons and framework dependency closure passed. The simulator logged `CV_INTEGRATION_ROOT_ACTIVE` without a guest-launch marker. Its inspected screenshot shows **Configuration unavailable: Protected Keychain access is unavailable for this app signature**. This proves the unauthenticated fail-closed UI mounted; it is not evidence of a working calculator session, successful authentication, native guest execution or isolation on this simulator signature.

@@ -151,8 +151,8 @@ import plistlib, sys
 from pathlib import Path
 host = Path(sys.argv[1])
 info = plistlib.loads((host / 'Info.plist').read_bytes())
-assert info.get('CFBundleVersion') == '22'
-assert info.get('CVNativeIntegrationStage') == 'synthetic-integration-22'
+assert info.get('CFBundleVersion') == '22.1'
+assert info.get('CVNativeIntegrationStage') == 'synthetic-integration-22-diagnostics1'
 assert info.get('CVLPFrameworkGuestMode') == 1
 assert info.get('CFBundleIdentifier') == 'com.jaylintaylor.calcvault'
 assert info.get('UIFileSharingEnabled') is False
@@ -221,11 +221,11 @@ xcrun simctl io "$simulator" screenshot "$evidence/simulator-locked-root.png"
 
 mkdir -p "$output/Payload"
 ditto "$device_host" "$output/Payload/LiveContainer.app"
-(cd "$output" && zip -qry CalcVault-integration-synthetic-22.ipa Payload)
-shasum -a 256 "$output/CalcVault-integration-synthetic-22.ipa" \
-    > "$output/CalcVault-integration-synthetic-22.ipa.sha256"
-unzip -t "$output/CalcVault-integration-synthetic-22.ipa" > "$evidence/ipa-zip-check.txt"
-printf '%s\n' 'Build 22 synthetic integration artifact created.' \
+(cd "$output" && zip -qry CalcVault-integration-diagnostics-22.1.ipa Payload)
+shasum -a 256 "$output/CalcVault-integration-diagnostics-22.1.ipa" \
+    > "$output/CalcVault-integration-diagnostics-22.1.ipa.sha256"
+unzip -t "$output/CalcVault-integration-diagnostics-22.1.ipa" > "$evidence/ipa-zip-check.txt"
+printf '%s\n' 'Build 22.1 synthetic integration diagnostic artifact created.' \
     'Simulator evidence covers only the locked CalcVault root; no guest launch was attempted.' \
     'Physical-device signing, install, native guest launch and isolation remain NOT RUN.' \
     > "$evidence/result.txt"

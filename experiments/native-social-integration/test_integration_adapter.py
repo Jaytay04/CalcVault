@@ -30,6 +30,7 @@ int callAppMain(int argc, char *argv[]) { return 0; }
     }
 #endif
 // independent synthetic file and Keychain controls remain
+return @"Synthetic Keychain fixture setup is inconclusive; device probe stopped before guest launch. See the host report for each control's identity status and setup result.";
 ''',
             adapter.PROJECT: '\t\t\t\tOTHER_LDFLAGS = "-Wl,-U,_OBJC_CLASS_$_RBSTarget";\n' * 2,
             adapter.SESSION: 'native-framework-research',
@@ -82,6 +83,26 @@ int callAppMain(int argc, char *argv[]) { return 0; }
         for name in (adapter.BOOT, adapter.PROBE, adapter.SESSION, adapter.SCENE, adapter.EXTENSION):
             self.assertNotIn('native-framework-research', prepared[name])
             self.assertIn('integration-synthetic-22', prepared[name])
+
+    def test_preparation_failures_are_mapped_without_publishing_raw_errors(self):
+        app = (ROOT / 'IntegrationApp.swift').read_text()
+        self.assertIn('if let failure = CVLPProbe.prepareHost()', app)
+        self.assertIn('throw Self.preparationFailure(failure)', app)
+        self.assertIn('-> NativeGuestPreparationFailure', app)
+        self.assertIn('default: .unclassified', app)
+        for code in ('signingExport', 'immutableContract', 'hostSupport',
+                     'hostFixtureDirectory', 'hostSentinelCreate', 'hostSentinelReadback',
+                     'hostDocuments', 'guestDirectoryType', 'guestDirectoryCreate',
+                     'appIDControl', 'hostOnlyControl', 'bothControls'):
+            self.assertIn(': .' + code, app)
+        for forbidden in ('localizedDescription', 'String(describing:', 'NSLog(failure', 'print(failure'):
+            self.assertNotIn(forbidden, app)
+
+    def test_control_failure_diagnostic_uses_only_existing_readiness_booleans(self):
+        probe = adapter.transform(self.sources(), 'root')[adapter.PROBE]
+        self.assertIn('!appIDFixtureReady && !hostOnlyFixtureReady', probe)
+        for control in ('BOTH_CONTROLS', 'APP_ID_CONTROL', 'HOST_ONLY_CONTROL'):
+            self.assertIn('CV_INTEGRATION_PREP_' + control, probe)
 
 
 if __name__ == '__main__':

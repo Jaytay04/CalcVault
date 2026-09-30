@@ -1,4 +1,4 @@
-name: CalcVault native integration 22 (synthetic, manual)
+name: CalcVault native integration 22.1 (synthetic diagnostics, manual)
 
 on:
   workflow_dispatch:
@@ -35,7 +35,7 @@ jobs:
       - name: Test synthetic integration adapter
         run: python3 -m unittest discover -s experiments/native-social-integration -p 'test_*.py' -v
 
-      - name: Build, stage, sign, and verify Build 22 fixtures
+      - name: Build, stage, sign, and verify Build 22.1 fixtures
         shell: bash
         run: bash experiments/native-social-integration/build.sh "$CV_INTEGRATION_UPSTREAM" "$RUNNER_TEMP/cv-integration"
 
@@ -43,10 +43,10 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: calcvault-integration-synthetic-22
+          name: calcvault-integration-diagnostics-22.1
           path: |
-            ${{ runner.temp }}/cv-integration/output/CalcVault-integration-synthetic-22.ipa
-            ${{ runner.temp }}/cv-integration/output/CalcVault-integration-synthetic-22.ipa.sha256
+            ${{ runner.temp }}/cv-integration/output/CalcVault-integration-diagnostics-22.1.ipa
+            ${{ runner.temp }}/cv-integration/output/CalcVault-integration-diagnostics-22.1.ipa.sha256
           if-no-files-found: error
           retention-days: 7
 
@@ -54,7 +54,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: calcvault-integration-synthetic-22-evidence
+          name: calcvault-integration-diagnostics-22.1-evidence
           path: |
             ${{ runner.temp }}/integration-xcode-version.log
             ${{ runner.temp }}/cv-integration/logs/

@@ -13,6 +13,24 @@ public protocol NativeGuestRuntime: AnyObject {
     func revoke()
 }
 
+/// Allowlisted preparation failures only. Never carry an underlying error,
+/// filesystem path, entitlement value or credential into the UI report.
+public enum NativeGuestPreparationFailure: String, Error, Sendable {
+    case signingExport = "signing-export-absence"
+    case immutableContract = "immutable-framework-contract"
+    case hostSupport = "host-support-directory"
+    case hostFixtureDirectory = "host-fixture-directory"
+    case hostSentinelCreate = "host-sentinel-create"
+    case hostSentinelReadback = "host-sentinel-readback"
+    case hostDocuments = "host-documents-directory"
+    case guestDirectoryType = "guest-directory-type"
+    case guestDirectoryCreate = "guest-directory-create"
+    case appIDControl = "synthetic-app-id-control"
+    case hostOnlyControl = "synthetic-host-only-control"
+    case bothControls = "synthetic-both-controls"
+    case unclassified
+}
+
 /// Coordinates one diagnostic-gated native guest attempt within the current
 /// application launch. It never owns credentials or session authority.
 @MainActor
@@ -52,6 +70,7 @@ public final class NativeGuestCoordinator: ObservableObject {
     private var runtimeStartAttempted = false
     private var runtimeStartPending = false
     private var runtimeRevoked = false
+    private var launchFailure: String?
 
     public init(
         lifecycle: SessionLifecycleCoordinator,
@@ -92,8 +111,12 @@ public final class NativeGuestCoordinator: ObservableObject {
     /// diagnostic report without restoring access to its revoked controller.
     /// Locked/authenticating states always use fixed, non-error details.
     public var summary: String {
-        if validSessionContext() != nil, let runtime {
-            return runtime.summary
+        if validSessionContext() != nil {
+            if let launchFailure {
+                let diagnostic = "Native launch diagnostic v1\n\(launchFailure)"
+                return runtime.map { diagnostic + "\n\n" + $0.summary } ?? diagnostic
+            }
+            if let runtime { return runtime.summary }
         }
 
         switch state {
@@ -133,6 +156,7 @@ public final class NativeGuestCoordinator: ObservableObject {
 
         let request = CheckRequest(session: session, requestID: UUID())
         let checker = checkLegacyCredentialAbsence
+        launchFailure = nil
         activeRequest = request
         state = .checking
 
@@ -149,12 +173,16 @@ public final class NativeGuestCoordinator: ObservableObject {
                         self?.cancelCheck(request)
                         return
                     }
-                    self?.finishCheck(request, succeeded: true)
+                    self?.finishCheck(request, failure: nil)
                 } catch {
                     if Task.isCancelled {
                         self?.cancelCheck(request)
                     } else {
-                        self?.finishCheck(request, succeeded: false)
+                        let code = (error as? NativeGuestCredentialBoundaryFailure)?.diagnosticCode
+                            ?? "unclassified"
+                        let preference = biometricEnabled ? "enabled" : "disabled"
+                        self?.finishCheck(request, failure: "stage=credential-boundary; " + code
+                                          + "; biometric=" + preference)
                     }
                 }
             } onCancel: { [weak self] in
@@ -195,7 +223,7 @@ public final class NativeGuestCoordinator: ObservableObject {
             && isValid(request.session)
     }
 
-    private func finishCheck(_ request: CheckRequest, succeeded: Bool) {
+    private func finishCheck(_ request: CheckRequest, failure: String?) {
         guard activeRequest == request else { return }
         activeRequest = nil
         activeCheckTask = nil
@@ -204,7 +232,8 @@ public final class NativeGuestCoordinator: ObservableObject {
             state = .idle
             return
         }
-        guard succeeded else {
+        if let failure {
+            launchFailure = failure
             state = .blocked
             return
         }
@@ -237,7 +266,13 @@ public final class NativeGuestCoordinator: ObservableObject {
             showingGuest = true
             state = .presenting
         } catch {
-            state = isValid(request.session) ? .blocked : .ended
+            if isValid(request.session) {
+                let code = (error as? NativeGuestPreparationFailure)?.rawValue ?? "unclassified"
+                launchFailure = "stage=runtime-preparation; reason=" + code
+                state = .blocked
+            } else {
+                state = .ended
+            }
         }
     }
 
@@ -263,6 +298,7 @@ public final class NativeGuestCoordinator: ObservableObject {
         if started {
             state = .running
         } else {
+            launchFailure = "stage=runtime-start; reason=request-rejected"
             showingGuest = false
             runtime?.revoke()
             runtimeRevoked = true

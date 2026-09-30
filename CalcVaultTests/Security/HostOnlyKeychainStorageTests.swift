@@ -260,6 +260,146 @@ final class HostOnlyKeychainStorageTests: XCTestCase {
         XCTAssertEqual(backend.operations.filter { $0.kind == .validateProtection }.count, 1)
     }
 
+    func testGuestBoundaryDiagnosticDistinguishesGroupResolution() throws {
+        let backend = MemoryHostOnlyKeychainBackend()
+        let storage = HostOnlyKeychainStorage(
+            groups: { throw HostOnlyKeychainStorageError.identityUnavailable },
+            backend: { _ in backend }
+        )
+
+        XCTAssertThrowsError(try storage.assertGuestCredentialBoundary(
+            required: [makeItem()],
+            optional: [],
+            diagnosticErrors: true
+        )) { error in
+            XCTAssertEqual(
+                (error as? NativeGuestCredentialBoundaryFailure)?.diagnosticCode,
+                "native-guest-boundary.group-resolution.identity-unavailable"
+            )
+        }
+        XCTAssertTrue(backend.operations.isEmpty)
+    }
+
+    func testGuestBoundaryDiagnosticIdentifiesInvalidInventory() throws {
+        let backend = MemoryHostOnlyKeychainBackend()
+        var groupResolutionCalls = 0
+        let storage = HostOnlyKeychainStorage(
+            groups: {
+                groupResolutionCalls += 1
+                return try self.makeSingleLegacyGroups()
+            },
+            backend: { _ in backend }
+        )
+
+        XCTAssertThrowsError(try storage.assertGuestCredentialBoundary(
+            required: [],
+            optional: [makeItem()],
+            diagnosticErrors: true
+        )) { error in
+            XCTAssertEqual(
+                (error as? NativeGuestCredentialBoundaryFailure)?.diagnosticCode,
+                "native-guest-boundary.inventory.invalid-inventory"
+            )
+        }
+        XCTAssertEqual(groupResolutionCalls, 0)
+        XCTAssertTrue(backend.operations.isEmpty)
+    }
+
+    func testGuestBoundaryDiagnosticDistinguishesLegacyPresenceFromQueryFailure() throws {
+        let groups = try makeSideStoreGroups()
+        let item = makeItem(account: "required")
+
+        let presentBackend = MemoryHostOnlyKeychainBackend()
+        presentBackend.seed(Data("legacy fixture".utf8), item: item, group: groups.legacyGroups[0])
+        let presentStorage = makeStorage(groups: groups, backend: presentBackend)
+        XCTAssertThrowsError(try presentStorage.assertGuestCredentialBoundary(
+            required: [item], optional: [], diagnosticErrors: true
+        )) { error in
+            XCTAssertEqual(
+                (error as? NativeGuestCredentialBoundaryFailure)?.diagnosticCode,
+                "native-guest-boundary.legacy-presence.item-0.group-0.legacy-credential-present"
+            )
+        }
+        XCTAssertTrue(presentBackend.operations.allSatisfy { $0.kind == .contains })
+
+        let failedBackend = MemoryHostOnlyKeychainBackend()
+        failedBackend.failContainsFor = ScopedCredential(item: item, group: groups.legacyGroups[1])
+        let failedStorage = makeStorage(groups: groups, backend: failedBackend)
+        XCTAssertThrowsError(try failedStorage.assertGuestCredentialBoundary(
+            required: [item], optional: [], diagnosticErrors: true
+        )) { error in
+            XCTAssertEqual(
+                (error as? NativeGuestCredentialBoundaryFailure)?.diagnosticCode,
+                "native-guest-boundary.legacy-presence.item-0.group-1.status:-50"
+            )
+        }
+        XCTAssertTrue(failedBackend.operations.allSatisfy { $0.kind == .contains })
+    }
+
+    func testGuestBoundaryDiagnosticDistinguishesRequiredAndOptionalProtectionFailures() throws {
+        let groups = try makeSideStoreGroups()
+        let existingRequired = makeItem(account: "existing-required")
+        let missingRequired = makeItem(account: "missing-required")
+        let missingBackend = MemoryHostOnlyKeychainBackend()
+        missingBackend.seed(Data("required fixture".utf8), item: existingRequired, group: groups.hostOnly)
+        let missingStorage = makeStorage(groups: groups, backend: missingBackend)
+
+        XCTAssertThrowsError(try missingStorage.assertGuestCredentialBoundary(
+            required: [existingRequired, missingRequired], optional: [], diagnosticErrors: true
+        )) { error in
+            XCTAssertEqual(
+                (error as? NativeGuestCredentialBoundaryFailure)?.diagnosticCode,
+                "native-guest-boundary.required-protection.item-1.invalid-item"
+            )
+        }
+        XCTAssertTrue(missingBackend.operations.allSatisfy {
+            $0.kind == .contains || $0.kind == .validateProtection
+        })
+
+        let required = makeItem(account: "required")
+        let optional = makeItem(account: "optional")
+        let optionalBackend = MemoryHostOnlyKeychainBackend()
+        optionalBackend.seed(Data("required fixture".utf8), item: required, group: groups.hostOnly)
+        optionalBackend.failValidationFor = ScopedCredential(item: optional, group: groups.hostOnly)
+        let optionalStorage = makeStorage(groups: groups, backend: optionalBackend)
+
+        XCTAssertThrowsError(try optionalStorage.assertGuestCredentialBoundary(
+            required: [required], optional: [optional], diagnosticErrors: true
+        )) { error in
+            XCTAssertEqual(
+                (error as? NativeGuestCredentialBoundaryFailure)?.diagnosticCode,
+                "native-guest-boundary.optional-protection.item-0.status:-51"
+            )
+        }
+        XCTAssertTrue(optionalBackend.operations.allSatisfy {
+            $0.kind == .contains || $0.kind == .validateProtection
+        })
+    }
+
+    func testGuestBoundaryDiagnosticDoesNotExposeUnknownErrorOrCredentialIdentity() throws {
+        let groups = try makeSideStoreGroups()
+        let item = makeItem(service: "synthetic-service-secret", account: "synthetic-account-secret")
+        let unknownErrorText = "synthetic-underlying-error-secret"
+        let backend = MemoryHostOnlyKeychainBackend()
+        backend.containsFailure = SecretDiagnosticError(message: unknownErrorText)
+        let storage = makeStorage(groups: groups, backend: backend)
+
+        XCTAssertThrowsError(try storage.assertGuestCredentialBoundary(
+            required: [item], optional: [], diagnosticErrors: true
+        )) { error in
+            let failure = error as? NativeGuestCredentialBoundaryFailure
+            XCTAssertEqual(
+                failure?.diagnosticCode,
+                "native-guest-boundary.legacy-presence.item-0.group-0.unclassified"
+            )
+            let diagnosticCode = failure?.diagnosticCode ?? ""
+            for secret in [unknownErrorText, item.service, item.account] + groups.legacyGroups + [groups.hostOnly] {
+                XCTAssertFalse(diagnosticCode.contains(secret))
+            }
+        }
+        XCTAssertTrue(backend.operations.allSatisfy { $0.kind == .contains })
+    }
+
     func testGuestBoundaryRejectsInvalidInventoryBeforeGroupResolutionOrBackendConstruction() throws {
         let groups = try makeSideStoreGroups()
         let invalidInventories: [([KeychainMigrationItem], [KeychainMigrationItem])] = [
@@ -817,6 +957,7 @@ private final class MemoryHostOnlyKeychainBackend: HostOnlyKeychainBackend {
     var failNextInsert = false
     var failNextRemovalForGroups: Set<String> = []
     var failContainsFor: ScopedCredential?
+    var containsFailure: (any Error)?
     var failValidationFor: ScopedCredential?
     var invalidProtectionFor: Set<ScopedCredential> = []
 
@@ -856,6 +997,7 @@ private final class MemoryHostOnlyKeychainBackend: HostOnlyKeychainBackend {
 
     func contains(_ item: KeychainMigrationItem, accessGroup: String) throws -> Bool {
         operations.append(BackendOperation(kind: .contains, item: item, group: accessGroup))
+        if let containsFailure { throw containsFailure }
         if failContainsFor == ScopedCredential(item: item, group: accessGroup) {
             throw HostOnlyKeychainStorageError.unexpectedStatus(-50)
         }
@@ -882,6 +1024,11 @@ private final class MemoryHostOnlyKeychainBackend: HostOnlyKeychainBackend {
         guard values[credential] != nil else { throw HostOnlyKeychainStorageError.invalidItem }
         values[credential] = data
     }
+}
+
+private struct SecretDiagnosticError: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
 }
 
 private final class DiscoveryState {

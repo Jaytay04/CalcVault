@@ -331,6 +331,7 @@ final class NativeGuestCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(coordinator.state, .blocked)
         XCTAssertFalse(coordinator.summary.contains("sensitive"))
+        XCTAssertTrue(coordinator.summary.contains("stage=credential-boundary; unclassified"))
         XCTAssertEqual(runtime.factoryCount, 0)
 
         let retryTask = try XCTUnwrap(coordinator.start(biometricEnabled: true))
@@ -340,6 +341,99 @@ final class NativeGuestCoordinatorTests: XCTestCase {
         await retryTask.value
         XCTAssertEqual(coordinator.state, .presenting)
         XCTAssertEqual(runtime.factoryCount, 1)
+        XCTAssertFalse(coordinator.summary.contains("stage=credential-boundary"))
+    }
+
+    func testPreparationDiagnosticIsAllowlistedAndRequiresAuthentication() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let coordinator = NativeGuestCoordinator(lifecycle: lifecycle, check: { _ in }, runtimeFactory: {
+            throw NativeGuestPreparationFailure.immutableContract
+        })
+        let task = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await task.value
+        XCTAssertEqual(coordinator.state, .blocked)
+        XCTAssertEqual(coordinator.summary,
+                       "Native launch diagnostic v1\nstage=runtime-preparation; reason=immutable-framework-contract")
+        lifecycle.lock()
+        XCTAssertFalse(coordinator.summary.contains("immutable-framework-contract"))
+        _ = try unlock(lifecycle)
+        XCTAssertTrue(coordinator.summary.contains("immutable-framework-contract"))
+        XCTAssertNil(coordinator.start(biometricEnabled: false))
+        XCTAssertNil(coordinator.viewController)
+    }
+
+    func testUnknownFactoryErrorDoesNotExposeDescriptionOrUserInfo() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let coordinator = NativeGuestCoordinator(lifecycle: lifecycle, check: { _ in }, runtimeFactory: {
+            throw NSError(domain: "sensitive-domain", code: 42,
+                          userInfo: [NSLocalizedDescriptionKey: "sensitive-path-and-credential"])
+        })
+        let task = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await task.value
+        XCTAssertEqual(coordinator.summary,
+                       "Native launch diagnostic v1\nstage=runtime-preparation; reason=unclassified")
+        XCTAssertFalse(coordinator.summary.contains("sensitive"))
+    }
+
+    func testTypedCredentialDiagnosticSurvivesWithoutConstructingRuntime() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let runtime = FakeGuestRuntime()
+        let coordinator = NativeGuestCoordinator(lifecycle: lifecycle, check: { _ in
+            // Invalid synthetic inventory is rejected before any Keychain query.
+            try HostOnlyKeychainStorage().assertGuestCredentialBoundary(
+                required: [], optional: [], diagnosticErrors: true)
+        }, runtimeFactory: {
+            runtime.noteFactoryInvocation()
+            return runtime
+        })
+        let task = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await task.value
+        XCTAssertEqual(coordinator.state, .blocked)
+        XCTAssertEqual(runtime.factoryCount, 0)
+        XCTAssertTrue(coordinator.summary.contains("stage=credential-boundary"))
+        XCTAssertTrue(coordinator.summary.contains("native-guest-boundary.inventory.invalid-inventory"))
+        lifecycle.lock()
+        XCTAssertFalse(coordinator.summary.contains("native-guest-boundary"))
+    }
+
+    func testLateCheckFailureCannotReplaceNewSessionReport() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeGuestRuntime()
+        let coordinator = makeCoordinator(lifecycle: lifecycle, checker: checker, runtime: runtime)
+        let stale = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await checker.waitForCall(1)
+        lifecycle.lock()
+        _ = try unlock(lifecycle)
+        let current = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await checker.waitForCall(2)
+        let success = await checker.succeed(2)
+        XCTAssertTrue(success)
+        await current.value
+        let failure = await checker.fail(1)
+        XCTAssertTrue(failure)
+        await stale.value
+        XCTAssertEqual(coordinator.state, .presenting)
+        XCTAssertEqual(coordinator.summary, runtime.summary)
+    }
+
+    func testRuntimeRejectionReportKeepsItsStageAndRuntimeEvidence() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeGuestRuntime()
+        let coordinator = makeCoordinator(lifecycle: lifecycle, checker: checker, runtime: runtime)
+        try await completeCheck(coordinator, checker: checker)
+        coordinator.surfaceReady()
+        runtime.completeStart(false)
+        XCTAssertTrue(coordinator.summary.contains("stage=runtime-start; reason=request-rejected"))
+        XCTAssertTrue(coordinator.summary.contains(runtime.summary))
+        XCTAssertNil(coordinator.viewController)
+        XCTAssertEqual(runtime.revokeCount, 1)
     }
 
     private func completeCheck(

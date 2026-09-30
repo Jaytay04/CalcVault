@@ -84,7 +84,10 @@ final class NativeGuestCredentialInventoryTests: XCTestCase {
                     biometricEnabled: true,
                     storage: storage
                 )) { error in
-                    XCTAssertEqual(error as? HostOnlyKeychainStorageError, .invalidItem)
+                    XCTAssertEqual(
+                        (error as? NativeGuestCredentialBoundaryFailure)?.diagnosticCode,
+                        "native-guest-boundary.required-protection.item-2.invalid-item"
+                    )
                 }
             } else {
                 XCTAssertNoThrow(try NativeGuestCredentialInventory.checkForLaunch(
@@ -95,6 +98,8 @@ final class NativeGuestCredentialInventoryTests: XCTestCase {
 
             XCTAssertTrue(backend.validationCalls.contains { $0.item == items[3] })
             XCTAssertTrue(backend.containsCalls.contains { $0.item == items[3] })
+            XCTAssertEqual(backend.readCount, 0)
+            XCTAssertEqual(backend.mutationCount, 0)
         }
     }
 

@@ -75,7 +75,13 @@ def transform(sources, app):
         return @"Signing export absence could not be verified; guest launch blocked.";
     }''')
     result[PROBE] = once(result[PROBE], 'Build marker: build20-framework-portrait1.',
-                         'Build marker: synthetic-integration-22.')
+                         'Build marker: synthetic-integration-22-diagnostics1.')
+    # Preserve the original device-only failure condition. Classify which
+    # synthetic positive control failed without publishing identities or errors.
+    result[PROBE] = once(result[PROBE],
+        'return @"Synthetic Keychain fixture setup is inconclusive; device probe stopped before guest launch. See the host report for each control\'s identity status and setup result.";',
+        '''return !appIDFixtureReady && !hostOnlyFixtureReady ? @"CV_INTEGRATION_PREP_BOTH_CONTROLS"
+            : (!appIDFixtureReady ? @"CV_INTEGRATION_PREP_APP_ID_CONTROL" : @"CV_INTEGRATION_PREP_HOST_ONLY_CONTROL");''')
     linker = '\t\t\t\tOTHER_LDFLAGS = "-Wl,-U,_OBJC_CLASS_$_RBSTarget";'
     project = sources[PROJECT]
     if project.count(linker) != 2:

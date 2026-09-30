@@ -53,7 +53,9 @@ private final class IntegrationRuntime: NativeGuestRuntime {
     init() throws {
         // Called only after CalcVault's fresh credential/session checks. This
         // prepares disposable boundary controls, never production key material.
-        if CVLPProbe.prepareHost() != nil { throw PreparationFailure.unavailable }
+        if let failure = CVLPProbe.prepareHost() {
+            throw Self.preparationFailure(failure)
+        }
         UserDefaults.lcShared().set(0, forKey: "LCMultitaskMode")
         session = CVLPGuestSession()
     }
@@ -67,5 +69,23 @@ private final class IntegrationRuntime: NativeGuestRuntime {
         }
     }
     func revoke() { session.revoke() }
-    private enum PreparationFailure: Error { case unavailable }
+    // Exact known fixture messages map to fixed codes; never display arbitrary
+    // NSError descriptions, entitlement values or filesystem paths.
+    private static func preparationFailure(_ message: String) -> NativeGuestPreparationFailure {
+        switch message {
+        case "Signing export absence could not be verified; guest launch blocked.": .signingExport
+        case "Immutable framework guest contract is missing or invalid.": .immutableContract
+        case "Synthetic fixture setup failed (host support directory unavailable).": .hostSupport
+        case "Synthetic fixture setup failed (host fixture directory unavailable).": .hostFixtureDirectory
+        case "Synthetic fixture setup failed (host sentinel could not be created).": .hostSentinelCreate
+        case "Synthetic fixture setup failed (host sentinel readback did not match).": .hostSentinelReadback
+        case "Synthetic guest staging failed (host documents directory unavailable).": .hostDocuments
+        case "Guest data path is not an ordinary private directory.": .guestDirectoryType
+        case "Guest data directory could not be prepared.": .guestDirectoryCreate
+        case "CV_INTEGRATION_PREP_APP_ID_CONTROL": .appIDControl
+        case "CV_INTEGRATION_PREP_HOST_ONLY_CONTROL": .hostOnlyControl
+        case "CV_INTEGRATION_PREP_BOTH_CONTROLS": .bothControls
+        default: .unclassified
+        }
+    }
 }

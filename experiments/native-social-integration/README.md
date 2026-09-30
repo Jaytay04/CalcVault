@@ -1,5 +1,11 @@
 # Combined CalcVault synthetic integration
 
+Build 22.1 adds bounded launch-failure diagnostics to the same synthetic-only
+integration. If blocked, remain unlocked and choose Refresh native report;
+report only its fixed stage/reason codes. Credential values, raw errors,
+identities and paths are excluded. Do not reset credentials to force a pass.
+The existing synthetic data directory and launch protections are unchanged.
+
 Build 22 combines the existing CalcVault UI/security/browser code with the
 reviewed immutable-framework LiveProcess route. It contains only the generated
 synthetic guest, not TikTok. Keep the known-good private 20.6 IPA unchanged.

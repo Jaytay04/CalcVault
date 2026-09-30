@@ -44,7 +44,11 @@ public enum NativeGuestCredentialInventory {
         } else {
             optional.append(biometricRootItem)
         }
-        try storage.assertGuestCredentialBoundary(required: required, optional: optional)
+        try storage.assertGuestCredentialBoundary(
+            required: required,
+            optional: optional,
+            diagnosticErrors: true
+        )
     }
 
     public static func checkLegacyAbsence(storage: HostOnlyKeychainStorage = HostOnlyKeychainStorage()) throws {

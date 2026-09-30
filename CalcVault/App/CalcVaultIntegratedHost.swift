@@ -142,6 +142,7 @@ struct NativeGuestIntegrationSection: View {
     @State private var report = ""
     var body: some View {
         Section("Native integration test") {
+            Text("Build 22.1 launch diagnostics")
             Text("Synthetic guest only. Native TikTok is not included in this isolation-test build.")
             Button("Open isolated test guest", action: start)
                 .disabled(model.state != .idle && model.state != .blocked)
@@ -159,7 +160,7 @@ struct NativeGuestIntegrationSection: View {
         case .checking: "Checking credential boundary."
         case .presenting: "Attaching isolated guest."
         case .running: "Guest request accepted; verify visible content separately."
-        case .blocked: "Launch blocked. Credentials or runtime prerequisites could not be verified."
+        case .blocked: "Launch blocked. Refresh the native report for the diagnostic code. No credential changes were made by this check."
         case .ended: "Guest revoked. Restart the app before another native launch."
         }
     }

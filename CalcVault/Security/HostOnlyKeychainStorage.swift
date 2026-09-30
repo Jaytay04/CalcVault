@@ -48,6 +48,62 @@ public enum HostOnlyKeychainStorageError: Error, Equatable, LocalizedError {
     }
 }
 
+fileprivate enum NativeGuestCredentialBoundaryStage: String, Sendable, Equatable {
+    case inventory
+    case groupResolution = "group-resolution"
+    case legacyPresence = "legacy-presence"
+    case requiredProtection = "required-protection"
+    case optionalProtection = "optional-protection"
+}
+
+/// Sanitized, stable diagnostic for a native guest credential boundary check.
+/// It intentionally contains no Keychain identity or underlying error text.
+public struct NativeGuestCredentialBoundaryFailure: Error, Sendable, Equatable {
+    private let stage: NativeGuestCredentialBoundaryStage
+    private let itemIndex: Int?
+    private let groupIndex: Int?
+    private let reason: String
+
+    fileprivate init(
+        stage: NativeGuestCredentialBoundaryStage,
+        itemIndex: Int?,
+        groupIndex: Int?,
+        error: any Error
+    ) {
+        self.stage = stage
+        self.itemIndex = itemIndex.map { min($0, 99) }
+        self.groupIndex = groupIndex.map { min($0, 99) }
+
+        guard let error = error as? HostOnlyKeychainStorageError else {
+            reason = "unclassified"
+            return
+        }
+
+        switch error {
+        case .identityUnavailable:
+            reason = "identity-unavailable"
+        case .duplicateItem:
+            reason = "duplicate-item"
+        case .invalidItem:
+            reason = "invalid-item"
+        case .invalidInventory:
+            reason = "invalid-inventory"
+        case .legacyCredentialPresent:
+            reason = "legacy-credential-present"
+        case .protectionMismatch:
+            reason = "protection-mismatch"
+        case .unexpectedStatus(let status):
+            reason = "status:\(status)"
+        }
+    }
+
+    public var diagnosticCode: String {
+        let item = itemIndex.map { ".item-\($0)" } ?? ""
+        let group = groupIndex.map { ".group-\($0)" } ?? ""
+        return "native-guest-boundary.\(stage.rawValue)\(item)\(group).\(reason)"
+    }
+}
+
 private struct KeychainCredentialIdentity: Hashable {
     let service: String
     let account: String
@@ -142,50 +198,94 @@ public final class HostOnlyKeychainStorage: @unchecked Sendable {
     /// that public Keychain attributes expose exact biometric ACL flags.
     public func assertGuestCredentialBoundary(
         required: [KeychainMigrationItem],
-        optional: [KeychainMigrationItem]
+        optional: [KeychainMigrationItem],
+        diagnosticErrors: Bool = false
     ) throws {
         try locked {
-            guard !required.isEmpty else { throw HostOnlyKeychainStorageError.invalidInventory }
-            let items = required + optional
-            guard !items.isEmpty else { throw HostOnlyKeychainStorageError.invalidInventory }
+            var stage = NativeGuestCredentialBoundaryStage.inventory
+            var itemIndex: Int?
+            var groupIndex: Int?
+            do {
+                guard !required.isEmpty else { throw HostOnlyKeychainStorageError.invalidInventory }
+                let items = required + optional
+                guard !items.isEmpty else { throw HostOnlyKeychainStorageError.invalidInventory }
 
-            var identities = Set<KeychainCredentialIdentity>()
-            for item in items {
-                guard !item.service.isEmpty, !item.account.isEmpty else {
-                    throw HostOnlyKeychainStorageError.invalidInventory
-                }
-                let identity = KeychainCredentialIdentity(service: item.service, account: item.account)
-                guard identities.insert(identity).inserted else {
-                    throw HostOnlyKeychainStorageError.invalidInventory
-                }
-            }
-
-            let scope = try groups()
-            let store = backend(nil)
-            var foundLegacyCopy = false
-            for item in items {
-                for group in scope.legacyGroups {
-                    if try store.contains(item, accessGroup: group) {
-                        foundLegacyCopy = true
+                var identities = Set<KeychainCredentialIdentity>()
+                for (index, item) in items.enumerated() {
+                    itemIndex = index
+                    groupIndex = nil
+                    guard !item.service.isEmpty, !item.account.isEmpty else {
+                        throw HostOnlyKeychainStorageError.invalidInventory
+                    }
+                    let identity = KeychainCredentialIdentity(service: item.service, account: item.account)
+                    guard identities.insert(identity).inserted else {
+                        throw HostOnlyKeychainStorageError.invalidInventory
                     }
                 }
-            }
-            guard !foundLegacyCopy else {
-                throw HostOnlyKeychainStorageError.legacyCredentialPresent
-            }
 
-            var missingRequiredCredential = false
-            for item in required {
-                let isPresent = try store.validateProtection(item, accessGroup: scope.hostOnly)
-                if !isPresent {
-                    missingRequiredCredential = true
+                stage = .groupResolution
+                itemIndex = nil
+                groupIndex = nil
+                let scope = try groups()
+                let store = backend(nil)
+
+                stage = .legacyPresence
+                var foundLegacyCopy = false
+                var firstLegacyLocation: (item: Int, group: Int)?
+                for (currentItemIndex, item) in items.enumerated() {
+                    for (currentGroupIndex, group) in scope.legacyGroups.enumerated() {
+                        itemIndex = currentItemIndex
+                        groupIndex = currentGroupIndex
+                        if try store.contains(item, accessGroup: group) {
+                            foundLegacyCopy = true
+                            if firstLegacyLocation == nil {
+                                firstLegacyLocation = (currentItemIndex, currentGroupIndex)
+                            }
+                        }
+                    }
                 }
+                if let firstLegacyLocation {
+                    itemIndex = firstLegacyLocation.item
+                    groupIndex = firstLegacyLocation.group
+                }
+                guard !foundLegacyCopy else {
+                    throw HostOnlyKeychainStorageError.legacyCredentialPresent
+                }
+
+                stage = .requiredProtection
+                groupIndex = nil
+                var missingRequiredCredential = false
+                var firstMissingRequiredIndex: Int?
+                for (currentItemIndex, item) in required.enumerated() {
+                    itemIndex = currentItemIndex
+                    let isPresent = try store.validateProtection(item, accessGroup: scope.hostOnly)
+                    if !isPresent {
+                        missingRequiredCredential = true
+                        if firstMissingRequiredIndex == nil {
+                            firstMissingRequiredIndex = currentItemIndex
+                        }
+                    }
+                }
+                stage = .optionalProtection
+                itemIndex = nil
+                for (currentItemIndex, item) in optional.enumerated() {
+                    itemIndex = currentItemIndex
+                    // A false result means only that this optional identity is absent.
+                    _ = try store.validateProtection(item, accessGroup: scope.hostOnly)
+                }
+                stage = .requiredProtection
+                itemIndex = firstMissingRequiredIndex
+                groupIndex = nil
+                guard !missingRequiredCredential else { throw HostOnlyKeychainStorageError.invalidItem }
+            } catch {
+                guard diagnosticErrors else { throw error }
+                throw NativeGuestCredentialBoundaryFailure(
+                    stage: stage,
+                    itemIndex: itemIndex,
+                    groupIndex: groupIndex,
+                    error: error
+                )
             }
-            for item in optional {
-                // A false result means only that this optional identity is absent.
-                _ = try store.validateProtection(item, accessGroup: scope.hostOnly)
-            }
-            guard !missingRequiredCredential else { throw HostOnlyKeychainStorageError.invalidItem }
         }
     }
 
