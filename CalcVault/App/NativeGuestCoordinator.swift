@@ -243,10 +243,11 @@ public final class NativeGuestCoordinator: ObservableObject {
             guard !Task.isCancelled, canRunCheck(request),
                   let failure = error as? NativeGuestCredentialBoundaryFailure,
                   failure.requiresBiometricAuthentication(biometricEnabled: biometricEnabled),
-                  let authorizationFactory else { throw error }
+                  authorizationFactory != nil else { throw error }
         }
 
-        guard let token = lifecycle.beginPrivateAuthenticationPrompt(
+        guard let authorizationFactory,
+              let token = lifecycle.beginPrivateAuthenticationPrompt(
             sessionID: request.session.sessionID, generation: request.session.generation
         ) else { throw CancellationError() }
         let authorization = authorizationFactory()
