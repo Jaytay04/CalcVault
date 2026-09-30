@@ -17,6 +17,7 @@ mkdir -p "$logs" "$evidence" "$output"
 
 build_target() {
     local sdk="$1" destination="$2" products="$3"
+    printf 'Building CalcVaultKit and synthetic runtime for %s\n' "$sdk"
     xcodebuild build -project "$kit_project/CalcVaultKit.xcodeproj" -scheme CalcVaultKit \
         -configuration Release -sdk "$sdk" -destination "$destination" \
         -derivedDataPath "$work/kit-$sdk" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
@@ -141,8 +142,11 @@ for binary_arg, listing_arg in zip(sys.argv[2:5], sys.argv[5:8]):
         if not resolved.exists():
             raise SystemExit(f'unresolved @rpath dependency: {dependency}')
 PY
-    codesign -d --entitlements - "$extension" 2>/dev/null > "$evidence/extension-entitlements-$sdk.plist"
-    python3 - "$host" "$evidence/extension-entitlements-$sdk.plist" <<'PY'
+    # Explicit XML is required: the default display is human-readable on this toolchain.
+    codesign -d --entitlements - --xml "$extension" 2>/dev/null > "$evidence/extension-entitlements-$sdk.plist"
+    codesign -d --entitlements - --xml "$host" 2>/dev/null > "$evidence/host-entitlements-$sdk.plist"
+    python3 - "$host" "$evidence/extension-entitlements-$sdk.plist" \
+        "$evidence/host-entitlements-$sdk.plist" "$entitlements" <<'PY'
 import plistlib, sys
 from pathlib import Path
 host = Path(sys.argv[1])
@@ -151,11 +155,19 @@ assert info.get('CFBundleVersion') == '22'
 assert info.get('CVNativeIntegrationStage') == 'synthetic-integration-22'
 assert info.get('CVLPFrameworkGuestMode') == 1
 assert info.get('CFBundleIdentifier') == 'com.jaylintaylor.calcvault'
+assert info.get('UIFileSharingEnabled') is False
+assert info.get('LSSupportsOpeningDocumentsInPlace') is False
+assert 'NSAppTransportSecurity' not in info and 'UIBackgroundModes' not in info
 assert sorted(p.name for p in (host / 'PlugIns').iterdir()) == ['LiveProcess.appex']
 assert not list(host.rglob('*.app'))
 entitlements = plistlib.loads(Path(sys.argv[2]).read_bytes())
 groups = entitlements.get('keychain-access-groups', [])
 assert not any('hostonly' in group.lower() for group in groups)
+for kind, signed_path in (('extension', sys.argv[2]), ('host', sys.argv[3])):
+    signed = plistlib.loads(Path(signed_path).read_bytes())
+    expected = plistlib.loads((Path(sys.argv[4]) / (kind + '.entitlements')).read_bytes())
+    for key, value in expected.items():
+        assert signed.get(key) == value, (kind, key)
 for path in host.rglob('*'):
     assert path.suffix.lower() not in ('.p12', '.pfx', '.mobileprovision')
 PY
