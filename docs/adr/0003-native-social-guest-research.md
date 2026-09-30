@@ -2,6 +2,26 @@
 
 Status: separate integration candidate authorized after owner acceptance of portrait research 20.6. This is not production/security acceptance.
 
+## Integration candidate 23: private immutable TikTok guest
+
+Following the supplied 22.2 combined synthetic report and owner confirmations,
+the owner requested continuing to the combined native candidate. Public builds
+remain synthetic. Local packaging may copy only the already prepared, digest-pinned
+20.6 NativeGuest framework and descriptor into the new combined host, preserving
+every guest byte and all other host bytes except the two explicit host package
+kind/stage metadata fields. SideStore must re-sign the assembled candidate; its
+old outer signature is not represented as valid after packaging.
+
+Build 23 recognizes only the matching synthetic descriptor (version 1) or the
+approved native TikTok descriptor (version 439042), with paired host build/kind/
+stage metadata, before fixture/runtime preparation. This check supplements rather
+than replaces the immutable framework, session and credential checks. The exact
+guest data directory is changed consistently to `integration-native-23`, separate
+from both synthetic 22.x and private 20.6. No guest state/cookies are copied, no
+bookmarks broadened, no guest code patched and no new product/extension added.
+X/Instagram browsing and downloaders remain in CalcVault; real-guest compatibility,
+lock/background behavior and post-refresh results require separate phone evidence.
+
 ## Integration candidate 22: combined host, synthetic guest first
 
 Build 22.2 addresses the observed `required-protection.item-2.status:-25308`
@@ -20,9 +40,16 @@ lock, deadline or cancellation invalidates the context and pending request.
 Success received while inactive waits for foreground before the full recheck.
 After the prompt scope ends, ordinary inactivity again revokes the session.
 The context is invalidated before runtime creation on success or failure.
-Signed-device Face ID/Keychain behavior and combined isolation remain unverified.
+The owner subsequently reports successful 22.2 guest opening, cancellation preventing
+launch and explicit Lock stopping audio/returning the calculator. The supplied
+combined phone report shows both positive controls ready and host-file/host-only
+Keychain denial at all five stages through guest-button, with no signing export.
+PID presence/absence is observed after revocation; the independent signal-zero
+settlement remains unproved. Browser/download and SideStore refresh/unlock/launch
+also pass by owner report. These bounded observations are recorded in TEST_REPORT;
+they are not a security certification or acceptance of a real TikTok payload.
 
-The approved integration continues in a separate opt-in build. Compile existing CalcVault sources as CalcVaultKit, linked only by the containing host UI framework; keep the single reviewed LiveProcess extension and immutable synthetic guest. Framework separation is a build boundary, not an OS security boundary. Physical, SideStore-signed guest denial of host files and host-only Keychain still must be measured in the combined app before adding the private TikTok payload.
+The approved integration continues in a separate opt-in build. Compile existing CalcVault sources as CalcVaultKit, linked only by the containing host UI framework; keep the single reviewed LiveProcess extension and immutable synthetic guest. Framework separation is a build boundary, not an OS security boundary. Physical, SideStore-signed guest denial of host files and host-only Keychain must be measured in the combined app before adding the private TikTok payload; the 22.2 report now supplies that bounded synthetic evidence. Any real-guest candidate still requires separate package, compatibility and lifecycle verification without relaxing the credential or isolation gates.
 
 CalcVault's authenticated session and generation are the sole authority. Each launch performs a fresh exact-inventory legacy scan plus required host-only destination metadata validation under the existing credential-operation lock. Required navigation/envelope items and an enabled biometric root must exist; optional existing items must satisfy their declared metadata policy. Queries request no credential values and prohibit implicit authentication UI. Public attributes validate accessibility, access-group identity and biometric ACL presence, not exact ACL flags or enrollment behavior. No credentials are passed to the runtime.
 

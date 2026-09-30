@@ -68,14 +68,14 @@ def transform(sources, app):
     // and the current authenticated session. Do not rerun the historical
     // biometric migration experiment or invent a successful fixture result.
     // Retain the independent synthetic file and Keychain controls below.
-    CVLPAppendHostObservation(@"Integration 22: migration fixture not repeated; guest boundary controls remain synthetic.");
+    CVLPAppendHostObservation(@"Integration 23: migration fixture not repeated; guest boundary controls remain synthetic.");
     struct stat signingExport;
     NSString *exportPath = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"ALTCertificate.p12"];
     if (lstat(exportPath.fileSystemRepresentation, &signingExport) == 0 || errno != ENOENT) {
         return @"Signing export absence could not be verified; guest launch blocked.";
     }''')
     result[PROBE] = once(result[PROBE], 'Build marker: build20-framework-portrait1.',
-                         'Build marker: synthetic-integration-22-authcheck1.')
+                         'Build marker: integration-23.')
     # Preserve the original device-only failure condition. Classify which
     # synthetic positive control failed without publishing identities or errors.
     result[PROBE] = once(result[PROBE],
@@ -92,11 +92,12 @@ def transform(sources, app):
         '\n\t\t\t\tHEADER_SEARCH_PATHS = ("$(inherited)", "$(CV_INTEGRATION_KIT_DIR)/include");')
     # Do not reuse or mutate the existing private TikTok research data folder.
     # Preserve every exact-path allowlist/bookmark check, changing only its fixed
-    # synthetic integration directory consistently across both processes.
+    # integration candidate directory consistently across both processes. This
+    # is separate from both the 22.x synthetic and 20.6 private guest data.
     for name, count in ((BOOT, 4), (PROBE, 1), (SESSION, 1), (SCENE, 2), (EXTENSION, 2)):
         if result[name].count('native-framework-research') != count:
             raise ValueError('guest_data_path_anchor_drift')
-        result[name] = result[name].replace('native-framework-research', 'integration-synthetic-22')
+        result[name] = result[name].replace('native-framework-research', 'integration-native-23')
     return result
 
 

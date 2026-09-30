@@ -82,7 +82,14 @@ return @"Synthetic Keychain fixture setup is inconclusive; device probe stopped 
         prepared = adapter.transform(self.sources(), 'root')
         for name in (adapter.BOOT, adapter.PROBE, adapter.SESSION, adapter.SCENE, adapter.EXTENSION):
             self.assertNotIn('native-framework-research', prepared[name])
-            self.assertIn('integration-synthetic-22', prepared[name])
+            self.assertNotIn('integration-synthetic-22', prepared[name])
+            self.assertIn('integration-native-23', prepared[name])
+
+    def test_package_identity_is_checked_before_runtime_preparation(self):
+        app = (ROOT / 'IntegrationApp.swift').read_text()
+        self.assertLess(app.index('guard let profile = NativeGuestIntegrationProfile.current'),
+                        app.index('CVLPProbe.prepareHost()'))
+        self.assertIn('throw NativeGuestPreparationFailure.immutableContract', app)
 
     def test_preparation_failures_are_mapped_without_publishing_raw_errors(self):
         app = (ROOT / 'IntegrationApp.swift').read_text()

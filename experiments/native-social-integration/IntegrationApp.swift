@@ -50,7 +50,12 @@ private final class IntegrationAppDelegate: UIResponder, UIApplicationDelegate {
 @MainActor
 private final class IntegrationRuntime: NativeGuestRuntime {
     private let session: CVLPGuestSession
+    private let profile: NativeGuestIntegrationProfile
     init() throws {
+        guard let profile = NativeGuestIntegrationProfile.current else {
+            throw NativeGuestPreparationFailure.immutableContract
+        }
+        self.profile = profile
         // Called only after CalcVault's fresh credential/session checks. This
         // prepares disposable boundary controls, never production key material.
         if let failure = CVLPProbe.prepareHost() {
@@ -60,7 +65,7 @@ private final class IntegrationRuntime: NativeGuestRuntime {
         session = CVLPGuestSession()
     }
     var viewController: UIViewController { session.viewController }
-    var summary: String { session.summary + "\n\n" + CVLPProbe.hostSummary() }
+    var summary: String { profile.title + "\n\n" + session.summary + "\n\n" + CVLPProbe.hostSummary() }
     func start(completion: @escaping @MainActor (Bool) -> Void) {
         session.start { success in
             // CVLPGuestSession asserts main-thread delivery; fail closed if

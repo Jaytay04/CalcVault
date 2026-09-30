@@ -151,8 +151,9 @@ import plistlib, sys
 from pathlib import Path
 host = Path(sys.argv[1])
 info = plistlib.loads((host / 'Info.plist').read_bytes())
-assert info.get('CFBundleVersion') == '22.2'
-assert info.get('CVNativeIntegrationStage') == 'synthetic-integration-22-authcheck1'
+assert info.get('CFBundleVersion') == '23'
+assert info.get('CVNativeIntegrationStage') == 'synthetic-integration-23'
+assert info.get('CVNativeGuestKind') == 'synthetic'
 assert info.get('CVLPFrameworkGuestMode') == 1
 assert info.get('CFBundleIdentifier') == 'com.jaylintaylor.calcvault'
 assert info.get('UIFileSharingEnabled') is False
@@ -221,11 +222,11 @@ xcrun simctl io "$simulator" screenshot "$evidence/simulator-locked-root.png"
 
 mkdir -p "$output/Payload"
 ditto "$device_host" "$output/Payload/LiveContainer.app"
-(cd "$output" && zip -qry CalcVault-integration-authcheck-22.2.ipa Payload)
-shasum -a 256 "$output/CalcVault-integration-authcheck-22.2.ipa" \
-    > "$output/CalcVault-integration-authcheck-22.2.ipa.sha256"
-unzip -t "$output/CalcVault-integration-authcheck-22.2.ipa" > "$evidence/ipa-zip-check.txt"
-printf '%s\n' 'Build 22.2 synthetic authenticated-check artifact created.' \
+(cd "$output" && zip -qry CalcVault-integration-host-23.ipa Payload)
+shasum -a 256 "$output/CalcVault-integration-host-23.ipa" \
+    > "$output/CalcVault-integration-host-23.ipa.sha256"
+unzip -t "$output/CalcVault-integration-host-23.ipa" > "$evidence/ipa-zip-check.txt"
+printf '%s\n' 'Build 23 synthetic integration-host artifact created.' \
     'Simulator evidence covers only the locked CalcVault root; no guest launch was attempted.' \
     'Physical-device signing, install, native guest launch and isolation remain NOT RUN.' \
     > "$evidence/result.txt"

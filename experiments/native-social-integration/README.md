@@ -1,4 +1,20 @@
-# Combined CalcVault synthetic integration
+# Combined CalcVault native integration candidate
+
+Build 23 follows the owner's 22.2 signed-phone synthetic denial, launch,
+cancellation, explicit-lock, browser/download and refresh observations. Public
+CI still generates **only a synthetic guest**. A separate local-only merger
+copies the unchanged immutable framework and descriptor from the checksum-pinned
+20.6 private candidate; it does not patch guest code, sign or install anything.
+The two host package variants have explicit kind/stage metadata. Before preparing
+the runtime, the host requires that metadata to match the approved descriptor
+identity/version. Neither package recognition nor a biometric Boolean authorizes
+launch independently of the complete credential/session checks.
+
+The Build 23 guest data directory is `integration-native-23`, separate from both
+`integration-synthetic-22` and the old 20.6 guest. No existing guest data or login
+state is copied. Guest data is not vault-encrypted. The private candidate is not
+physically accepted until its own startup, playback, lock/background and browser
+checks pass; the working 20.6 IPA remains unchanged.
 
 Build 22.2 adds an explicit biometric retry only when the initial metadata scan
 reports interaction-not-allowed for the fixed host-only biometric item. A fresh
@@ -29,7 +45,7 @@ synthetic guest, not TikTok. Keep the known-good private 20.6 IPA unchanged.
 - Only one runtime attempt is permitted per host launch. Lock/inactivity covers
   and revokes synchronously. Reauthentication allows diagnostic report access,
   not reuse of a revoked guest.
-- The fixed `integration-synthetic-22` data directory is separate from the old
+- The fixed `integration-native-23` data directory is separate from the old
   private research guest. Exact path guards and the two narrow framework/data
   bookmarks remain in place. No vault bookmark or command bridge is introduced.
 - The host does not run upstream cookie/preferences restoration, self-tweaks,
@@ -50,8 +66,9 @@ packages one containing app with one LiveProcess extension.
 The simulator smoke checks the locked CalcVault root without an authentication
 bypass or automatic guest launch. It is not a guest-execution or sandbox test.
 The ordinary `ios-build.yml` suite separately tests the session/credential gates.
-Signed-phone guest launch, denial probes, media stop, cover, browser regressions
-and SideStore refresh must still be checked before private guest inclusion.
+The owner supplied the bounded 22.2 phone checks before this private-candidate
+slice. Build 23 is a new candidate; unchanged code does not substitute for its
+own physical startup and lifecycle acceptance.
 
 On the phone, unlock normally and use Security > Native integration test. After
 locking the synthetic guest, reauthenticate and choose Refresh native report.
