@@ -104,7 +104,8 @@ public final class AppCoordinator: ObservableObject {
                 try NativeGuestCredentialInventory.checkForLaunch(biometricEnabled: biometricEnabled)
             }.value
         },
-        runtimeFactory: nativeRuntimeFactory
+        runtimeFactory: nativeRuntimeFactory,
+        authorizationFactory: { NativeGuestBiometricAuthorization() }
     )
 
     public func startNativeGuest() {
@@ -149,6 +150,7 @@ public final class AppCoordinator: ObservableObject {
     private var activeVaultAccess: (permit: VaultSessionPermit, vaultID: UUID)?
     private var vaultOperationCancellation: VaultOperationCancellation?
     private var vaultOperationTask: Task<Void, Never>?
+    private var lifecycleLockObservation: AnyCancellable?
 
     public init(
         lifecycle: SessionLifecycleCoordinator = SessionLifecycleCoordinator(),
@@ -182,6 +184,23 @@ public final class AppCoordinator: ObservableObject {
             self.vaultRepositoryFailure = error.localizedDescription
         }
         lifecycleState = lifecycle.state
+        // A bounded native-authentication prompt can expire inside the lifecycle
+        // owner, without entering this object's UIKit callbacks. Revoke vault
+        // authority synchronously and mirror the emitted state (willSet).
+        lifecycleLockObservation = lifecycle.$state.dropFirst().sink { [weak self] state in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if state == .locking {
+                    self.navigationChangeMessage = nil
+                    self.clearPendingAuthentication()
+                    self.clearRootKey()
+                    self.calculator.prepareFreshSecretEntry()
+                }
+                if state == .locking || state == .calculatorLocked {
+                    self.lifecycleState = state
+                }
+            }
+        }
         reloadSetupState()
     }
 

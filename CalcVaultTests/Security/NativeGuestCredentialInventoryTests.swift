@@ -1,4 +1,5 @@
 import Foundation
+import LocalAuthentication
 import XCTest
 @testable import CalcVault
 
@@ -65,6 +66,39 @@ final class NativeGuestCredentialInventoryTests: XCTestCase {
         }
     }
 
+    func testLaunchCheckForwardsAnExplicitContextWhileDefaultScanRemainsNil() throws {
+        let groups = try makeGroups()
+        let backend = GuestInventoryBackend()
+        for item in NativeGuestCredentialInventory.items {
+            backend.present.insert(InventoryScopedCredential(item: item, group: groups.hostOnly))
+        }
+        var contexts: [LAContext?] = []
+        let storage = HostOnlyKeychainStorage(
+            groups: { groups },
+            backend: { context in
+                contexts.append(context)
+                return backend
+            }
+        )
+        let context = LAContext()
+
+        XCTAssertNoThrow(try NativeGuestCredentialInventory.checkForLaunch(
+            biometricEnabled: true,
+            storage: storage
+        ))
+        XCTAssertNoThrow(try NativeGuestCredentialInventory.checkForLaunch(
+            biometricEnabled: true,
+            storage: storage,
+            context: context
+        ))
+
+        XCTAssertEqual(contexts.count, 2)
+        XCTAssertNil(contexts[0])
+        XCTAssertTrue(contexts[1] === context)
+        XCTAssertEqual(backend.readCount, 0)
+        XCTAssertEqual(backend.mutationCount, 0)
+    }
+
     func testBiometricRootIsOptionalWhenDisabledAndRequiredWhenEnabled() throws {
         let items = NativeGuestCredentialInventory.items
         let groups = try makeGroups()
@@ -103,6 +137,75 @@ final class NativeGuestCredentialInventoryTests: XCTestCase {
         }
     }
 
+    func testBiometricFallbackEligibilityRequiresTheExactProtectedItemAndStatus() throws {
+        let items = NativeGuestCredentialInventory.items
+        let groups = try makeGroups()
+
+        let requiredFailure = try XCTUnwrap(launchFailure(
+            biometricEnabled: true,
+            failingItem: items[3],
+            status: -25308,
+            groups: groups
+        ))
+        XCTAssertEqual(requiredFailure.diagnosticCode,
+                       "native-guest-boundary.required-protection.item-2.status:-25308")
+        XCTAssertTrue(requiredFailure.requiresBiometricAuthentication(biometricEnabled: true))
+        XCTAssertFalse(requiredFailure.requiresBiometricAuthentication(biometricEnabled: false))
+
+        let optionalFailure = try XCTUnwrap(launchFailure(
+            biometricEnabled: false,
+            failingItem: items[3],
+            status: -25308,
+            groups: groups
+        ))
+        XCTAssertEqual(optionalFailure.diagnosticCode,
+                       "native-guest-boundary.optional-protection.item-1.status:-25308")
+        XCTAssertTrue(optionalFailure.requiresBiometricAuthentication(biometricEnabled: false))
+        XCTAssertFalse(optionalFailure.requiresBiometricAuthentication(biometricEnabled: true))
+
+        let unrelatedRequiredItemFailure = try XCTUnwrap(launchFailure(
+            biometricEnabled: true,
+            failingItem: items[1],
+            status: -25308,
+            groups: groups
+        ))
+        XCTAssertFalse(unrelatedRequiredItemFailure.requiresBiometricAuthentication(biometricEnabled: true))
+
+        let unrelatedStatusFailure = try XCTUnwrap(launchFailure(
+            biometricEnabled: true,
+            failingItem: items[3],
+            status: -50,
+            groups: groups
+        ))
+        XCTAssertFalse(unrelatedStatusFailure.requiresBiometricAuthentication(biometricEnabled: true))
+    }
+
+    private func launchFailure(
+        biometricEnabled: Bool,
+        failingItem: KeychainMigrationItem,
+        status: Int32,
+        groups: KeychainAccessGroups
+    ) -> NativeGuestCredentialBoundaryFailure? {
+        let backend = GuestInventoryBackend()
+        for item in NativeGuestCredentialInventory.items {
+            backend.present.insert(InventoryScopedCredential(item: item, group: groups.hostOnly))
+        }
+        backend.failValidationFor = failingItem
+        backend.validationFailureStatus = status
+        let storage = HostOnlyKeychainStorage(groups: { groups }, backend: { _ in backend })
+
+        do {
+            try NativeGuestCredentialInventory.checkForLaunch(biometricEnabled: biometricEnabled, storage: storage)
+            XCTFail("Expected the guest boundary check to fail")
+            return nil
+        } catch let failure as NativeGuestCredentialBoundaryFailure {
+            return failure
+        } catch {
+            XCTFail("Expected a sanitized guest boundary failure")
+            return nil
+        }
+    }
+
     private func makeGroups() throws -> KeychainAccessGroups {
         try KeychainAccessGroups(
             legacy: "ABCDE12345.com.example.calcvault.runtime",
@@ -128,6 +231,8 @@ private final class GuestInventoryBackend: HostOnlyKeychainBackend {
     var validationCalls: [InventoryCall] = []
     var readCount = 0
     var mutationCount = 0
+    var failValidationFor: KeychainMigrationItem?
+    var validationFailureStatus: Int32 = -1
 
     func read(_ item: KeychainMigrationItem, accessGroup: String) throws -> Data? {
         readCount += 1
@@ -149,6 +254,9 @@ private final class GuestInventoryBackend: HostOnlyKeychainBackend {
 
     func validateProtection(_ item: KeychainMigrationItem, accessGroup: String) throws -> Bool {
         validationCalls.append(InventoryCall(item: item, group: accessGroup))
+        if item == failValidationFor {
+            throw HostOnlyKeychainStorageError.unexpectedStatus(validationFailureStatus)
+        }
         return present.contains(InventoryScopedCredential(item: item, group: accessGroup))
     }
 

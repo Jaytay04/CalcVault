@@ -75,7 +75,7 @@ def transform(sources, app):
         return @"Signing export absence could not be verified; guest launch blocked.";
     }''')
     result[PROBE] = once(result[PROBE], 'Build marker: build20-framework-portrait1.',
-                         'Build marker: synthetic-integration-22-diagnostics1.')
+                         'Build marker: synthetic-integration-22-authcheck1.')
     # Preserve the original device-only failure condition. Classify which
     # synthetic positive control failed without publishing identities or errors.
     result[PROBE] = once(result[PROBE],

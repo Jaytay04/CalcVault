@@ -142,8 +142,9 @@ struct NativeGuestIntegrationSection: View {
     @State private var report = ""
     var body: some View {
         Section("Native integration test") {
-            Text("Build 22.1 launch diagnostics")
+            Text("Build 22.2 authenticated launch check")
             Text("Synthetic guest only. Native TikTok is not included in this isolation-test build.")
+            Text("Face ID may be requested to verify protected credential metadata before launch. No credential values are shared with the guest.")
             Button("Open isolated test guest", action: start)
                 .disabled(model.state != .idle && model.state != .blocked)
             Text(status)

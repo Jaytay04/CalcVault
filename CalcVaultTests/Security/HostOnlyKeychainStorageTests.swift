@@ -468,6 +468,33 @@ final class HostOnlyKeychainStorageTests: XCTestCase {
         XCTAssertEqual(backend.values[ScopedCredential(item: optional, group: groups.legacyGroups[1])], Data("legacy appeared".utf8))
     }
 
+    func testGuestBoundaryForwardsSuppliedAuthenticationContextWithoutReadingOrMutating() throws {
+        let groups = try makeSideStoreGroups()
+        let backend = MemoryHostOnlyKeychainBackend()
+        let required = makeItem(account: "required")
+        backend.seed(Data("required fixture".utf8), item: required, group: groups.hostOnly)
+        let context = LAContext()
+        var backendContexts: [LAContext?] = []
+        let storage = HostOnlyKeychainStorage(
+            groups: { groups },
+            backend: { value in
+                backendContexts.append(value)
+                return backend
+            }
+        )
+
+        XCTAssertNoThrow(try storage.assertGuestCredentialBoundary(
+            required: [required],
+            optional: [],
+            context: context
+        ))
+
+        XCTAssertEqual(backendContexts.count, 1)
+        XCTAssertTrue(backendContexts[0] === context)
+        XCTAssertTrue(backend.operations.allSatisfy { $0.kind == .contains || $0.kind == .validateProtection })
+        XCTAssertFalse(backend.operations.contains { $0.kind == .read || $0.kind == .insert || $0.kind == .remove || $0.kind == .replace })
+    }
+
     func testNewWriteUsesOnlyHostOnlyGroupAndPreservesProtection() throws {
         let groups = try makeSingleLegacyGroups()
         let backend = MemoryHostOnlyKeychainBackend()

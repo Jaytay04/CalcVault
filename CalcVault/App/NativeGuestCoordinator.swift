@@ -61,6 +61,14 @@ public final class NativeGuestCoordinator: ObservableObject {
     private let lifecycle: SessionLifecycleCoordinator
     private let checkLegacyCredentialAbsence: @Sendable (Bool) async throws -> Void
     private let runtimeFactory: (@MainActor () throws -> any NativeGuestRuntime)?
+    private let authorizationFactory: (@MainActor () -> any NativeGuestCredentialAuthorization)?
+    private struct ActiveAuthorization {
+        let request: CheckRequest
+        let promptToken: UUID
+        let authorization: any NativeGuestCredentialAuthorization
+    }
+    private enum AuthenticationFailure: Error { case unavailable }
+    private var activeAuthorization: ActiveAuthorization?
     private var lifecycleObservation: AnyCancellable?
     private var activeRequest: CheckRequest?
     private var activeCheckTask: Task<Void, Never>?
@@ -75,11 +83,13 @@ public final class NativeGuestCoordinator: ObservableObject {
     public init(
         lifecycle: SessionLifecycleCoordinator,
         check: @escaping @Sendable (Bool) async throws -> Void,
-        runtimeFactory: (@MainActor () throws -> any NativeGuestRuntime)?
+        runtimeFactory: (@MainActor () throws -> any NativeGuestRuntime)?,
+        authorizationFactory: (@MainActor () -> any NativeGuestCredentialAuthorization)? = nil
     ) {
         self.lifecycle = lifecycle
         self.checkLegacyCredentialAbsence = check
         self.runtimeFactory = runtimeFactory
+        self.authorizationFactory = authorizationFactory
         self.state = runtimeFactory == nil ? .unavailable : .idle
 
         lifecycleObservation = lifecycle.$state
@@ -155,7 +165,6 @@ public final class NativeGuestCoordinator: ObservableObject {
         }
 
         let request = CheckRequest(session: session, requestID: UUID())
-        let checker = checkLegacyCredentialAbsence
         launchFailure = nil
         activeRequest = request
         state = .checking
@@ -168,12 +177,13 @@ public final class NativeGuestCoordinator: ObservableObject {
                 }
 
                 do {
-                    try await checker(biometricEnabled)
+                    guard let self else { return }
+                    try await self.checkCredentials(request, biometricEnabled: biometricEnabled)
                     guard !Task.isCancelled else {
-                        self?.cancelCheck(request)
+                        self.cancelCheck(request)
                         return
                     }
-                    self?.finishCheck(request, failure: nil)
+                    self.finishCheck(request, failure: nil)
                 } catch {
                     if Task.isCancelled {
                         self?.cancelCheck(request)
@@ -181,8 +191,10 @@ public final class NativeGuestCoordinator: ObservableObject {
                         let code = (error as? NativeGuestCredentialBoundaryFailure)?.diagnosticCode
                             ?? "unclassified"
                         let preference = biometricEnabled ? "enabled" : "disabled"
-                        self?.finishCheck(request, failure: "stage=credential-boundary; " + code
-                                          + "; biometric=" + preference)
+                        let failure = error is AuthenticationFailure
+                            ? "stage=credential-authentication; reason=cancelled-or-unavailable"
+                            : "stage=credential-boundary; " + code + "; biometric=" + preference
+                        self?.finishCheck(request, failure: failure)
                     }
                 }
             } onCancel: { [weak self] in
@@ -221,6 +233,47 @@ public final class NativeGuestCoordinator: ObservableObject {
             && !runtimeAttemptConsumed
             && runtimeFactory != nil
             && isValid(request.session)
+    }
+
+    private func checkCredentials(_ request: CheckRequest, biometricEnabled: Bool) async throws {
+        do {
+            try await checkLegacyCredentialAbsence(biometricEnabled)
+            return
+        } catch {
+            guard !Task.isCancelled, canRunCheck(request),
+                  let failure = error as? NativeGuestCredentialBoundaryFailure,
+                  failure.requiresBiometricAuthentication(biometricEnabled: biometricEnabled),
+                  let authorizationFactory else { throw error }
+        }
+
+        guard let token = lifecycle.beginPrivateAuthenticationPrompt(
+            sessionID: request.session.sessionID, generation: request.session.generation
+        ) else { throw CancellationError() }
+        let authorization = authorizationFactory()
+        activeAuthorization = ActiveAuthorization(
+            request: request, promptToken: token, authorization: authorization
+        )
+        defer { endAuthorization(request) }
+        do {
+            try await authorization.authenticate()
+        } catch {
+            throw AuthenticationFailure.unavailable
+        }
+        try Task.checkCancellation()
+        guard activeRequest == request,
+              await lifecycle.completePrivateAuthenticationPrompt(token),
+              canRunCheck(request) else { throw CancellationError() }
+        // A successful biometric Boolean is not the boundary verdict. Repeat
+        // the entire inventory check with that context, still forbidding UI.
+        try await authorization.check(biometricEnabled: biometricEnabled)
+        try Task.checkCancellation()
+    }
+
+    private func endAuthorization(_ request: CheckRequest) {
+        guard let active = activeAuthorization, active.request == request else { return }
+        activeAuthorization = nil
+        active.authorization.invalidate()
+        lifecycle.cancelPrivateAuthenticationPrompt(active.promptToken)
     }
 
     private func finishCheck(_ request: CheckRequest, failure: String?) {
@@ -278,6 +331,7 @@ public final class NativeGuestCoordinator: ObservableObject {
 
     private func cancelCheck(_ request: CheckRequest) {
         guard activeRequest == request else { return }
+        endAuthorization(request)
         activeRequest = nil
         activeCheckTask = nil
         state = runtimeFactory == nil ? .unavailable : .idle
@@ -327,6 +381,7 @@ public final class NativeGuestCoordinator: ObservableObject {
             runtimeRevoked = true
         }
 
+        if let request = activeAuthorization?.request { endAuthorization(request) }
         activeCheckTask?.cancel()
         activeCheckTask = nil
         activeRequest = nil

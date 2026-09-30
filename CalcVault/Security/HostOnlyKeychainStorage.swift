@@ -102,6 +102,16 @@ public struct NativeGuestCredentialBoundaryFailure: Error, Sendable, Equatable {
         let group = groupIndex.map { ".group-\($0)" } ?? ""
         return "native-guest-boundary.\(stage.rawValue)\(item)\(group).\(reason)"
     }
+
+    /// Whether a biometric-authenticated metadata retry is appropriate for
+    /// this exact Keychain interaction failure. This deliberately excludes
+    /// legacy scans, identity/group failures, missing items, and all other
+    /// Security statuses.
+    public func requiresBiometricAuthentication(biometricEnabled: Bool) -> Bool {
+        guard groupIndex == nil, reason == "status:-25308", let itemIndex else { return false }
+        return (stage == .requiredProtection && itemIndex == 2 && biometricEnabled)
+            || (stage == .optionalProtection && itemIndex == 1 && !biometricEnabled)
+    }
 }
 
 private struct KeychainCredentialIdentity: Hashable {
@@ -199,6 +209,7 @@ public final class HostOnlyKeychainStorage: @unchecked Sendable {
     public func assertGuestCredentialBoundary(
         required: [KeychainMigrationItem],
         optional: [KeychainMigrationItem],
+        context: LAContext? = nil,
         diagnosticErrors: Bool = false
     ) throws {
         try locked {
@@ -227,7 +238,7 @@ public final class HostOnlyKeychainStorage: @unchecked Sendable {
                 itemIndex = nil
                 groupIndex = nil
                 let scope = try groups()
-                let store = backend(nil)
+                let store = backend(context)
 
                 stage = .legacyPresence
                 var foundLegacyCopy = false

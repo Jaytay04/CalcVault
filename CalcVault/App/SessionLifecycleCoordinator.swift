@@ -21,11 +21,25 @@ public final class SessionLifecycleCoordinator: ObservableObject {
     private var appIsActive = true
     private var activeAuthenticationAttempt: UUID?
     private var authenticationPromptIsActive = false
+    private struct PrivateAuthenticationPrompt {
+        let token: UUID
+        let sessionID: UUID
+        let generation: UInt64
+    }
+    private var privateAuthenticationPrompt: PrivateAuthenticationPrompt?
+    private var privatePromptWaiter: CheckedContinuation<Bool, Never>?
+    private var privatePromptDeadline: Task<Void, Never>?
+    private var privatePromptTimeoutNanoseconds: UInt64 = 45_000_000_000
 
     public init() {}
 
+    internal init(privatePromptTimeoutNanoseconds: UInt64) {
+        self.privatePromptTimeoutNanoseconds = privatePromptTimeoutNanoseconds
+    }
+
     @discardableResult
     public func beginAuthentication() -> UUID {
+        clearPrivateAuthenticationPrompt(result: false)
         let attemptID = UUID()
         activeAuthenticationAttempt = attemptID
         authenticationPromptIsActive = true
@@ -58,6 +72,7 @@ public final class SessionLifecycleCoordinator: ObservableObject {
     }
 
     public func lock() {
+        clearPrivateAuthenticationPrompt(result: false)
         activeAuthenticationAttempt = nil
         authenticationPromptIsActive = false
         sessionGeneration &+= 1
@@ -71,7 +86,7 @@ public final class SessionLifecycleCoordinator: ObservableObject {
         // Face ID can make a scene inactive while its own prompt is visible.
         // Keep the attempt pending for that short transition, but the privacy
         // cover remains installed by PrivacyShieldController.
-        if authenticationPromptIsActive {
+        if authenticationPromptIsActive || privateAuthenticationPrompt != nil {
             return
         }
 
@@ -84,6 +99,11 @@ public final class SessionLifecycleCoordinator: ObservableObject {
 
     public func applicationDidBecomeActive() {
         appIsActive = true
+
+        if privatePromptWaiter != nil, let prompt = privateAuthenticationPrompt {
+            let current = matchesPrivatePromptSession(prompt)
+            clearPrivateAuthenticationPrompt(result: current)
+        }
 
         // A pending prompt is allowed to finish only if LocalAuthentication
         // reports success while this scene is foregrounded. If no prompt is
@@ -105,5 +125,59 @@ public final class SessionLifecycleCoordinator: ObservableObject {
             return false
         }
         return activeSessionID == sessionID && generation == sessionGeneration && appIsActive
+            && privateAuthenticationPrompt == nil
+    }
+
+    /// Narrow, bounded exception for a user-requested biometric credential
+    /// check in an already authenticated session. Session validation rejects
+    /// guest work while the prompt is pending; background and explicit lock revoke it.
+    public func beginPrivateAuthenticationPrompt(sessionID: UUID, generation: UInt64) -> UUID? {
+        guard !authenticationPromptIsActive,
+              isValidSession(sessionID: sessionID, generation: generation) else { return nil }
+        let token = UUID()
+        privateAuthenticationPrompt = PrivateAuthenticationPrompt(
+            token: token, sessionID: sessionID, generation: generation
+        )
+        let timeout = privatePromptTimeoutNanoseconds
+        privatePromptDeadline = Task { @MainActor [weak self] in
+            do { try await Task.sleep(nanoseconds: timeout) } catch { return }
+            guard self?.privateAuthenticationPrompt?.token == token else { return }
+            self?.lock()
+        }
+        return token
+    }
+
+    /// Authentication can complete before UIKit reports foreground activation.
+    /// Keep the privacy exception scoped until that event; never return success
+    /// while inactive. Lock/background/deadline resumes this wait with false.
+    public func completePrivateAuthenticationPrompt(_ token: UUID) async -> Bool {
+        guard let prompt = privateAuthenticationPrompt, prompt.token == token,
+              matchesPrivatePromptSession(prompt), privatePromptWaiter == nil else { return false }
+        if appIsActive {
+            clearPrivateAuthenticationPrompt(result: true)
+            return true
+        }
+        return await withCheckedContinuation { privatePromptWaiter = $0 }
+    }
+
+    public func cancelPrivateAuthenticationPrompt(_ token: UUID) {
+        guard privateAuthenticationPrompt?.token == token else { return }
+        clearPrivateAuthenticationPrompt(result: false)
+        // A cancelled prompt is no longer a reason to retain an inactive session.
+        if !appIsActive { lock() }
+    }
+
+    private func matchesPrivatePromptSession(_ prompt: PrivateAuthenticationPrompt) -> Bool {
+        guard case .privateUnlocked(let sessionID) = state else { return false }
+        return sessionID == prompt.sessionID && sessionGeneration == prompt.generation
+    }
+
+    private func clearPrivateAuthenticationPrompt(result: Bool) {
+        privateAuthenticationPrompt = nil
+        privatePromptDeadline?.cancel()
+        privatePromptDeadline = nil
+        let waiter = privatePromptWaiter
+        privatePromptWaiter = nil
+        waiter?.resume(returning: result)
     }
 }

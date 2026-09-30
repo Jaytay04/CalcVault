@@ -4,6 +4,24 @@ Status: separate integration candidate authorized after owner acceptance of port
 
 ## Integration candidate 22: combined host, synthetic guest first
 
+Build 22.2 addresses the observed `required-protection.item-2.status:-25308`
+with biometrics enabled. The initial no-context metadata scan remains unchanged.
+Only interaction-not-allowed at the fixed host-only biometric item can request
+a fresh explicit biometrics-only authentication context, followed by the full
+inventory scan using that same context with implicit Keychain prompts still
+disabled. A successful authentication Boolean alone is never a boundary pass.
+No credential values are requested or passed to the runtime; no credentials are
+migrated, reset or deleted. Public metadata still cannot prove exact ACL flags.
+
+The prompt is tied to the initiating session, generation and request, with a
+45-second deadline. Guest/session validation is suspended during the prompt;
+inactive UI stays covered. Genuine background, data-protection loss, explicit
+lock, deadline or cancellation invalidates the context and pending request.
+Success received while inactive waits for foreground before the full recheck.
+After the prompt scope ends, ordinary inactivity again revokes the session.
+The context is invalidated before runtime creation on success or failure.
+Signed-device Face ID/Keychain behavior and combined isolation remain unverified.
+
 The approved integration continues in a separate opt-in build. Compile existing CalcVault sources as CalcVaultKit, linked only by the containing host UI framework; keep the single reviewed LiveProcess extension and immutable synthetic guest. Framework separation is a build boundary, not an OS security boundary. Physical, SideStore-signed guest denial of host files and host-only Keychain still must be measured in the combined app before adding the private TikTok payload.
 
 CalcVault's authenticated session and generation are the sole authority. Each launch performs a fresh exact-inventory legacy scan plus required host-only destination metadata validation under the existing credential-operation lock. Required navigation/envelope items and an enabled biometric root must exist; optional existing items must satisfy their declared metadata policy. Queries request no credential values and prohibit implicit authentication UI. Public attributes validate accessibility, access-group identity and biometric ACL presence, not exact ACL flags or enrollment behavior. No credentials are passed to the runtime.

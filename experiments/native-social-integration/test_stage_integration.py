@@ -33,8 +33,8 @@ class IntegrationStageTests(unittest.TestCase):
     def test_embeds_only_kit_and_marks_synthetic_host(self):
         stage.stage(self.host, self.kit)
         info = plistlib.loads((self.host / 'Info.plist').read_bytes())
-        self.assertEqual(info['CFBundleVersion'], '22.1')
-        self.assertEqual(info['CVNativeIntegrationStage'], 'synthetic-integration-22-diagnostics1')
+        self.assertEqual(info['CFBundleVersion'], '22.2')
+        self.assertEqual(info['CVNativeIntegrationStage'], 'synthetic-integration-22-authcheck1')
         self.assertFalse(info['UIFileSharingEnabled'])
         self.assertFalse(info['LSSupportsOpeningDocumentsInPlace'])
         self.assertNotIn('NSAppTransportSecurity', info)

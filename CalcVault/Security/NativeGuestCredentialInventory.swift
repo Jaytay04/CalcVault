@@ -1,4 +1,5 @@
 import Foundation
+import LocalAuthentication
 
 /// Exact credential locations considered by the integration preflight.
 /// This inventory is not a general Keychain enumeration or guest permit.
@@ -35,7 +36,8 @@ public enum NativeGuestCredentialInventory {
 
     public static func checkForLaunch(
         biometricEnabled: Bool,
-        storage: HostOnlyKeychainStorage = HostOnlyKeychainStorage()
+        storage: HostOnlyKeychainStorage = HostOnlyKeychainStorage(),
+        context: LAContext? = nil
     ) throws {
         var required = [navigationItem, envelopeItem]
         var optional = [initializationItem]
@@ -47,6 +49,7 @@ public enum NativeGuestCredentialInventory {
         try storage.assertGuestCredentialBoundary(
             required: required,
             optional: optional,
+            context: context,
             diagnosticErrors: true
         )
     }

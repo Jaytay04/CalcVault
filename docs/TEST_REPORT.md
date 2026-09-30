@@ -1,5 +1,11 @@
 # CalcVault test report
 
+## Integration 22.2 authenticated preflight (2026-09-29)
+
+Owner supplied `stage=credential-boundary; native-guest-boundary.required-protection.item-2.status:-25308; biometric=enabled` from 22.1. Source inventory maps required item 2 to the biometric root; the failing no-context query forbids UI. Apple's [error definition](https://github.com/apple-oss-distributions/Security/blob/main/base/SecBase.h) maps -25308 to interaction-not-allowed. Its [authentication-context documentation](https://developer.apple.com/documentation/security/ksecuseauthenticationcontext) supports reuse of a previously authenticated context. This identifies the failed operation, not credential corruption or a successful native launch.
+
+22.2 candidate uses a fresh explicit biometrics-only context only after the specific interaction failure, then repeats the full metadata scan with UI still forbidden. No successful Boolean substitutes for a passing scan. A session/request-bound 45-second prompt scope rejects guest/session validation; background/lock/cancellation invalidates the context, and inactive success waits for foreground. A lifecycle lock subscriber synchronously clears vault authority, keys and pending work and updates UI even when locking originates from the prompt deadline. It ignores non-lock transitions to preserve authentication ordering. Credentials and runtime prerequisites are unchanged. Local unit/build checks and physical authentication/launch acceptance are pending. The payload remains synthetic only.
+
 ## Integration 22.1 launch diagnostics (2026-09-29)
 
 Owner-observed Build 22 launch: FAIL. UI reports "Launch blocked. Credentials or runtime prerequisites could not be verified."; Refresh native report returns only "Native guest could not be started." The nil-runtime fallback in NativeGuestCoordinator cannot distinguish failed credential validation from a throwing preparation factory. No guest-entry or boundary report was supplied, and no specific Keychain/signing fault is yet established.

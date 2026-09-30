@@ -1,5 +1,13 @@
 # Combined CalcVault synthetic integration
 
+Build 22.2 adds an explicit biometric retry only when the initial metadata scan
+reports interaction-not-allowed for the fixed host-only biometric item. A fresh
+biometrics-only context is used for a complete second scan; a successful prompt
+alone cannot authorize launch. Both scans prohibit implicit Keychain prompts
+and never request credential values. The prompt exception is session-bound,
+limited to 45 seconds and revoked by background/lock; launch waits for foreground.
+Cancellation fails closed. No credential reset or migration is performed.
+
 Build 22.1 adds bounded launch-failure diagnostics to the same synthetic-only
 integration. If blocked, remain unlocked and choose Refresh native report;
 report only its fixed stage/reason codes. Credential values, raw errors,
