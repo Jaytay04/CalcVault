@@ -23,6 +23,10 @@ on:
         description: 'Temporary native viewing experiment (requires integration_guest and diagnostics)'
         type: boolean
         default: false
+      highlights_early_viewing_experiment:
+        description: 'Temporary pre-initializer viewing experiment (requires integration_guest and diagnostics)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -38,8 +42,9 @@ jobs:
         env:
           VIEWING: ${{ inputs.highlights_viewing_experiment }}
           DIRECT: ${{ inputs.highlights_direct_viewing_experiment }}
+          EARLY: ${{ inputs.highlights_early_viewing_experiment }}
           DIAGNOSTICS: ${{ inputs.highlights_diagnostics }}
-        run: test "$VIEWING" != true && test "$DIAGNOSTICS" != true && test "$DIRECT" != true
+        run: test "$VIEWING" != true && test "$DIAGNOSTICS" != true && test "$DIRECT" != true && test "$EARLY" != true
       - name: Test synthetic packaging rules
         run: python3 -m unittest discover -s experiments/native-social-liveprocess-device -p 'test_*.py' -v
       - name: Select pinned toolchain and source
@@ -528,3 +533,4 @@ jobs:
       highlights_diagnostics: ${{ inputs.highlights_diagnostics }}
       highlights_viewing_experiment: ${{ inputs.highlights_viewing_experiment }}
       highlights_direct_viewing_experiment: ${{ inputs.highlights_direct_viewing_experiment }}
+      highlights_early_viewing_experiment: ${{ inputs.highlights_early_viewing_experiment }}

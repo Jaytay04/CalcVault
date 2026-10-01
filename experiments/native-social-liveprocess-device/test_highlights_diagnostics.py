@@ -140,6 +140,7 @@ class HighlightsDiagnosticsSourceTests(unittest.TestCase):
     def test_direct_viewing_mode_is_pinned_default_off_and_single_slot_only(self):
         self.assertIn("#define CVLP_HIGHLIGHTS_VIEWING_EXPERIMENT 0", self.header)
         self.assertIn("#define CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT 0", self.header)
+        self.assertIn("#define CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT 0", self.header)
         self.assertIn("#error Highlights viewing experiments are mutually exclusive", self.header)
         self.assertIn("static _Atomic(uintptr_t) CVLPHighlightsDirectOriginalAddress = 0", self.header)
         self.assertIn("header.filetype != MH_DYLIB", self.header)
@@ -169,9 +170,10 @@ class HighlightsDiagnosticsSourceTests(unittest.TestCase):
         direct_install = self.header.split(
             "static CVLPHighlightsDirectInstallStatus CVLPHighlightsDirectValidateAndInstall(", 1
         )[1].split("static BOOL CVLPHighlightsDirectMachRegionAllows", 1)[0]
-        self.assertIn("#if !CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT", direct_install)
+        self.assertIn("#if !CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT && !CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT", direct_install)
         self.assertIn("return CVLPHighlightsDirectDisabled", direct_install)
         self.assertNotIn("compareExchange(creationSlot", direct_install)
+        self.assertNotIn("malloc(", direct_install)
 
     def test_ios_vm_api_and_preprocessor_balance(self):
         self.assertNotIn("#import <mach/mach_vm.h>", self.header)
@@ -201,11 +203,15 @@ class HighlightsDiagnosticsSourceTests(unittest.TestCase):
         self.assertIn('CVLPHighlightsRecording = NO;', self.header)
         self.assertIn('[self appendLineForPhase:@"stopped"', self.header)
         self.assertIn('line.length > 2048', self.header)
-        self.assertIn('parts.count != 44', self.header)
+        self.assertIn('parts.count != 48', self.header)
         self.assertIn('"scope", "why0", "why1", "classes0", "classes1", "mode", "overrideCalls"', self.header)
         self.assertIn('scope=1 why0=%d why1=%d classes0=%lu classes1=%lu mode=%d overrideCalls=%u', self.header)
         self.assertIn('"directMode", "directStatus", "directCalls", "directLast", "directOverrideCalls"', self.header)
         self.assertIn('directMode=%d directStatus=%d directCalls=%u directLast=%d directOverrideCalls=%u', self.header)
+        self.assertIn('"earlyMode", "earlyStatus", "earlyMatches", "earlyRetained"', self.header)
+        self.assertIn('earlyMode=%d earlyStatus=%d earlyMatches=%u earlyRetained=%d', self.header)
+        self.assertIn('CVLPHighlightsEarlyViewingExperimentMode', self.header)
+        self.assertIn('status > CVLPHighlightsEarlyInstallFailed', self.header)
         self.assertIn('strtoll(value, NULL, 10) != CVLPHighlightsViewingExperimentMode', self.header)
         self.assertIn('(CVLPHighlightsViewingExperimentMode == 0 && overrideCalls != 0)', self.header)
         self.assertIn('overrideCalls > CVLPHighlightsCountMaximum', self.header)
@@ -217,6 +223,64 @@ class HighlightsDiagnosticsSourceTests(unittest.TestCase):
         start = self.header.split('- (void)startOnMainQueue {', 1)[1].split('- (void)scheduleSample:', 1)[0]
         self.assertNotIn('CVLPHighlightsSampleTreeSafely()', start)
         self.assertIn('initialTree.truncated = 1;', start)
+
+    def test_early_startup_callback_is_consumption_only_bounded_and_inert_after_finish(self):
+        self.assertIn("+ (void)armEarlyViewing;", self.header)
+        self.assertIn("+ (void)finishEarlyViewingLoad;", self.header)
+        self.assertIn("CVLPHighlightsEarlyArm();", self.header)
+        self.assertIn("CVLPHighlightsEarlyFinish();", self.header)
+        self.assertIn("_dyld_register_func_for_add_image(CVLPHighlightsEarlyAddImageCallback)", self.header)
+        self.assertIn("static _Thread_local BOOL CVLPHighlightsEarlyArmThread", self.header)
+        self.assertIn("static _Thread_local BOOL CVLPHighlightsEarlyRegistrationReplay", self.header)
+        self.assertIn("CVLPHighlightsEarlyMaximumScannedImages = 4096", self.header)
+        self.assertIn("CVLPHighlightsEarlyClaimAttempt()", self.header)
+        self.assertIn("CVLPHighlightsDirectValidateAndInstall(imageBase, memory)", self.header)
+        self.assertIn("CVLPHighlightsEarlyPinnedCandidateMatches", self.header)
+        self.assertIn("CVLPHighlightsDirectExpectedUUID", self.header)
+        self.assertIn("CVLPHighlightsEarlyActive, false", self.header)
+        self.assertIn("CVLPHighlightsEarlyRetainedValue", self.header)
+        self.assertIn("CVLPHighlightsEarlyTestSetInstaller", self.header)
+        self.assertIn("CVLPHighlightsEarlyTestDeliverImageCallback", self.header)
+        self.assertIn("CVLPHighlightsEarlyTestReadState", self.header)
+        callback = self.header.split("static void CVLPHighlightsEarlyAddImageCallback(", 1)[1].split(
+            "static void CVLPHighlightsEarlyArm(", 1
+        )[0]
+        for forbidden in ("CACurrentMediaTime", "malloc(", "free(", "objc_", "class_get", "UIApplication", "NSLog"):
+            self.assertNotIn(forbidden, callback)
+        arm_reset = self.header.split("- (void)startOnMainQueue {", 1)[1].split("- (void)scheduleSample:", 1)[0]
+        for preserved in (
+            "previous.directCalls",
+            "previous.directOverrideCalls",
+            "previous.directLast",
+            "CVLPHighlightsEarlyStatusValue",
+            "CVLPHighlightsEarlyMatchCount",
+            "CVLPHighlightsEarlyRetainedValue",
+            "self->_startedAt = CVLPHighlightsStartedAt",
+        ):
+            self.assertIn(preserved, arm_reset)
+
+    def test_exact_registration_replay_terminally_closes_install_attempt(self):
+        callback = self.header.split("static void CVLPHighlightsEarlyAddImageCallback(", 1)[1].split(
+            "static void CVLPHighlightsEarlyArm(", 1
+        )[0]
+        replay = callback.split("if (CVLPHighlightsEarlyRegistrationReplay) {", 1)[1].split(
+            "struct mach_header_64 header64;", 1
+        )[0]
+        attempt_guard = callback.index("if (atomic_load_explicit(&CVLPHighlightsEarlyAttempted, memory_order_acquire))")
+        replay_guard = callback.index("if (CVLPHighlightsEarlyRegistrationReplay) {")
+        self.assertLess(attempt_guard, replay_guard)
+        self.assertIn("CVLPHighlightsEarlyClaimAttempt()", replay)
+        self.assertIn("CVLPHighlightsEarlyPinnedCandidateMatches", replay)
+        self.assertIn("CVLPHighlightsEarlyTestInstallerFunction(header, slide", replay)
+        self.assertIn("CVLPHighlightsEarlyReplaySkipped", replay)
+        self.assertIn("CVLPHighlightsEarlyRetainedValue, 0", replay)
+        for forbidden in (
+            "CVLPHighlightsDirectValidateAndInstall",
+            "compareExchange(",
+            "CVLPHighlightsDirectOriginalAddress",
+            "CVLPHighlightsDirectReplacementAddress",
+        ):
+            self.assertNotIn(forbidden, replay)
 
     def test_view_walk_is_read_only_shallow_bounded_and_content_free(self):
         self.assertIn("CVLPHighlightsMaximumTreeNodes = 1499", self.header)

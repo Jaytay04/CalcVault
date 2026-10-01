@@ -117,6 +117,27 @@ audio cessation. Do not mistake package checks for a successful device test.
 
 ## Opt-in Highlights diagnostic candidate
 
+The separate early-startup experiment uses
+`highlights_early_viewing_experiment=true`, diagnostics enabled and both other
+experiments disabled. Its marker/suffix is `highlights-earlyviewing1`. The same
+pinned consumption pointer is considered only during the existing guest load,
+using Apple's new-image pre-initializer callback. An exact already-loaded target
+terminally closes the attempt without mutation; unrelated replay is ignored.
+load completion disarms the callback and checks pointer retention without
+reinstallation. Early observations survive later observer setup. Real synthetic
+dylib initialization and existing validation/forwarding fixtures are required in
+CI. No additional feature gate, guest bytes, RX or lifecycle behavior changes.
+Phone Highlights activation remains unverified; preserve the working IPA.
+
+Early diagnostics add `earlyMode`, `earlyStatus`, `earlyMatches` and
+`earlyRetained`. Status: 0 disabled, 1 armed, 2 installed, 3 no match, 4 rejected,
+5 exact target replay skipped, 6 unsupported architecture, 7 installation failed.
+Retention is -1 unknown, 0 absent/changed, 1 still installed at the end of loading.
+`directMode=1` covers either native experiment; use `earlyMode` to distinguish them.
+CI runs a separate fresh process for terminal exact-target replay, in addition to
+the four configurations and real synthetic constructor timing checks. A manual
+post-finish pointer change verifies reporting without claiming initializer rewrite.
+
 The separately approved direct-call experiment requires
 `highlights_direct_viewing_experiment=true` with diagnostics enabled and the
 method-only experiment disabled. Its marker/suffix is `highlights-directviewing1`.

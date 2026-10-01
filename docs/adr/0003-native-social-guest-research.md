@@ -4,6 +4,28 @@ Status: separate integration candidate authorized after owner acceptance of port
 
 ## Integration candidate 23: private immutable TikTok guest
 
+### Temporary pre-initializer viewing experiment (2026-10-01)
+
+The owner approved a separate early-startup test after the signed-phone direct
+viewing override ran five times without revealing Highlights. The existing
+observer starts after guest `dlopen` returns; earlier consumption decisions remain
+a hypothesis, not a confirmed cause. Arm Apple's add-image callback immediately
+before that existing load, within the already authorized LiveProcess bootstrap.
+Skip synchronous replay of already loaded images. For one newly loaded exact
+pinned image, perform the same consumption-only pointer validation and atomic
+replacement before its initializers. The callback must be bounded C with no
+Objective-C discovery, allocation, logging or dependency loading.
+
+Disarm after load return or an Objective-C exception. Keep the callback inert
+outside that window, retain early counters across observer startup, and report
+whether the pointer survived initialization without reinstalling it. Ordinary,
+method-only and late-direct builds remain separate/default-off. No creation gate,
+RX, license, guest bytes, credential, bookmark, entitlement, identity, portrait or
+lifecycle policy change is authorized. Preserve the working IPA. A real synthetic
+Apple dylib constructor timing test and existing pin/mapping/forwarding failures
+must pass before private packaging; owner-operated phone acceptance remains
+separate. Existing private artifact delivery authority applies.
+
 ### Temporary direct-call viewing experiment (2026-10-01)
 
 After the method-only experiment failed to activate an observed Highlights row,

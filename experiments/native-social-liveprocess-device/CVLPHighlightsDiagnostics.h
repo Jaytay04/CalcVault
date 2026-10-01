@@ -11,6 +11,7 @@
 #import <limits.h>
 #import <stdint.h>
 #import <mach/mach.h>
+#import <mach-o/dyld.h>
 #import <mach-o/loader.h>
 #import <mach-o/nlist.h>
 #import <stdatomic.h>
@@ -32,7 +33,16 @@
 #error CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT must be 0 or 1
 #endif
 
-#if CVLP_HIGHLIGHTS_VIEWING_EXPERIMENT && CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT
+#ifndef CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT
+#define CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT 0
+#endif
+
+#if CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT != 0 && CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT != 1
+#error CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT must be 0 or 1
+#endif
+
+#if (CVLP_HIGHLIGHTS_VIEWING_EXPERIMENT + CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT + \
+    CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT) > 1
 #error Highlights viewing experiments are mutually exclusive
 #endif
 
@@ -44,6 +54,10 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface CVLPHighlightsDiagnostics : NSObject
 + (void)start;
+#if CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT
++ (void)armEarlyViewing;
++ (void)finishEarlyViewingLoad;
+#endif
 #if defined(CVLP_HIGHLIGHTS_TESTING)
 + (BOOL)runFixtureSelfTest:(NSString * _Nullable * _Nullable)failure;
 #endif
@@ -53,9 +67,25 @@ NS_ASSUME_NONNULL_BEGIN
 BOOL CVLPHighlightsRunFixtureSelfTest(NSString * _Nullable * _Nullable failure);
 #endif
 
+#if defined(CVLP_HIGHLIGHTS_TESTING) && CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT
+struct mach_header;
+// Read-only resolver for a synthetic fixture dylib. The registered callback
+// performs the compare-and-swap after this resolver identifies the real slot.
+typedef BOOL (*CVLPHighlightsEarlyTestInstaller)(const struct mach_header *header,
+    intptr_t slide, uintptr_t *slotAddress, uintptr_t *expectedOriginal, void *context);
+void CVLPHighlightsEarlyTestSetInstaller(CVLPHighlightsEarlyTestInstaller installer, void *context);
+void CVLPHighlightsEarlyTestDeliverImageCallback(const struct mach_header *header, intptr_t slide);
+uint32_t CVLPHighlightsEarlyTestCASAttempts(void);
+uint32_t CVLPHighlightsEarlyTestReplayDeliveries(void);
+void CVLPHighlightsEarlyTestReadState(int *status, uint16_t *matches,
+    int *retained, int *directStatus);
+#endif
+
 enum {
     CVLPHighlightsViewingExperimentMode = CVLP_HIGHLIGHTS_VIEWING_EXPERIMENT,
-    CVLPHighlightsDirectViewingExperimentMode = CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT,
+    CVLPHighlightsDirectViewingExperimentMode = (CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT ||
+        CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT),
+    CVLPHighlightsEarlyViewingExperimentMode = CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT,
     CVLPHighlightsMaximumEvents = 26,
     CVLPHighlightsMaximumSamples = 24,
     CVLPHighlightsMaximumClasses = 100000,
@@ -100,6 +130,21 @@ typedef NS_ENUM(int, CVLPHighlightsDirectInstallStatus) {
     CVLPHighlightsDirectCompareExchangeFailed = 11,
 };
 
+// earlyStatus describes lifecycle/attempt outcome. ReplaySkipped means the exact
+// target was present during synchronous registration replay and was left untouched.
+// Installed remains installed when an initializer later replaces the slot;
+// earlyRetained reports that separately.
+typedef NS_ENUM(int, CVLPHighlightsEarlyStatus) {
+    CVLPHighlightsEarlyDisabled = 0,
+    CVLPHighlightsEarlyArmed = 1,
+    CVLPHighlightsEarlyInstalled = 2,
+    CVLPHighlightsEarlyNoMatch = 3,
+    CVLPHighlightsEarlyRejected = 4,
+    CVLPHighlightsEarlyReplaySkipped = 5,
+    CVLPHighlightsEarlyUnsupportedArchitecture = 6,
+    CVLPHighlightsEarlyInstallFailed = 7,
+};
+
 typedef NS_ENUM(int, CVLPHighlightsLookupReason) {
     CVLPHighlightsLookupReasonNone = 0,
     CVLPHighlightsLookupReasonMissingAnchor = 1,
@@ -129,6 +174,9 @@ typedef struct {
     uint16_t directCalls;
     uint16_t directOverrideCalls;
     int directStatus;
+    int earlyStatus;
+    uint16_t earlyMatches;
+    int earlyRetained;
     int lastConsumption;
     int lastCreation;
     int directLast;
@@ -176,6 +224,8 @@ static CVLPHighlightsHookState CVLPHighlightsState = {
     .lastConsumption = -1,
     .lastCreation = -1,
     .directLast = -1,
+    .earlyStatus = CVLPHighlightsEarlyDisabled,
+    .earlyRetained = -1,
     .lastModelPresence = -1,
     .lastMount = -1,
     .lastUpdate = -1,
@@ -185,7 +235,7 @@ static BOOL CVLPHighlightsRecording = NO;
 static CFTimeInterval CVLPHighlightsStartedAt = 0.0;
 static __strong id CVLPHighlightsSharedObserver;
 
-#if CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT || defined(CVLP_HIGHLIGHTS_TESTING)
+#if CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT || CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT || defined(CVLP_HIGHLIGHTS_TESTING)
 typedef BOOL (*CVLPHighlightsDirectGateFunction)(void);
 _Static_assert(sizeof(uintptr_t) == sizeof(CVLPHighlightsDirectGateFunction),
     "Direct gate pointers must match arm64 pointer width.");
@@ -210,6 +260,28 @@ typedef struct {
 } CVLPHighlightsDirectImagePin;
 
 static _Atomic(uintptr_t) CVLPHighlightsDirectOriginalAddress = 0;
+#if CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT
+static _Atomic(int) CVLPHighlightsEarlyStatusValue = CVLPHighlightsEarlyDisabled;
+static _Atomic(uint16_t) CVLPHighlightsEarlyMatchCount = 0;
+static _Atomic(int) CVLPHighlightsEarlyRetainedValue = -1;
+static _Atomic(int) CVLPHighlightsEarlyDirectStatus = CVLPHighlightsDirectImageUnavailable;
+static _Atomic(bool) CVLPHighlightsEarlyActive = false;
+static _Atomic(bool) CVLPHighlightsEarlyAttempted = false;
+static _Atomic(bool) CVLPHighlightsEarlyReplayObserved = false;
+static _Atomic(uintptr_t) CVLPHighlightsEarlySlotAddress = 0;
+static _Atomic(uintptr_t) CVLPHighlightsEarlyReplacementAddress = 0;
+static _Atomic(uint32_t) CVLPHighlightsEarlyScannedImages = 0;
+static _Atomic(uint32_t) CVLPHighlightsEarlyCASAttemptCount = 0;
+static _Atomic(uint32_t) CVLPHighlightsEarlyReplayDeliveryCount = 0;
+static _Atomic(bool) CVLPHighlightsEarlyArmStarted = false;
+static _Atomic(bool) CVLPHighlightsEarlyRegistered = false;
+static _Thread_local BOOL CVLPHighlightsEarlyArmThread = NO;
+static _Thread_local BOOL CVLPHighlightsEarlyRegistrationReplay = NO;
+#if defined(CVLP_HIGHLIGHTS_TESTING)
+static CVLPHighlightsEarlyTestInstaller CVLPHighlightsEarlyTestInstallerFunction = NULL;
+static void *CVLPHighlightsEarlyTestInstallerContext = NULL;
+#endif
+#endif
 static CVLPHighlightsDirectInstallStatus CVLPHighlightsDirectValidateAndInstall(
     uintptr_t imageBase, const CVLPHighlightsDirectMemory *memory);
 static BOOL CVLPHighlightsDirectRunFixture(NSString **failure);
@@ -277,7 +349,7 @@ static void CVLPHighlightsRecordInvocation(CVLPHighlightsTarget target, int valu
     os_unfair_lock_unlock(&CVLPHighlightsStateLock);
 }
 
-#if CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT || defined(CVLP_HIGHLIGHTS_TESTING)
+#if CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT || CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT || defined(CVLP_HIGHLIGHTS_TESTING)
 static const uint8_t CVLPHighlightsDirectExpectedUUID[16] = {
     0xe9, 0x94, 0xf2, 0xc7, 0x83, 0x49, 0x3e, 0x53,
     0x92, 0xef, 0xd2, 0x1c, 0x10, 0xde, 0xd9, 0xfc,
@@ -455,7 +527,7 @@ static BOOL CVLPHighlightsDirectAddress(uintptr_t base, uint64_t vmAddress, uint
 }
 
 static BOOL CVLPHighlightsDirectReplacement(void) {
-#if !CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT
+#if !CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT && !CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT
     return NO;
 #else
     uintptr_t address = atomic_load_explicit(&CVLPHighlightsDirectOriginalAddress, memory_order_acquire);
@@ -490,7 +562,7 @@ static BOOL CVLPHighlightsDirectReplacement(void) {
 
 static CVLPHighlightsDirectInstallStatus CVLPHighlightsDirectValidateAndInstall(
     uintptr_t imageBase, const CVLPHighlightsDirectMemory *memory) {
-#if !CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT
+#if !CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT && !CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT
     (void)imageBase;
     (void)memory;
     return CVLPHighlightsDirectDisabled;
@@ -517,16 +589,12 @@ static CVLPHighlightsDirectInstallStatus CVLPHighlightsDirectValidateAndInstall(
     if (!memory->regionAllows(imageBase, imageBytesLength, VM_PROT_READ, VM_PROT_WRITE, memory->context)) {
         return CVLPHighlightsDirectMappingRejected;
     }
-    uint8_t *imageBytes = malloc(imageBytesLength);
-    if (imageBytes == NULL) { return CVLPHighlightsDirectMalformedImage; }
+    uint8_t imageBytes[sizeof(struct mach_header_64) + CVLPHighlightsDirectExpectedCommandBytes];
+    if (imageBytesLength > sizeof(imageBytes)) { return CVLPHighlightsDirectMalformedImage; }
     BOOL imageRead = memory->read(imageBase, imageBytes, imageBytesLength, memory->context);
-    if (!imageRead) {
-        free(imageBytes);
-        return CVLPHighlightsDirectMappingRejected;
-    }
+    if (!imageRead) { return CVLPHighlightsDirectMappingRejected; }
     CVLPHighlightsDirectImagePin pin;
     CVLPHighlightsDirectInstallStatus status = CVLPHighlightsDirectParseImage(imageBytes, imageBytesLength, &pin);
-    free(imageBytes);
     if (status != CVLPHighlightsDirectInstalled) { return status; }
 
     uintptr_t consumptionSlot = 0;
@@ -668,6 +736,368 @@ static CVLPHighlightsDirectInstallStatus CVLPHighlightsDirectInstallForAnchor(Cl
     return CVLPHighlightsDirectValidateAndInstall((uintptr_t)imageInfo.dli_fbase, &memory);
 #endif
 }
+#endif
+
+#if CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT
+enum {
+    CVLPHighlightsEarlyMaximumScannedImages = 4096,
+};
+
+static void CVLPHighlightsEarlyStoreStatus(CVLPHighlightsEarlyStatus status) {
+    atomic_store_explicit(&CVLPHighlightsEarlyStatusValue, status, memory_order_release);
+}
+
+static void CVLPHighlightsEarlyIncrementMatches(void) {
+    uint16_t current = atomic_load_explicit(&CVLPHighlightsEarlyMatchCount, memory_order_relaxed);
+    while (current < CVLPHighlightsCountMaximum &&
+        !atomic_compare_exchange_weak_explicit(&CVLPHighlightsEarlyMatchCount, &current,
+            (uint16_t)(current + 1), memory_order_relaxed, memory_order_relaxed)) {}
+}
+
+static uintptr_t CVLPHighlightsDirectReplacementAddress(void) {
+    CVLPHighlightsDirectGateFunction replacement = &CVLPHighlightsDirectReplacement;
+    uintptr_t address = 0;
+    memcpy(&address, &replacement, sizeof(address));
+    return address;
+}
+
+static BOOL CVLPHighlightsEarlyBasicImageHeaderMatches(const struct mach_header *header,
+    struct mach_header_64 *header64) {
+    if (header == NULL || header64 == NULL) { return NO; }
+    uint32_t magic = 0;
+    memcpy(&magic, header, sizeof(magic));
+    if (magic != MH_MAGIC_64) { return NO; }
+    memcpy(header64, header, sizeof(*header64));
+    return header64->cputype == CPU_TYPE_ARM64 &&
+        header64->cpusubtype == CPU_SUBTYPE_ARM64_ALL &&
+        header64->filetype == MH_DYLIB;
+}
+
+// This bounded prefilter rejects unrelated images before the one full exact
+// validator attempt. It reads only the fixed expected load-command envelope.
+static BOOL CVLPHighlightsEarlyPinnedCandidateMatches(uintptr_t imageBase,
+    const CVLPHighlightsDirectMemory *memory) {
+    if (imageBase == 0 || memory == NULL || memory->regionAllows == NULL || memory->read == NULL) {
+        return NO;
+    }
+    struct mach_header_64 header;
+    if (!memory->regionAllows(imageBase, sizeof(header), VM_PROT_READ, VM_PROT_WRITE, memory->context) ||
+        !memory->read(imageBase, &header, sizeof(header), memory->context) ||
+        header.magic != MH_MAGIC_64 || header.cputype != CPU_TYPE_ARM64 ||
+        header.cpusubtype != CPU_SUBTYPE_ARM64_ALL || header.filetype != MH_DYLIB ||
+        header.ncmds != CVLPHighlightsDirectExpectedCommandCount ||
+        header.sizeofcmds != CVLPHighlightsDirectExpectedCommandBytes) {
+        return NO;
+    }
+
+    size_t bytesLength = sizeof(header) + CVLPHighlightsDirectExpectedCommandBytes;
+    uint8_t bytes[sizeof(struct mach_header_64) + CVLPHighlightsDirectExpectedCommandBytes];
+    if (!memory->regionAllows(imageBase, bytesLength, VM_PROT_READ, VM_PROT_WRITE, memory->context) ||
+        !memory->read(imageBase, bytes, bytesLength, memory->context)) {
+        return NO;
+    }
+
+    struct mach_header_64 copiedHeader;
+    memcpy(&copiedHeader, bytes, sizeof(copiedHeader));
+    const uint8_t *cursor = bytes + sizeof(copiedHeader);
+    size_t remaining = copiedHeader.sizeofcmds;
+    BOOL hasUUID = NO;
+    for (uint32_t index = 0; index < copiedHeader.ncmds; index++) {
+        if (remaining < sizeof(struct load_command)) { return NO; }
+        struct load_command command;
+        memcpy(&command, cursor, sizeof(command));
+        if (command.cmdsize < sizeof(command) || command.cmdsize > remaining) { return NO; }
+        if (command.cmd == LC_UUID) {
+            if (hasUUID || command.cmdsize < sizeof(struct uuid_command)) { return NO; }
+            struct uuid_command uuid;
+            memcpy(&uuid, cursor, sizeof(uuid));
+            if (memcmp(uuid.uuid, CVLPHighlightsDirectExpectedUUID, sizeof(uuid.uuid)) != 0) {
+                return NO;
+            }
+            hasUUID = YES;
+        }
+        cursor += command.cmdsize;
+        remaining -= command.cmdsize;
+    }
+    return remaining == 0 && hasUUID;
+}
+
+static BOOL CVLPHighlightsEarlyClaimAttempt(void) {
+    bool expected = false;
+    return atomic_compare_exchange_strong_explicit(&CVLPHighlightsEarlyAttempted,
+        &expected, true, memory_order_acq_rel, memory_order_acquire);
+}
+
+static void CVLPHighlightsEarlyRememberInstall(uintptr_t slotAddress, uintptr_t originalAddress,
+    CVLPHighlightsDirectInstallStatus installStatus) {
+    atomic_store_explicit(&CVLPHighlightsEarlyDirectStatus, installStatus, memory_order_release);
+    if (installStatus == CVLPHighlightsDirectInstalled) {
+        atomic_store_explicit(&CVLPHighlightsEarlySlotAddress, slotAddress, memory_order_release);
+        atomic_store_explicit(&CVLPHighlightsEarlyReplacementAddress,
+            CVLPHighlightsDirectReplacementAddress(), memory_order_release);
+        CVLPHighlightsEarlyStoreStatus(CVLPHighlightsEarlyInstalled);
+    } else if (installStatus == CVLPHighlightsDirectUnsupportedArchitecture) {
+        CVLPHighlightsEarlyStoreStatus(CVLPHighlightsEarlyUnsupportedArchitecture);
+    } else if (installStatus == CVLPHighlightsDirectPinMismatch ||
+        installStatus == CVLPHighlightsDirectMalformedImage ||
+        installStatus == CVLPHighlightsDirectConsumptionSlotMismatch ||
+        installStatus == CVLPHighlightsDirectCreationSlotMismatch ||
+        installStatus == CVLPHighlightsDirectCodeMismatch ||
+        installStatus == CVLPHighlightsDirectSectionMismatch) {
+        CVLPHighlightsEarlyStoreStatus(CVLPHighlightsEarlyRejected);
+    } else {
+        CVLPHighlightsEarlyStoreStatus(CVLPHighlightsEarlyInstallFailed);
+    }
+    (void)originalAddress;
+}
+
+static void CVLPHighlightsEarlyProcessPinnedImage(uintptr_t imageBase,
+    const CVLPHighlightsDirectMemory *memory) {
+    if (!CVLPHighlightsEarlyPinnedCandidateMatches(imageBase, memory)) { return; }
+    CVLPHighlightsEarlyIncrementMatches();
+    if (!CVLPHighlightsEarlyClaimAttempt()) { return; }
+    atomic_fetch_add_explicit(&CVLPHighlightsEarlyCASAttemptCount, 1, memory_order_relaxed);
+    CVLPHighlightsDirectInstallStatus installStatus =
+        CVLPHighlightsDirectValidateAndInstall(imageBase, memory);
+    uintptr_t slotAddress = 0;
+    uintptr_t originalAddress = 0;
+    if (installStatus == CVLPHighlightsDirectInstalled) {
+        CVLPHighlightsDirectAddress(imageBase, CVLPHighlightsDirectConsumptionSlotVM, &slotAddress);
+        CVLPHighlightsDirectAddress(imageBase, CVLPHighlightsDirectConsumptionVM, &originalAddress);
+    }
+    CVLPHighlightsEarlyRememberInstall(slotAddress, originalAddress, installStatus);
+}
+
+#if defined(CVLP_HIGHLIGHTS_TESTING)
+static void CVLPHighlightsEarlyProcessTestImage(const struct mach_header *header, intptr_t slide) {
+    CVLPHighlightsEarlyTestInstaller installer = CVLPHighlightsEarlyTestInstallerFunction;
+    if (installer == NULL || header == NULL) { return; }
+    uintptr_t slotAddress = 0;
+    uintptr_t expectedOriginal = 0;
+    if (!installer(header, slide, &slotAddress, &expectedOriginal,
+            CVLPHighlightsEarlyTestInstallerContext)) {
+        return;
+    }
+    CVLPHighlightsEarlyIncrementMatches();
+    if (!CVLPHighlightsEarlyClaimAttempt()) { return; }
+    atomic_fetch_add_explicit(&CVLPHighlightsEarlyCASAttemptCount, 1, memory_order_relaxed);
+    if (slotAddress == 0 || (slotAddress & (sizeof(uintptr_t) - 1)) != 0 || expectedOriginal == 0 ||
+        !CVLPHighlightsDirectMachRegionAllows(slotAddress, sizeof(uintptr_t),
+            VM_PROT_READ | VM_PROT_WRITE, VM_PROT_EXECUTE, NULL)) {
+        CVLPHighlightsEarlyRememberInstall(0, 0, CVLPHighlightsDirectMappingRejected);
+        return;
+    }
+    atomic_store_explicit(&CVLPHighlightsDirectOriginalAddress, expectedOriginal, memory_order_release);
+    uintptr_t replacementAddress = CVLPHighlightsDirectReplacementAddress();
+    uintptr_t observed = expectedOriginal;
+    if (!__atomic_compare_exchange_n((uintptr_t *)slotAddress, &observed, replacementAddress,
+            false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        CVLPHighlightsEarlyRememberInstall(0, 0, CVLPHighlightsDirectCompareExchangeFailed);
+        return;
+    }
+    CVLPHighlightsEarlyRememberInstall(slotAddress, expectedOriginal, CVLPHighlightsDirectInstalled);
+}
+#endif
+
+static void CVLPHighlightsEarlyAddImageCallback(const struct mach_header *header, intptr_t slide) {
+    int incomingErrno = errno;
+    if (!atomic_load_explicit(&CVLPHighlightsEarlyActive, memory_order_acquire) ||
+        !CVLPHighlightsEarlyArmThread) {
+        errno = incomingErrno;
+        return;
+    }
+    if (atomic_load_explicit(&CVLPHighlightsEarlyAttempted, memory_order_acquire)) {
+        errno = incomingErrno;
+        return;
+    }
+    uint32_t scanned = atomic_fetch_add_explicit(&CVLPHighlightsEarlyScannedImages, 1,
+        memory_order_relaxed);
+    if (scanned >= CVLPHighlightsEarlyMaximumScannedImages) {
+        if (!atomic_load_explicit(&CVLPHighlightsEarlyAttempted, memory_order_acquire)) {
+            CVLPHighlightsEarlyStoreStatus(CVLPHighlightsEarlyRejected);
+            atomic_store_explicit(&CVLPHighlightsEarlyDirectStatus,
+                CVLPHighlightsDirectImageUnavailable, memory_order_release);
+        }
+        errno = incomingErrno;
+        return;
+    }
+    if (CVLPHighlightsEarlyRegistrationReplay) {
+#if defined(CVLP_HIGHLIGHTS_TESTING)
+        atomic_fetch_add_explicit(&CVLPHighlightsEarlyReplayDeliveryCount, 1, memory_order_relaxed);
+        if (CVLPHighlightsEarlyTestInstallerFunction != NULL) {
+            uintptr_t replaySlot = 0;
+            uintptr_t replayOriginal = 0;
+            if (CVLPHighlightsEarlyBasicImageHeaderMatches(header, &(struct mach_header_64){0}) &&
+                CVLPHighlightsEarlyTestInstallerFunction(header, slide, &replaySlot,
+                    &replayOriginal, CVLPHighlightsEarlyTestInstallerContext)) {
+                atomic_store_explicit(&CVLPHighlightsEarlyReplayObserved, true, memory_order_release);
+                CVLPHighlightsEarlyIncrementMatches();
+                (void)CVLPHighlightsEarlyClaimAttempt();
+                atomic_store_explicit(&CVLPHighlightsEarlyRetainedValue, 0, memory_order_release);
+                CVLPHighlightsEarlyStoreStatus(CVLPHighlightsEarlyReplaySkipped);
+            }
+        }
+#else
+        struct mach_header_64 replayHeader;
+        if (CVLPHighlightsEarlyBasicImageHeaderMatches(header, &replayHeader) &&
+            replayHeader.ncmds == CVLPHighlightsDirectExpectedCommandCount &&
+            replayHeader.sizeofcmds == CVLPHighlightsDirectExpectedCommandBytes) {
+            CVLPHighlightsDirectMemory replayMemory = {
+                .regionAllows = CVLPHighlightsDirectMachRegionAllows,
+                .read = CVLPHighlightsDirectMachRead,
+                .compareExchange = CVLPHighlightsDirectMachCompareExchange,
+                .context = NULL,
+            };
+            if (CVLPHighlightsEarlyPinnedCandidateMatches((uintptr_t)header, &replayMemory)) {
+                atomic_store_explicit(&CVLPHighlightsEarlyReplayObserved, true, memory_order_release);
+                CVLPHighlightsEarlyIncrementMatches();
+                (void)CVLPHighlightsEarlyClaimAttempt();
+                atomic_store_explicit(&CVLPHighlightsEarlyRetainedValue, 0, memory_order_release);
+                CVLPHighlightsEarlyStoreStatus(CVLPHighlightsEarlyReplaySkipped);
+            }
+        }
+#endif
+        errno = incomingErrno;
+        return;
+    }
+    struct mach_header_64 header64;
+    if (!CVLPHighlightsEarlyBasicImageHeaderMatches(header, &header64)) {
+        errno = incomingErrno;
+        return;
+    }
+#if defined(CVLP_HIGHLIGHTS_TESTING)
+    if (CVLPHighlightsEarlyTestInstallerFunction != NULL) {
+        CVLPHighlightsEarlyProcessTestImage(header, slide);
+        errno = incomingErrno;
+        return;
+    }
+#endif
+#if !defined(__arm64__) || defined(__arm64e__)
+    CVLPHighlightsEarlyStoreStatus(CVLPHighlightsEarlyUnsupportedArchitecture);
+    atomic_store_explicit(&CVLPHighlightsEarlyDirectStatus,
+        CVLPHighlightsDirectUnsupportedArchitecture, memory_order_release);
+#else
+    if (header64.ncmds != CVLPHighlightsDirectExpectedCommandCount ||
+        header64.sizeofcmds != CVLPHighlightsDirectExpectedCommandBytes) {
+        errno = incomingErrno;
+        return;
+    }
+    CVLPHighlightsDirectMemory memory = {
+        .regionAllows = CVLPHighlightsDirectMachRegionAllows,
+        .read = CVLPHighlightsDirectMachRead,
+        .compareExchange = CVLPHighlightsDirectMachCompareExchange,
+        .context = NULL,
+    };
+    CVLPHighlightsEarlyProcessPinnedImage((uintptr_t)header, &memory);
+#endif
+    errno = incomingErrno;
+}
+
+static void CVLPHighlightsEarlyArm(void) {
+    int incomingErrno = errno;
+    bool expected = false;
+    if (!atomic_compare_exchange_strong_explicit(&CVLPHighlightsEarlyArmStarted,
+            &expected, true, memory_order_acq_rel, memory_order_acquire)) {
+        errno = incomingErrno;
+        return;
+    }
+    CVLPHighlightsEarlyArmThread = YES;
+    os_unfair_lock_lock(&CVLPHighlightsStateLock);
+    CVLPHighlightsStartedAt = CACurrentMediaTime();
+    CVLPHighlightsRecording = YES;
+    CVLPHighlightsEarlyStoreStatus(CVLPHighlightsEarlyArmed);
+    CVLPHighlightsState.earlyStatus = CVLPHighlightsEarlyArmed;
+    CVLPHighlightsState.earlyRetained = -1;
+    CVLPHighlightsState.directStatus = CVLPHighlightsDirectImageUnavailable;
+    os_unfair_lock_unlock(&CVLPHighlightsStateLock);
+
+#if !defined(__arm64__) || defined(__arm64e__)
+    atomic_store_explicit(&CVLPHighlightsEarlyDirectStatus,
+        CVLPHighlightsDirectUnsupportedArchitecture, memory_order_release);
+    CVLPHighlightsEarlyStoreStatus(CVLPHighlightsEarlyUnsupportedArchitecture);
+    errno = incomingErrno;
+    return;
+#else
+    atomic_store_explicit(&CVLPHighlightsEarlyActive, true, memory_order_release);
+    bool unregistered = false;
+    if (atomic_compare_exchange_strong_explicit(&CVLPHighlightsEarlyRegistered,
+            &unregistered, true, memory_order_acq_rel, memory_order_acquire)) {
+        CVLPHighlightsEarlyRegistrationReplay = YES;
+        _dyld_register_func_for_add_image(CVLPHighlightsEarlyAddImageCallback);
+        CVLPHighlightsEarlyRegistrationReplay = NO;
+    }
+#endif
+    errno = incomingErrno;
+}
+
+static void CVLPHighlightsEarlyFinish(void) {
+    int incomingErrno = errno;
+    if (!atomic_load_explicit(&CVLPHighlightsEarlyArmStarted, memory_order_acquire)) {
+        errno = incomingErrno;
+        return;
+    }
+    atomic_store_explicit(&CVLPHighlightsEarlyActive, false, memory_order_release);
+    CVLPHighlightsEarlyArmThread = NO;
+    if (!atomic_load_explicit(&CVLPHighlightsEarlyAttempted, memory_order_acquire)) {
+        int status = atomic_load_explicit(&CVLPHighlightsEarlyStatusValue, memory_order_acquire);
+        if (status == CVLPHighlightsEarlyArmed) {
+            status = atomic_load_explicit(&CVLPHighlightsEarlyReplayObserved, memory_order_acquire)
+                ? CVLPHighlightsEarlyReplaySkipped : CVLPHighlightsEarlyNoMatch;
+            CVLPHighlightsEarlyStoreStatus((CVLPHighlightsEarlyStatus)status);
+        }
+        atomic_store_explicit(&CVLPHighlightsEarlyRetainedValue, 0, memory_order_release);
+    } else if (atomic_load_explicit(&CVLPHighlightsEarlyStatusValue, memory_order_acquire) ==
+            CVLPHighlightsEarlyInstalled) {
+        uintptr_t slotAddress = atomic_load_explicit(&CVLPHighlightsEarlySlotAddress, memory_order_acquire);
+        uintptr_t replacementAddress = atomic_load_explicit(&CVLPHighlightsEarlyReplacementAddress,
+            memory_order_acquire);
+        BOOL retained = slotAddress != 0 && replacementAddress != 0 &&
+            CVLPHighlightsDirectMachRegionAllows(slotAddress, sizeof(uintptr_t),
+                VM_PROT_READ, VM_PROT_EXECUTE, NULL) &&
+            __atomic_load_n((uintptr_t *)slotAddress, __ATOMIC_ACQUIRE) == replacementAddress;
+        atomic_store_explicit(&CVLPHighlightsEarlyRetainedValue, retained ? 1 : 0, memory_order_release);
+    } else {
+        atomic_store_explicit(&CVLPHighlightsEarlyRetainedValue, 0, memory_order_release);
+    }
+    errno = incomingErrno;
+}
+
+#if defined(CVLP_HIGHLIGHTS_TESTING)
+void CVLPHighlightsEarlyTestSetInstaller(CVLPHighlightsEarlyTestInstaller installer, void *context) {
+    if (!atomic_load_explicit(&CVLPHighlightsEarlyArmStarted, memory_order_acquire)) {
+        CVLPHighlightsEarlyTestInstallerFunction = installer;
+        CVLPHighlightsEarlyTestInstallerContext = context;
+    }
+}
+
+void CVLPHighlightsEarlyTestDeliverImageCallback(const struct mach_header *header, intptr_t slide) {
+    CVLPHighlightsEarlyAddImageCallback(header, slide);
+}
+
+uint32_t CVLPHighlightsEarlyTestCASAttempts(void) {
+    return atomic_load_explicit(&CVLPHighlightsEarlyCASAttemptCount, memory_order_acquire);
+}
+
+uint32_t CVLPHighlightsEarlyTestReplayDeliveries(void) {
+    return atomic_load_explicit(&CVLPHighlightsEarlyReplayDeliveryCount, memory_order_acquire);
+}
+
+void CVLPHighlightsEarlyTestReadState(int *status, uint16_t *matches,
+    int *retained, int *directStatus) {
+    if (status != NULL) {
+        *status = atomic_load_explicit(&CVLPHighlightsEarlyStatusValue, memory_order_acquire);
+    }
+    if (matches != NULL) {
+        *matches = atomic_load_explicit(&CVLPHighlightsEarlyMatchCount, memory_order_acquire);
+    }
+    if (retained != NULL) {
+        *retained = atomic_load_explicit(&CVLPHighlightsEarlyRetainedValue, memory_order_acquire);
+    }
+    if (directStatus != NULL) {
+        *directStatus = atomic_load_explicit(&CVLPHighlightsEarlyDirectStatus, memory_order_acquire);
+    }
+}
+#endif
 #endif
 
 static BOOL CVLPHighlightsMethodHasExactSignature(Method method, const char *returnEncoding) {
@@ -1106,6 +1536,7 @@ static const char *CVLPHighlightsFieldNames[] = {
     "n", "w", "r", "hidden", "alpha", "width", "height", "trunc", "err",
     "scope", "why0", "why1", "classes0", "classes1", "mode", "overrideCalls",
     "directMode", "directStatus", "directCalls", "directLast", "directOverrideCalls",
+    "earlyMode", "earlyStatus", "earlyMatches", "earlyRetained",
 };
 
 static BOOL CVLPHighlightsParseInteger(const char *value) {
@@ -1161,7 +1592,7 @@ static BOOL CVLPHighlightsLineIsSanitized(NSString *line) {
     });
     if ([line rangeOfCharacterFromSet:allowedCharacters.invertedSet].location != NSNotFound) { return NO; }
     NSArray<NSString *> *parts = [line componentsSeparatedByString:@" "];
-    if (parts.count != 44 || ![parts[0] isEqualToString:@"CVLP_HIGHLIGHTS"]) { return NO; }
+    if (parts.count != 48 || ![parts[0] isEqualToString:@"CVLP_HIGHLIGHTS"]) { return NO; }
     NSString *phase = nil;
     for (NSUInteger index = 1; index < parts.count; index++) {
         NSString *part = parts[index];
@@ -1248,12 +1679,46 @@ static BOOL CVLPHighlightsLineIsSanitized(NSString *line) {
                 (CVLPHighlightsDirectViewingExperimentMode == 0 && last != -1)) { return NO; }
             long long directStatus = CVLPHighlightsIntegerField(parts[40]);
             if (directStatus != CVLPHighlightsDirectInstalled && last != -1) { return NO; }
+        } else if (index == 44) {
+            long long mode = strtoll(value, NULL, 10);
+            if (mode != CVLPHighlightsEarlyViewingExperimentMode) { return NO; }
+        } else if (index == 45) {
+            long long status = strtoll(value, NULL, 10);
+            if (status < CVLPHighlightsEarlyDisabled || status > CVLPHighlightsEarlyInstallFailed ||
+                (CVLPHighlightsEarlyViewingExperimentMode == 0 && status != CVLPHighlightsEarlyDisabled) ||
+                (CVLPHighlightsEarlyViewingExperimentMode == 1 && status == CVLPHighlightsEarlyDisabled)) {
+                return NO;
+            }
+        } else if (index == 46) {
+            long long matches = strtoll(value, NULL, 10);
+            if (matches < 0 || matches > CVLPHighlightsCountMaximum ||
+                (CVLPHighlightsEarlyViewingExperimentMode == 0 && matches != 0)) { return NO; }
+            long long earlyStatus = CVLPHighlightsIntegerField(parts[45]);
+            if ((earlyStatus == CVLPHighlightsEarlyInstalled ||
+                    earlyStatus == CVLPHighlightsEarlyReplaySkipped) && matches == 0) { return NO; }
+        } else if (index == 47) {
+            long long retained = strtoll(value, NULL, 10);
+            if (retained < -1 || retained > 1 ||
+                (CVLPHighlightsEarlyViewingExperimentMode == 0 && retained != -1) ||
+                (retained == 1 && CVLPHighlightsIntegerField(parts[45]) != CVLPHighlightsEarlyInstalled)) {
+                return NO;
+            }
         }
     }
     return phase != nil;
 }
 
 @implementation CVLPHighlightsDiagnostics
+
+#if CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT
++ (void)armEarlyViewing {
+    CVLPHighlightsEarlyArm();
+}
+
++ (void)finishEarlyViewingLoad {
+    CVLPHighlightsEarlyFinish();
+}
+#endif
 
 + (void)start {
     if (![NSThread isMainThread]) {
@@ -1290,11 +1755,41 @@ static BOOL CVLPHighlightsLineIsSanitized(NSString *line) {
 - (void)startOnMainQueue {
     NSCAssert([NSThread isMainThread], @"Highlights diagnostics must start on the main queue.");
     os_unfair_lock_lock(&CVLPHighlightsStateLock);
+#if CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT
+    CVLPHighlightsHookState previous = CVLPHighlightsState;
+    CVLPHighlightsState = (CVLPHighlightsHookState){ .lastConsumption = -1, .lastCreation = -1,
+        .directLast = -1, .lastModelPresence = -1, .lastMount = -1, .lastUpdate = -1,
+        .lastHeight = -1.0 };
+    CVLPHighlightsState.directCalls = previous.directCalls;
+    CVLPHighlightsState.directOverrideCalls = previous.directOverrideCalls;
+    CVLPHighlightsState.directLast = previous.directLast;
+    CVLPHighlightsState.directStatus = atomic_load_explicit(&CVLPHighlightsEarlyDirectStatus,
+        memory_order_acquire);
+    CVLPHighlightsState.earlyStatus = atomic_load_explicit(&CVLPHighlightsEarlyStatusValue,
+        memory_order_acquire);
+    CVLPHighlightsState.earlyMatches = atomic_load_explicit(&CVLPHighlightsEarlyMatchCount,
+        memory_order_acquire);
+    CVLPHighlightsState.earlyRetained = atomic_load_explicit(&CVLPHighlightsEarlyRetainedValue,
+        memory_order_acquire);
+    if (!atomic_load_explicit(&CVLPHighlightsEarlyArmStarted, memory_order_acquire)) {
+        CVLPHighlightsStartedAt = self->_startedAt;
+        CVLPHighlightsRecording = YES;
+        CVLPHighlightsState.earlyStatus = CVLPHighlightsEarlyInstallFailed;
+        atomic_store_explicit(&CVLPHighlightsEarlyStatusValue, CVLPHighlightsEarlyInstallFailed,
+            memory_order_release);
+    } else {
+        self->_startedAt = CVLPHighlightsStartedAt;
+        if (CACurrentMediaTime() - CVLPHighlightsStartedAt >= CVLPHighlightsDeadline) {
+            CVLPHighlightsRecording = NO;
+        }
+    }
+#else
     CVLPHighlightsState = (CVLPHighlightsHookState){ .lastConsumption = -1, .lastCreation = -1,
         .directLast = -1, .lastModelPresence = -1, .lastMount = -1, .lastUpdate = -1,
         .lastHeight = -1.0 };
     CVLPHighlightsStartedAt = self->_startedAt;
     CVLPHighlightsRecording = YES;
+#endif
     os_unfair_lock_unlock(&CVLPHighlightsStateLock);
     CVLPHighlightsStoreLastTree(self, CVLPHighlightsEmptyTree());
 
@@ -1315,6 +1810,9 @@ static BOOL CVLPHighlightsLineIsSanitized(NSString *line) {
     self->_classLookupClasses[1] = MIN(creationSearch.classes, CVLPHighlightsMaximumClasses);
 #if CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT
     CVLPHighlightsDirectInstallStatus directStatus = CVLPHighlightsDirectInstallForAnchor(modelClass);
+#elif CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT
+    CVLPHighlightsDirectInstallStatus directStatus = atomic_load_explicit(
+        &CVLPHighlightsEarlyDirectStatus, memory_order_acquire);
 #else
     CVLPHighlightsDirectInstallStatus directStatus = CVLPHighlightsDirectDisabled;
 #endif
@@ -1397,13 +1895,24 @@ static BOOL CVLPHighlightsLineIsSanitized(NSString *line) {
     os_unfair_lock_lock(&CVLPHighlightsStateLock);
     state = CVLPHighlightsState;
     os_unfair_lock_unlock(&CVLPHighlightsStateLock);
+#if CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT
+    state.directStatus = atomic_load_explicit(&CVLPHighlightsEarlyDirectStatus, memory_order_acquire);
+    state.earlyStatus = atomic_load_explicit(&CVLPHighlightsEarlyStatusValue, memory_order_acquire);
+    state.earlyMatches = atomic_load_explicit(&CVLPHighlightsEarlyMatchCount, memory_order_acquire);
+    state.earlyRetained = atomic_load_explicit(&CVLPHighlightsEarlyRetainedValue, memory_order_acquire);
+#else
+    state.earlyStatus = CVLPHighlightsEarlyDisabled;
+    state.earlyMatches = 0;
+    state.earlyRetained = -1;
+#endif
     unsigned long long elapsed = (unsigned long long)MAX(0.0, floor((CACurrentMediaTime() - self->_startedAt) * 1000.0));
     NSString *line = [NSString stringWithFormat:
         @"CVLP_HIGHLIGHTS phase=%@ seq=%lu ms=%llu reason=%d st0=%d st1=%d st2=%d st3=%d st4=%d st5=%d "
          "c0=%u c1=%u c2=%u c3=%u c4=%u c5=%u l0=%d l1=%d l2=%d l3=%d l4=%d l5=%.6g "
          "n=%lu w=%lu r=%lu hidden=%d alpha=%.6g width=%.6g height=%.6g trunc=%d err=%d "
          "scope=1 why0=%d why1=%d classes0=%lu classes1=%lu mode=%d overrideCalls=%u "
-         "directMode=%d directStatus=%d directCalls=%u directLast=%d directOverrideCalls=%u",
+         "directMode=%d directStatus=%d directCalls=%u directLast=%d directOverrideCalls=%u "
+         "earlyMode=%d earlyStatus=%d earlyMatches=%u earlyRetained=%d",
         phase, (unsigned long)sequence, elapsed, reason,
         self->_installStatuses[0], self->_installStatuses[1], self->_installStatuses[2],
         self->_installStatuses[3], self->_installStatuses[4], self->_installStatuses[5],
@@ -1416,7 +1925,9 @@ static BOOL CVLPHighlightsLineIsSanitized(NSString *line) {
         (unsigned long)self->_classLookupClasses[0], (unsigned long)self->_classLookupClasses[1],
         CVLPHighlightsViewingExperimentMode, (unsigned int)state.overrideCalls,
         CVLPHighlightsDirectViewingExperimentMode, state.directStatus,
-        (unsigned int)state.directCalls, state.directLast, (unsigned int)state.directOverrideCalls];
+        (unsigned int)state.directCalls, state.directLast, (unsigned int)state.directOverrideCalls,
+        CVLPHighlightsEarlyViewingExperimentMode, state.earlyStatus,
+        (unsigned int)state.earlyMatches, state.earlyRetained];
     if (!CVLPHighlightsLineIsSanitized(line)) { return; }
     self->_eventCount++;
     CVLPHighlightsStoreLastTree(self, tree);

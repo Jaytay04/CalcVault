@@ -1,5 +1,131 @@
 # CalcVault test report
 
+## Approved early-startup experiment (2026-10-01)
+
+Owner approval received for a separately marked `integration-23-highlights-earlyviewing1`
+candidate. Implementation and validation are IN PROGRESS. The approved change is
+timing only: the same pinned native consumption pointer, original once, true
+delivery, no creation/cache/RX/license/credential/lifecycle changes. Prior-image
+replay must be skipped; installation and post-initializer retention are distinct
+observations. Existing working IPA stays preserved. Apple native initializer
+timing, source tests, independent review, CI build, private assembly/delivery and
+signed-phone Highlights acceptance remain NOT RUN for this new mode.
+
+Source implementation now includes exact-load arm/finally-disarm, terminal skip
+for exact already-loaded replay, bounded C callback and preserved arm-time budget.
+Independent review accepts the production header, workflow, adapter and synthetic
+fixture slices, subject to the native Apple compile/runtime gate.
+Local Python source/adapter/package checks, YAML parsing and Bash syntax are
+host-side evidence only; they do not establish Apple dyld timing or phone behavior.
+The fixture uses disposable synthetic libraries only. Positive RW-slot retention
+and a manual post-finish pointer change are distinct tests; the latter does not
+claim an initializer overwrote the pointer.
+
+## Startup observation timing and decision boundary (2026-10-01)
+
+Source inspection verifies prepare-upstream loads the payload with dlopen before
+post-loader; guest_diagnostics inserts startup observations after post-loader,
+and prepare-highlights starts Highlights there. Independently inspected prepared
+LCBootstrap has dlopen at line 521, post-loader/observer start at 591/592 and
+appMain at 601. Thus the current hooks cannot observe/override any dependency
+initializer or Objective-C load-time reads performed before dlopen returns.
+Whether Highlights actually makes
+such an earlier read, or commits registration based on it, is NOT established.
+
+Apple's current [dyld.h callback contract](https://github.com/apple-oss-distributions/dyld/blob/main/include/mach-o/dyld.h)
+describes notification after image binding and before initializers for a newly
+loaded image, plus immediate callbacks for already loaded images. This suggests
+an early-startup test of the SAME pinned native consumption pointer, not another
+feature/creation/cache override. An existing-image callback must never be claimed
+as pre-initializer evidence. No callback/test implementation or build performed.
+
+This changes the loader-phase execution context and needs separate owner review.
+Any candidate must stay default-off, guest-only, exact-image/ABI/code/mapping
+pinned, original-once, one-cell CAS, no executable/protection writes and fail
+closed; no Objective-C class discovery or guest operation inside the callback.
+Preserve early scalar observations across later observer setup, bound callbacks,
+reject prior/duplicate/mismatched images and validate synthetic initializer
+behavior on Apple CI before private packaging. Guest/RX bytes, credentials,
+bookmarks, entitlements, portrait and lifecycle policy must remain unchanged.
+Bounded independent static scan finds 3,526 file-backed mod-init roots and no
+direct root pointing to the five functions containing the six consumption
+calls, or to their one observed direct caller. This does not cover indirect
+dispatch or multi-hop initializer paths; pre-hook execution remains possible
+but unproved. This is a timing hypothesis, not a confirmed Highlights fix.
+
+## Downstream admission static follow-up (2026-10-01)
+
+Parent and independent read-only disassembly verify function
+`0x1bac4d60..0x1bac4e18` combines the consumption result with additional
+object/integer prerequisites. Nil branches at `0x1bac4d8c/0x1bac4db4` clear both
+terms. Otherwise one term is true, and the other tests unsigned
+`(value - 0x526d) < 2`, accepting exactly `0x526d` or `0x526e`. Final ANDs are at
+`0x1bac4e04/0x1bac4e08`. Do not describe these as identified Boolean feature flags.
+The selector references `0xa35cee8`, `0xa35eeb8` and `0xa3d8570` are zero-fill
+metadata with no corresponding file-backed pointer, dyld bind or local symbol.
+Their meanings remain unknown, and the phone report does not prove this static
+caller executed or caused the missing row.
+
+Independent scope review confirms six exact Objective-C observer targets, not
+all component/data-source/notification/admission paths. The tree scan examines
+connected-scene windows' root-controller UIKit subtrees with window/node/depth
+bounds and matches one exact cell class; an untruncated zero excludes that cell
+only in those sampled subtrees/times. No generalized absence claim is justified.
+
+Bounded metadata decoding runs only the existing isolated decompressor in
+synthetic memory with allowlisted memory helpers; no app initializer, live
+guest, network/account content, licensing or feature-changing code executes.
+The compact fixup stream does not expose literal selector-reference addresses;
+a sequential string-index guess did not provide valid selector attribution and
+is rejected. Independent parsing finds candidate location records for all three
+refs only under an unverified custom ordinal-0-to-DATA mapping. Its trailing
+streams are likewise rebase-style locations, not selector strings/pointer
+addends; this cannot establish cell contents or exact selector names. Generic
+instance/metaclass traversal likewise cannot resolve callable owners/ABIs for
+the additional presence/non-empty identifiers, so no guessed observer is added.
+Independent bounded executable ADRP scan finds 460 references to storage page
+`0x5f9f000`. Only the known getter at `0x26df44ac` and initializer at
+`0x26df44c8` are validated as constructing exact storage `0x5f9f420` in the
+bounded instruction windows. A third apparent match uses a different register
+and page and is rejected. No additional exact cache consumer or `0x5f9f428`
+access validated. Split-address/alias/indirect dataflow is not exhaustively
+covered; the inline-cache-bypass hypothesis remains unverified, not disproved.
+The five-minute scan bound was honored and no tool process remains running.
+PASS locally: 10 diagnostic source checks and diff check.
+No new iOS build, IPA, deployment, override or runtime-policy change.
+
+## Direct viewing signed-phone outcome (2026-10-01)
+
+Owner supplies the `integration-23-highlights-directviewing1` report and explicitly
+states Highlights still do not appear. Source schema/forwarding review verifies
+`directMode=1`, `directStatus=1`, `directCalls=directOverrideCalls=5` and
+`c0=5/l0=1`: the targeted native consumption override installed and delivered true.
+`directLast=0` retains only the last original Boolean; earlier original values
+are not recorded. Direct and Objective-C counts match at every supplied sample;
+no additional native-only invocation is observed in this report. This does not
+prove every theoretical native path was exercised or covered.
+
+Creation is unchanged (`c1=2/l1=0`). All exact model/component/height observers
+installed but `c2..c5=0`; their last values remain unknown. Complete 10, 15, 20,
+25 and 30-second two-window trees (`n=330/r=0/trunc=0/err=0`) find no exact
+Highlights cell. The truncated 5-second tree is inconclusive. FAIL for requested
+Highlights appearance; successful override delivery is not feature acceptance.
+The result does not identify another necessary gate, prove absent server data,
+or establish that creation must be forced. Direct or alternative unobserved
+model paths also remain possible.
+
+Boundary positive controls READY with matching readbacks. Supplied pre-bookmark,
+post-bookmark and post-loader stages deny host file read/write and host-only
+Keychain, expose the expected app-ID control, and find no signing export; host
+sentinel unchanged. Extension completion and getpgid presence followed by ESRCH
+absence observed; pre-revoke signal-zero remains EPERM/unproved. Full portrait
+geometry is observed. No new audio-stop/calculator-return narrative supplied;
+do not upgrade that separate check from this report. No security certification.
+
+Read-only local rehash matches prior baseline and delivered IPA digests. No new
+build, package, deployment, guest/RX/licensing change or additional feature
+override performed for this result. Continue bounded static downstream tracing.
+
 ## Direct viewing final build, assembly and private delivery (2026-10-01)
 
 PASS: Actions36852554714 at4a8e99a, Xcode26.6/17F113, native job15m10s.

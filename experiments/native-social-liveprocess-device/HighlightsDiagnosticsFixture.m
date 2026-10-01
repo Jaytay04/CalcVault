@@ -190,6 +190,10 @@ static BOOL CVLPFixtureRequire(BOOL condition, NSString *name, NSString **failur
     return NO;
 }
 
+#if CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT
+#import "CVLPEarlyLoaderFixture.m"
+#endif
+
 // Synthetic virtual addresses exercise the production parser and installer.
 // The fake original address is never executed; forwarding uses a separate real
 // C function-pointer cell below. No proprietary payload or account is involved.
@@ -343,7 +347,7 @@ static BOOL CVLPHighlightsDirectRunFixture(NSString **failure) {
         CVLPHighlightsDirectSectionMismatch, @"direct_wrong_section_rejected", failure)) { return NO; }
     CVLPDirectFixtureInitialize(&fixture);
     CVLPHighlightsDirectMemory memory = { CVLPDirectFixtureRegion, CVLPDirectFixtureRead, CVLPDirectFixtureCAS, &fixture };
-#if !CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT
+#if !CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT && !CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT
     if (!CVLPFixtureRequire(CVLPHighlightsDirectValidateAndInstall(fixture.base, &memory) ==
         CVLPHighlightsDirectDisabled && fixture.CASCalls == 0 &&
         fixture.consumption == fixture.base + CVLPHighlightsDirectConsumptionVM,
@@ -408,6 +412,12 @@ static BOOL CVLPHighlightsDirectRunFixture(NSString **failure) {
     CVLPHighlightsState.directLast = -1;
     CVLPHighlightsRecording = YES;
     CVLPHighlightsStartedAt = CACurrentMediaTime();
+#if CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT
+    atomic_store_explicit(&CVLPHighlightsEarlyStatusValue, CVLPHighlightsEarlyInstallFailed, memory_order_release);
+    atomic_store_explicit(&CVLPHighlightsEarlyDirectStatus, CVLPHighlightsDirectImageUnavailable, memory_order_release);
+    atomic_store_explicit(&CVLPHighlightsEarlyMatchCount, 0, memory_order_release);
+    atomic_store_explicit(&CVLPHighlightsEarlyRetainedValue, 0, memory_order_release);
+#endif
     CVLPDirectFixtureOriginalCalls = 0;
     CVLPDirectFixtureNatural = NO;
     CVLPHighlightsDirectGateFunction call = (CVLPHighlightsDirectGateFunction)cells[0];
@@ -486,6 +496,12 @@ BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
         .lastModelPresence = -1, .lastMount = -1, .lastUpdate = -1, .lastHeight = -1.0 };
     CVLPHighlightsRecording = YES;
     CVLPHighlightsStartedAt = CACurrentMediaTime();
+#if CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT
+    atomic_store_explicit(&CVLPHighlightsEarlyStatusValue, CVLPHighlightsEarlyInstallFailed, memory_order_release);
+    atomic_store_explicit(&CVLPHighlightsEarlyDirectStatus, CVLPHighlightsDirectImageUnavailable, memory_order_release);
+    atomic_store_explicit(&CVLPHighlightsEarlyMatchCount, 0, memory_order_release);
+    atomic_store_explicit(&CVLPHighlightsEarlyRetainedValue, 0, memory_order_release);
+#endif
 
     // Exercise the same class-by-class core independently of the real image
     // iterator so failure causes are repeatable on a simulator and device.
@@ -930,6 +946,9 @@ BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
         [directLine containsString:@"directMode=1 directStatus=1 directCalls=2 directLast=0 directOverrideCalls=2"],
         @"direct_emitted_line_retains_original_false_distinct_from_delivery", failure)) { return NO; }
 #endif
+#if CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT
+    if (!CVLPEarlyLoaderRunFixture(failure)) { return NO; }
+#endif
     return YES;
 }
 
@@ -958,8 +977,9 @@ int main(void) {
                 encoding:NSUTF8StringEncoding error:NULL];
             return 1;
         }
-        NSString *result = [NSString stringWithFormat:@"CV_HIGHLIGHTS_FIXTURE_PASS viewing=%d direct=%d\n",
-            CVLPHighlightsViewingExperimentMode, CVLPHighlightsDirectViewingExperimentMode];
+        NSString *result = [NSString stringWithFormat:@"CV_HIGHLIGHTS_FIXTURE_PASS viewing=%d direct=%d early=%d\n",
+            CVLPHighlightsViewingExperimentMode, CVLPHighlightsDirectViewingExperimentMode,
+            CVLPHighlightsEarlyViewingExperimentMode];
         if (![result writeToFile:resultPath atomically:YES encoding:NSUTF8StringEncoding error:NULL]) {
             fprintf(stderr, "CV_HIGHLIGHTS_FIXTURE_FAIL result_write\n");
             return 1;

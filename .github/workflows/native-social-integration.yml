@@ -15,6 +15,10 @@ on:
         description: 'Temporary native consumption-pointer experiment; requires diagnostics, excludes method experiment'
         type: boolean
         default: false
+      highlights_early_viewing_experiment:
+        description: 'Temporary pre-initializer native viewing experiment; requires diagnostics, excludes other experiments'
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       highlights_diagnostics:
@@ -24,6 +28,9 @@ on:
         type: boolean
         default: false
       highlights_direct_viewing_experiment:
+        type: boolean
+        default: false
+      highlights_early_viewing_experiment:
         type: boolean
         default: false
 
@@ -41,11 +48,15 @@ jobs:
         env:
           VIEWING: ${{ inputs.highlights_viewing_experiment }}
           DIRECT: ${{ inputs.highlights_direct_viewing_experiment }}
+          EARLY: ${{ inputs.highlights_early_viewing_experiment }}
           DIAGNOSTICS: ${{ inputs.highlights_diagnostics }}
         run: |
           test "$VIEWING" != true || test "$DIAGNOSTICS" = true
           test "$DIRECT" != true || test "$DIAGNOSTICS" = true
           test "$DIRECT" != true || test "$VIEWING" != true
+          test "$EARLY" != true || test "$DIAGNOSTICS" = true
+          test "$EARLY" != true || test "$VIEWING" != true
+          test "$EARLY" != true || test "$DIRECT" != true
 
       - name: Select pinned toolchain and prepare synthetic upstream
         shell: bash
@@ -70,10 +81,12 @@ jobs:
         env:
           VIEWING: ${{ inputs.highlights_viewing_experiment }}
           DIRECT: ${{ inputs.highlights_direct_viewing_experiment }}
+          EARLY: ${{ inputs.highlights_early_viewing_experiment }}
         run: |
           args=()
           if [[ "$VIEWING" == true ]]; then args+=(--viewing-experiment); fi
           if [[ "$DIRECT" == true ]]; then args+=(--direct-viewing-experiment); fi
+          if [[ "$EARLY" == true ]]; then args+=(--early-viewing-experiment); fi
           python3 experiments/native-social-integration/prepare-highlights.py "$CV_INTEGRATION_UPSTREAM" "${args[@]}"
 
       - name: Test synthetic integration adapter
@@ -91,7 +104,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: calcvault-integration-host-23${{ inputs.highlights_direct_viewing_experiment && '-highlights-directviewing1' || inputs.highlights_viewing_experiment && '-highlights-viewing1' || inputs.highlights_diagnostics && '-highlights2' || '' }}
+          name: calcvault-integration-host-23${{ inputs.highlights_early_viewing_experiment && '-highlights-earlyviewing1' || inputs.highlights_direct_viewing_experiment && '-highlights-directviewing1' || inputs.highlights_viewing_experiment && '-highlights-viewing1' || inputs.highlights_diagnostics && '-highlights2' || '' }}
           path: |
             ${{ runner.temp }}/cv-integration/output/CalcVault-integration-host-23.ipa
             ${{ runner.temp }}/cv-integration/output/CalcVault-integration-host-23.ipa.sha256
@@ -102,7 +115,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: calcvault-integration-host-23${{ inputs.highlights_direct_viewing_experiment && '-highlights-directviewing1' || inputs.highlights_viewing_experiment && '-highlights-viewing1' || inputs.highlights_diagnostics && '-highlights2' || '' }}-evidence
+          name: calcvault-integration-host-23${{ inputs.highlights_early_viewing_experiment && '-highlights-earlyviewing1' || inputs.highlights_direct_viewing_experiment && '-highlights-directviewing1' || inputs.highlights_viewing_experiment && '-highlights-viewing1' || inputs.highlights_diagnostics && '-highlights2' || '' }}-evidence
           path: |
             ${{ runner.temp }}/integration-xcode-version.log
             ${{ runner.temp }}/cv-integration/logs/

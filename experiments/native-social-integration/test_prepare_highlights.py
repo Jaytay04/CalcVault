@@ -63,6 +63,32 @@ class HighlightsAdapterTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         adapter.transform(source().replace(anchor, replacement))
 
+    def test_early_is_independent_and_mutually_exclusive(self):
+        updated = adapter.transform(source(), early_viewing_experiment=True)
+        self.assertIn('#define CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT 1', updated)
+        self.assertIn('integration-23-highlights-earlyviewing1', updated)
+        self.assertIn('[CVLPHighlightsDiagnostics armEarlyViewing]', updated)
+        self.assertIn('[CVLPHighlightsDiagnostics finishEarlyViewingLoad]', updated)
+        for option in ('viewing_experiment', 'direct_viewing_experiment'):
+            with self.assertRaisesRegex(ValueError, 'mutually_exclusive'):
+                adapter.transform(source(), early_viewing_experiment=True, **{option: True})
+
+    def test_early_load_scope_and_fail_closed_anchors(self):
+        call = '        appHandle = dlopen_nolock(appExecPath, RTLD_LAZY|RTLD_GLOBAL|RTLD_FIRST);'
+        original = 'credential_checks();\n' + call + '\nloader_failure_checks();'
+        bootstrap, header = adapter.transform_early_bootstrap(original, '@interface CVLPProbe\n@end')
+        self.assertLess(bootstrap.index('credential_checks'), bootstrap.index('armEarlyHighlightsViewing'))
+        self.assertLess(bootstrap.index('armEarlyHighlightsViewing'), bootstrap.index('dlopen_nolock'))
+        self.assertLess(bootstrap.index('dlopen_nolock'), bootstrap.index('@finally'))
+        self.assertLess(bootstrap.index('finishEarlyHighlightsViewingLoad'), bootstrap.index('loader_failure_checks'))
+        self.assertEqual(bootstrap.count('dlopen_nolock'), 1)
+        self.assertIn('+ (void)armEarlyHighlightsViewing;', header)
+        for replacement in ('missing', call + call):
+            with self.assertRaises(ValueError):
+                adapter.transform_early_bootstrap(original.replace(call, replacement), '@end')
+        with self.assertRaises(ValueError):
+            adapter.transform_early_bootstrap(original, '@end\n@end')
+
     def test_standard_preparation_does_not_enable_diagnostics(self):
         root = Path(__file__).parent
         self.assertNotIn('CVLPHighlights', (root / 'prepare-integration.py').read_text())
@@ -81,15 +107,18 @@ class HighlightsAdapterTests(unittest.TestCase):
         self.assertIn('test ! -e "$fixture_result"', script)
         self.assertIn('SIMCTL_CHILD_CV_HIGHLIGHTS_RESULT_NAME="$fixture_result_name"', script)
         self.assertIn('for fixture_result_attempt in {1..30}; do', script)
-        self.assertIn('CV_HIGHLIGHTS_FIXTURE_PASS viewing=$viewing_mode direct=$direct_mode', script)
+        self.assertIn('CV_HIGHLIGHTS_FIXTURE_PASS viewing=$viewing_mode direct=$((direct_mode || early_mode)) early=$early_mode', script)
         self.assertIn('cp "$fixture_result" "$evidence/highlights-fixture$fixture_suffix-result.log"', script)
-        self.assertIn('for fixture_mode in 0 1 2; do', script)
+        self.assertIn('for fixture_mode in 0 1 2 3 4; do', script)
+        self.assertIn('SIMCTL_CHILD_CV_HIGHLIGHTS_EARLY_REPLAY_ONLY="$early_replay_only"', script)
+        self.assertIn('case=exact-target-replay-terminal', script)
         self.assertIn('-DCVLP_HIGHLIGHTS_VIEWING_EXPERIMENT="$viewing_mode"', script)
         self.assertIn('-DCVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT="$direct_mode"', script)
+        self.assertIn('-DCVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT="$early_mode"', script)
         self.assertIn('ditto "$device_host" "$output/Payload/LiveContainer.app"', script)
         self.assertNotIn('ditto "$fixture_app"', script)
         workflow = (root.parents[1] / '.github/workflows/native-social-integration.yml').read_text()
-        self.assertEqual(workflow.count('default: false'), 6)
+        self.assertEqual(workflow.count('default: false'), 8)
         self.assertIn('if: inputs.highlights_diagnostics', workflow)
         entry = (root.parents[1] / '.github/workflows/native-social-liveprocess-device.yml').read_text()
         self.assertIn('highlights_diagnostics: ${{ inputs.highlights_diagnostics }}', entry)
@@ -100,6 +129,10 @@ class HighlightsAdapterTests(unittest.TestCase):
         self.assertIn('highlights_direct_viewing_experiment: ${{ inputs.highlights_direct_viewing_experiment }}', entry)
         self.assertIn('test "$DIRECT" != true || test "$DIAGNOSTICS" = true', workflow)
         self.assertIn('test "$DIRECT" != true || test "$VIEWING" != true', workflow)
+        self.assertIn('highlights_early_viewing_experiment: ${{ inputs.highlights_early_viewing_experiment }}', entry)
+        self.assertIn('test "$EARLY" != true || test "$DIAGNOSTICS" = true', workflow)
+        self.assertIn('test "$EARLY" != true || test "$DIRECT" != true', workflow)
+        self.assertIn('test "$EARLY" != true || test "$VIEWING" != true', workflow)
 
 
 if __name__ == '__main__':

@@ -56,21 +56,43 @@ fi
 xcrun simctl bootstatus "$simulator" -b
 
 if [[ "${CV_HIGHLIGHTS_DIAGNOSTICS:-0}" == 1 ]]; then
-    # Run default-off, method-viewing and direct-viewing synthetic configurations.
+    # Run default-off, method-viewing, late-direct and early-direct configurations.
     # no proprietary guest, account or network is used by this executable.
     fixture_app="$work/HighlightsDiagnosticsFixture.app"
     mkdir -p "$fixture_app"
     cp "$device_project/HighlightsDiagnosticsFixture-Info.plist" "$fixture_app/Info.plist"
-    for fixture_mode in 0 1 2; do
+    # Synthetic libraries only: never part of the containing-app IPA. The fixture
+    # obtains their UUIDs before arming the callback; no linker UUID override.
+    mkdir -p "$fixture_app/Frameworks"
+    for fixture_library in CVLPEarlyLoaderTarget CVLPEarlyLoaderAlreadyLoaded CVLPEarlyLoaderMismatch; do
+        xcrun --sdk iphonesimulator clang -dynamiclib -arch arm64 \
+            -mios-simulator-version-min=18.0 -fobjc-arc -fblocks \
+            -framework Foundation -I "$device_project" \
+            -Wl,-install_name,@rpath/"$fixture_library.dylib" \
+            "$device_project/CVLPEarlyLoaderSyntheticImage.m" \
+            -o "$fixture_app/Frameworks/$fixture_library.dylib" \
+            > "$logs/$fixture_library-compile.log" 2>&1 || {
+                tail -n 100 "$logs/$fixture_library-compile.log"
+                exit 1
+            }
+        codesign --force --sign - "$fixture_app/Frameworks/$fixture_library.dylib"
+    done
+    for fixture_mode in 0 1 2 3 4; do
     viewing_mode=0
     direct_mode=0
+    early_mode=0
+    early_replay_only=0
     fixture_suffix=""
     if [[ "$fixture_mode" == 1 ]]; then viewing_mode=1; fixture_suffix="-viewing"; fi
     if [[ "$fixture_mode" == 2 ]]; then direct_mode=1; fixture_suffix="-directviewing"; fi
+    if [[ "$fixture_mode" == 3 ]]; then early_mode=1; fixture_suffix="-earlyviewing"; fi
+    if [[ "$fixture_mode" == 4 ]]; then early_mode=1; early_replay_only=1; fixture_suffix="-earlyreplay"; fi
     xcrun --sdk iphonesimulator clang -arch arm64 -mios-simulator-version-min=18.0 \
         -DCVLP_HIGHLIGHTS_VIEWING_EXPERIMENT="$viewing_mode" \
         -DCVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT="$direct_mode" \
+        -DCVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT="$early_mode" \
         -fobjc-arc -fblocks -framework Foundation -framework UIKit -framework QuartzCore \
+        -Wl,-rpath,@executable_path/Frameworks \
         -I "$device_project" -I "$upstream/LiveContainer" \
         "$device_project/HighlightsDiagnosticsFixture.m" \
         -o "$fixture_app/HighlightsDiagnosticsFixture" > "$logs/highlights-fixture$fixture_suffix-compile.log" 2>&1 || {
@@ -94,6 +116,7 @@ if [[ "${CV_HIGHLIGHTS_DIAGNOSTICS:-0}" == 1 ]]; then
     fixture_result="$fixture_data/tmp/$fixture_result_name"
     test ! -e "$fixture_result"
     SIMCTL_CHILD_CV_HIGHLIGHTS_RESULT_NAME="$fixture_result_name" \
+    SIMCTL_CHILD_CV_HIGHLIGHTS_EARLY_REPLAY_ONLY="$early_replay_only" \
     python3 "$kit_project/run-highlights-fixture.py" "$simulator" \
         "$evidence/highlights-fixture$fixture_suffix.log" || {
             cat "$evidence/highlights-fixture$fixture_suffix.log"
@@ -105,13 +128,17 @@ if [[ "${CV_HIGHLIGHTS_DIAGNOSTICS:-0}" == 1 ]]; then
         sleep 1
     done
     if ! test -f "$fixture_result" ||
-        ! test "$(<"$fixture_result")" = "CV_HIGHLIGHTS_FIXTURE_PASS viewing=$viewing_mode direct=$direct_mode"; then
+        ! test "$(<"$fixture_result")" = "CV_HIGHLIGHTS_FIXTURE_PASS viewing=$viewing_mode direct=$((direct_mode || early_mode)) early=$early_mode"; then
         cat "$evidence/highlights-fixture$fixture_suffix.log"
         if [[ -f "$fixture_result" ]]; then cat "$fixture_result"; fi
         fixture_failure_evidence
         exit 1
     fi
     cp "$fixture_result" "$evidence/highlights-fixture$fixture_suffix-result.log"
+    if [[ "$early_replay_only" == 1 ]]; then
+        grep -Fq 'CV_HIGHLIGHTS_EARLY_FIXTURE_PASS case=exact-target-replay-terminal' \
+            "$evidence/highlights-fixture$fixture_suffix.log"
+    fi
     # This marker is emitted only after the exact fresh, mode-tagged result.
     printf 'CV_HIGHLIGHTS_FIXTURE_PASS mode=%s\n' "$fixture_mode"
     done
