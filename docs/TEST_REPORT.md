@@ -1,5 +1,51 @@
 # CalcVault test report
 
+## Direct viewing final build, assembly and private delivery (2026-10-01)
+
+PASS: Actions36852554714 at4a8e99a, Xcode26.6/17F113, native job15m10s.
+All three modes have both console PASS and exact fresh, mode-tagged result PASS:
+default0/0, method1/0, direct0/1. The bounded launcher ran without timeout;
+its timeout/failure paths have four local subprocess tests, not an Apple hang
+injection. Both SDK builds and signing/entitlement/linkage/ZIP gates pass.
+Local final suites PASS: device64 + integration46 + package-tools118 =228.
+Independent review finds no remaining code-level blocker. The earlier silent
+launch root cause remains unproved; successful reruns do not establish it.
+
+Downloaded host digest matches CI. Local no-overwrite private assembly and
+independent complete ZIP/member comparison PASS:122 retained host files unchanged,
+2424 guest files plus descriptor unchanged, RX unchanged, intended two host
+metadata changes only, identity/data directory/portrait preserved, no signing
+exports, both original input digests unchanged. New marker
+`integration-23-highlights-directviewing1` is in the shared runtime framework.
+Copied signatures are not a valid final device signature; SideStore must re-sign.
+
+New IPA and checksum published as a separate prerelease in the verified-private
+repository; both server digests and sizes match local artifacts, release is not
+draft, prior releases remain. Private identifiers/receipt stay in ignored build
+storage, not public source. NOT RUN: SideStore.cv1 install, signed-phone direct
+mapping/CAS, usable Highlights, and new playback/Lock/calculator confirmation.
+Owner batch: same profile within two minutes and visible15s, open/play any
+Highlight, Lock/audio/calculator, then refreshed44-field native report. Interpret
+directMode with directStatus and positive directOverrideCalls; directLast is the
+last original native result, while Objective-C l0 may be the delivered true.
+No confirmed Highlights fix or security certification.
+
+## Direct native fixture execution verified (2026-10-01)
+
+PASS: Actions 36851944402 at 931ccb5, Xcode26.6/17F113. Downloaded evidence
+contains console PASS plus fresh result PASS viewing=0/direct=0, viewing=1/direct=0
+and viewing=0/direct=1. The same full native self-test executed in all modes,
+including direct parser/protection/CAS/forwarding/exception/counter/stop/schema
+fixtures. Simulator/device host builds and signing/entitlement/linkage/ZIP gates
+complete successfully. The earlier silent launch remains causally unproved.
+
+Independent reviewer accepts the later bounded launcher and fresh-result handshake
+without a blocker. Optional evidence limitation: an existing FAIL result would
+be printed in Actions logs, but only PASS results are copied to the artifact.
+The final bounded-launch run36852554714 at4a8e99a is still pending. No private
+candidate assembled or uploaded yet; signed-phone mapping and usable Highlights
+remain unverified, and native fixture PASS is not a security certification.
+
 ## Fixture launch timeout correction (2026-10-01)
 
 Independent review finds the foreground console command can delay reaching the
