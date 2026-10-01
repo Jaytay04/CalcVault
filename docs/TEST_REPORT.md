@@ -1,15 +1,59 @@
 # CalcVault test report
 
+## Early-startup Apple execution and immutable assembly (2026-10-01)
+
+Actions run 36914115481 at source98aa7c9d009902e904a6c7839e0ca2e6a763a8a1
+completed successfully. Toolchain: Xcode26.6, build17F113, macOS26 ARM64;
+native build/verification step15m9s. Local239 host-side tests and independent
+production/fixture review passed separately from this native execution.
+
+Downloaded native evidence contains both console PASS and exact fresh results:
+default0/0/0, method1/0/0, late-direct0/1/0, early0/1/1 and a separate
+early-replay0/1/1 process. The real registered dyld callback rebounded the
+synthetic target's actual RW/no-execute cell before its constructor, which
+observed true while its natural original returned false once. Unrelated replay
+left the attempt available; the mismatch left its slot untouched; exact-target
+replay terminally skipped with zero CAS. Duplicate/no-second-CAS, retained1,
+manual post-finish pointer-change/retained0/no-reinstall, callback inertness,
+observer scalar preservation and original arm-clock preservation all passed.
+The replay-only final terminal marker is present. Existing forwarding, pin,
+schema, bounded launch/fresh-result, SDK, signature and ZIP gates passed.
+
+This establishes synthetic C-constructor timing, not when the proprietary guest
+makes its eligibility decision or whether Highlights appears on the phone.
+Signed-phone installation, current mapping, playback/lifecycle acceptance and
+Highlights activation remain NOT RUN for this candidate.
+
+Downloaded synthetic host SHA-256:
+9ab2c2a8a96a6359e17d7e1d2a0dc384dac98123e4ad0a9db77462219320abbe,
+matching CI. Local immutable merger and an independent verifier read every
+output member:122 retained host files,2424 guest files plus descriptor unchanged;
+only the two authorized host guest-kind/stage metadata fields differ. RX, guest
+identity/data directory, portrait-only policy, disabled file sharing, absence of
+signing exports and input digests are preserved. Output ZIP CRC and new
+integration-23-highlights-earlyviewing1 runtime marker passed.
+
+Output SHA-256:
+e07b51d67c7918e83ed1e1812a21d51e9a06ca8992c9cad174dd6a1c1da1c4e4;
+size702811461bytes. This candidate requires SideStore re-signing; it is not a
+valid final signature or security certification. Existing baseline/direct
+downloads remain unchanged. Private repository visibility rechecked; separate
+release upload completed. Both published asset server digests and sizes match
+local files; repository remains PRIVATE and release is not draft. Receipt and
+delivery location remain ignored/private. No proprietary payload or private delivery
+location is added to public source or CI.
+
 ## Approved early-startup experiment (2026-10-01)
 
 Owner approval received for a separately marked `integration-23-highlights-earlyviewing1`
-candidate. Implementation and validation are IN PROGRESS. The approved change is
+candidate. Source/native validation and private delivery completed as recorded
+above; signed-phone acceptance remains pending. The approved change is
 timing only: the same pinned native consumption pointer, original once, true
 delivery, no creation/cache/RX/license/credential/lifecycle changes. Prior-image
 replay must be skipped; installation and post-initializer retention are distinct
 observations. Existing working IPA stays preserved. Apple native initializer
-timing, source tests, independent review, CI build, private assembly/delivery and
-signed-phone Highlights acceptance remain NOT RUN for this new mode.
+timing, source tests, independent review, CI build and private assembly/delivery
+have now passed; signed-phone Highlights acceptance remains NOT RUN for this mode.
 
 Source implementation now includes exact-load arm/finally-disarm, terminal skip
 for exact already-loaded replay, bounded C callback and preserved arm-time budget.
