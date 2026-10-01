@@ -8,6 +8,10 @@
 // a counter; discovery must inspect metadata without invoking any implementation.
 static NSUInteger CVLPAdmissionFixtureMethodCalls;
 
+static uintptr_t CVLPAdmissionFixtureSelectorAddress(SEL selector) {
+    return (uintptr_t)selector;
+}
+
 @interface CVLPAdmissionFixtureInstanceOwner : NSObject
 - (int32_t)cvlpAdmissionFixtureInstanceMethod;
 @end
@@ -119,9 +123,9 @@ static void CVLPAdmissionFixtureInitialize(CVLPAdmissionFixtureMemory *fixture) 
     fixture->dataProtection = VM_PROT_READ | VM_PROT_WRITE;
     fixture->codeProtection = VM_PROT_READ | VM_PROT_EXECUTE;
     fixture->classReference = fixture->base + CVLPAdmissionFunctionVM;
-    fixture->selectorReferences[0] = (uintptr_t)@selector(cvlpAdmissionFixtureInstanceMethod);
-    fixture->selectorReferences[1] = (uintptr_t)@selector(cvlpAdmissionFixtureMetaclassMethod);
-    fixture->selectorReferences[2] = (uintptr_t)@selector(cvlpAdmissionFixtureDuplicateMethod);
+    fixture->selectorReferences[0] = CVLPAdmissionFixtureSelectorAddress(@selector(cvlpAdmissionFixtureInstanceMethod));
+    fixture->selectorReferences[1] = CVLPAdmissionFixtureSelectorAddress(@selector(cvlpAdmissionFixtureMetaclassMethod));
+    fixture->selectorReferences[2] = CVLPAdmissionFixtureSelectorAddress(@selector(cvlpAdmissionFixtureDuplicateMethod));
     for (NSUInteger index = 0; index < sizeof(fixture->functionBytes); index++) {
         fixture->functionBytes[index] = (uint8_t)((index * 37U) + 19U);
     }
@@ -481,7 +485,7 @@ static BOOL CVLPAdmissionRunDiscoveryCases(NSString **failure) {
         result.returnCodes[1] == 'd' && result.argumentCounts[1] == 2,
         @"admission_metaclass_declared_method_matched", failure)) { return NO; }
 
-    fixture.selectorReferences[0] = (uintptr_t)@selector(cvlpAdmissionFixtureInheritedMethod);
+    fixture.selectorReferences[0] = CVLPAdmissionFixtureSelectorAddress(@selector(cvlpAdmissionFixtureInheritedMethod));
     if (!CVLPFixtureRequire(CVLPAdmissionValidateImageWithExpectedDigest(fixture.base, &memory,
         fixture.digest, &validated) == CVLPAdmissionStatusMatched,
         @"admission_inherited_fixture_image_valid", failure)) { return NO; }
@@ -494,12 +498,12 @@ static BOOL CVLPAdmissionRunDiscoveryCases(NSString **failure) {
     if (!CVLPFixtureRequire(noMatchLine != nil && CVLPAdmissionLineIsSanitized(noMatchLine),
         @"admission_no_match_line_is_valid", failure)) { return NO; }
 
-    fixture.selectorReferences[0] = (uintptr_t)@selector(cvlpAdmissionFixtureInstanceMethod);
+    fixture.selectorReferences[0] = CVLPAdmissionFixtureSelectorAddress(@selector(cvlpAdmissionFixtureInstanceMethod));
     if (!CVLPFixtureRequire(CVLPAdmissionValidateImageWithExpectedDigest(fixture.base, &memory,
         fixture.digest, &validated) == CVLPAdmissionStatusMatched,
         @"admission_discovery_reference_restore", failure)) { return NO; }
 
-    fixture.selectorReferences[0] = (uintptr_t)@selector(cvlpAdmissionFixtureUnknownABI);
+    fixture.selectorReferences[0] = CVLPAdmissionFixtureSelectorAddress(@selector(cvlpAdmissionFixtureUnknownABI));
     if (!CVLPFixtureRequire(CVLPAdmissionValidateImageWithExpectedDigest(fixture.base, &memory,
         fixture.digest, &validated) == CVLPAdmissionStatusMatched,
         @"admission_unknown_abi_fixture_image_valid", failure)) { return NO; }
@@ -510,7 +514,7 @@ static BOOL CVLPAdmissionRunDiscoveryCases(NSString **failure) {
         result.reason == CVLPAdmissionScanReasonInvalidRuntimeMetadata && result.matchCounts[0] == 1 &&
         result.returnCodes[0] == '?' && CVLPAdmissionLineIsSanitized(CVLPAdmissionFormatLine(&result, 1)),
         @"admission_unsupported_return_abi_is_unknown_and_incomplete", failure)) { return NO; }
-    fixture.selectorReferences[0] = (uintptr_t)@selector(cvlpAdmissionFixtureInstanceMethod);
+    fixture.selectorReferences[0] = CVLPAdmissionFixtureSelectorAddress(@selector(cvlpAdmissionFixtureInstanceMethod));
     if (!CVLPFixtureRequire(CVLPAdmissionValidateImageWithExpectedDigest(fixture.base, &memory,
         fixture.digest, &validated) == CVLPAdmissionStatusMatched,
         @"admission_unknown_abi_reference_restore", failure)) { return NO; }

@@ -164,5 +164,11 @@ class AdmissionMetadataFixtureSourceTests(unittest.TestCase):
         self.assert_source_contains(self.host_fixture, "CVLP_HIGHLIGHTS_ADMISSION_METADATA")
 
 
+    def test_fixture_passes_selector_expressions_through_a_typed_helper(self):
+        self.assert_source_absent(self.fixture, "(uintptr_t)@selector")
+        self.assert_source_contains(self.fixture, "static uintptr_t CVLPAdmissionFixtureSelectorAddress(SEL selector)")
+        self.assertEqual(self.fixture.count("CVLPAdmissionFixtureSelectorAddress(@selector("), 7)
+
+
 if __name__ == "__main__":
     unittest.main()

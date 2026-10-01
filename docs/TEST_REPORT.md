@@ -1,5 +1,17 @@
 # CalcVault test report
 
+## Admission fixture Apple compile correction (2026-10-01)
+
+Actions36928163021 at e25f4be FAIL: Apple Clang reports seven `cannot type cast
+@selector expression` errors in the disposable fixture. The production header
+compiled without errors in that fixture translation unit; warnings do not count
+as a successful app/device build. Native fixture execution and IPA creation did
+not occur. Root replaces only those fixture expressions with a typed helper
+taking SEL and returning its opaque uintptr_t value, without registration or
+method invocation. An added regression assertion verifies all seven helper uses.
+Local device-source81/integration51/package-tools118 PASS (250 total). A corrected
+Apple build, native execution and private assembly/delivery remain required.
+
 ## Admission metadata independent review (2026-10-01)
 
 Final read-only source review finds no blocking defect. It verifies default-off,
