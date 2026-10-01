@@ -1,5 +1,34 @@
 # CalcVault test report
 
+## Highlights diagnostic 2 build and private assembly (2026-10-01)
+
+Delivery confirmed: the verified-private repository has the new published
+prerelease with IPA and checksum in uploaded state. Both server-reported SHA-256
+digests and sizes match the local artifacts. Previous releases remain untouched;
+private delivery identifiers are omitted from this public record.
+
+Actions `36826792477` at `351048a` PASS. The native Objective-C fixture emitted
+all fixed stage markers and `CV_HIGHLIGHTS_FIXTURE_PASS`, exercising the real
+image enumeration and the synthetic failure/no-mutation cases. Both Apple SDK
+builds and synthetic signature/entitlement/linkage/ZIP gates passed. Downloaded
+host digest matches the CI checksum. No production observer code changed between
+the first silent fixture failure and this successful rerun; the first failure's
+cause remains unproven and must not be reported as a diagnosed runtime defect.
+
+Local pinned private assembly and independent full-member readback PASS: all
+122 non-metadata host files and 2,424 guest files plus descriptor unchanged;
+RX unchanged; only the two expected host stage/kind metadata values differ from
+the synthetic host. App/extension inventory, portrait orientation, data directory,
+export exclusions, unchanged inputs, report marker and ZIP CRC checks passed.
+The assembled candidate requires SideStore re-signing; copied signatures are not
+a valid final signature. No private payload was uploaded to public CI/source.
+
+Simulator host screenshot shows the fail-closed `Configuration unavailable`
+Keychain state under ad-hoc signing, not an authenticated private session or guest
+launch. Signed-phone startup, real profile observations and Highlights resolution
+remain pending. Publication is confirmed above; this does not establish device
+compatibility or Highlights resolution.
+
 ## Highlights diagnostic 2 local verification (2026-09-30)
 
 First native attempt `36825921801` at `4b4852e` FAILED before package creation:
