@@ -94,9 +94,8 @@ if [[ "${CV_HIGHLIGHTS_DIAGNOSTICS:-0}" == 1 ]]; then
     fixture_result="$fixture_data/tmp/$fixture_result_name"
     test ! -e "$fixture_result"
     SIMCTL_CHILD_CV_HIGHLIGHTS_RESULT_NAME="$fixture_result_name" \
-    xcrun simctl launch --terminate-running-process --console "$simulator" \
-        org.example.synthetic.highlights-observer-tests \
-        > "$evidence/highlights-fixture$fixture_suffix.log" 2>&1 || {
+    python3 "$kit_project/run-highlights-fixture.py" "$simulator" \
+        "$evidence/highlights-fixture$fixture_suffix.log" || {
             cat "$evidence/highlights-fixture$fixture_suffix.log"
             fixture_failure_evidence
             exit 1

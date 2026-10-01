@@ -1,5 +1,17 @@
 # CalcVault test report
 
+## Fixture launch timeout correction (2026-10-01)
+
+Independent review finds the foreground console command can delay reaching the
+result poll; the workflow has a global timeout but lacked a local launch bound.
+Added a fixture-only launcher with 180-second subprocess timeout and 15-second
+bounded termination targeting only the disposable synthetic fixture. Timeout,
+unavailable command or nonzero exit always fails, with fixed markers retained
+in console evidence. Four subprocess tests check success, nonzero exit, exact
+termination target/timeouts and failed termination never becoming success.
+Integration46 local tests and Bash syntax PASS. No production adapter change.
+Bounded Apple launch and full three-mode result collection remain pending.
+
 ## Direct fixture silent launch and durable evidence (2026-10-01)
 
 Actions 36850532864 at e870278: all fixture modes compile. Default and method
