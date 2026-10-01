@@ -56,16 +56,20 @@ fi
 xcrun simctl bootstatus "$simulator" -b
 
 if [[ "${CV_HIGHLIGHTS_DIAGNOSTICS:-0}" == 1 ]]; then
-    # Run both default-off and viewing-experiment synthetic configurations.
+    # Run default-off, method-viewing and direct-viewing synthetic configurations.
     # no proprietary guest, account or network is used by this executable.
     fixture_app="$work/HighlightsDiagnosticsFixture.app"
     mkdir -p "$fixture_app"
     cp "$device_project/HighlightsDiagnosticsFixture-Info.plist" "$fixture_app/Info.plist"
-    for viewing_mode in 0 1; do
+    for fixture_mode in 0 1 2; do
+    viewing_mode=0
+    direct_mode=0
     fixture_suffix=""
-    if [[ "$viewing_mode" == 1 ]]; then fixture_suffix="-viewing"; fi
+    if [[ "$fixture_mode" == 1 ]]; then viewing_mode=1; fixture_suffix="-viewing"; fi
+    if [[ "$fixture_mode" == 2 ]]; then direct_mode=1; fixture_suffix="-directviewing"; fi
     xcrun --sdk iphonesimulator clang -arch arm64 -mios-simulator-version-min=18.0 \
         -DCVLP_HIGHLIGHTS_VIEWING_EXPERIMENT="$viewing_mode" \
+        -DCVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT="$direct_mode" \
         -fobjc-arc -fblocks -framework Foundation -framework UIKit -framework QuartzCore \
         -I "$device_project" -I "$upstream/LiveContainer" \
         "$device_project/HighlightsDiagnosticsFixture.m" \

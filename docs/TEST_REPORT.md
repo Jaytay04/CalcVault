@@ -1,5 +1,100 @@
 # CalcVault test report
 
+## Direct viewing implementation and local validation (2026-10-01)
+
+Implemented the separately approved default-off native consumption-slot test.
+Runtime refuses unsupported architecture, image/header/UUID/section/code/pointer
+mismatch or non-RW/non-executable slot protection before its only CAS. Creation
+is validated read-only. Original address is published before replacement; failed
+CAS does not alter the slot and does not clear the published original, avoiding
+a concurrent forwarding race. No executable writes or protection changes.
+
+New synthetic native fixtures exercise the production parser, injected preflight
+and real self-task Mach query/read/CAS on disposable function-pointer cells.
+They check false/true original-once forwarding, errno, exception propagation
+(attempt counted, no delivered override), saturating counters and both deadline
+and actual background recording stop without removing process-local delivery.
+Generated direct-mode lines and invalid-mode/status/count/result lines exercise
+the strict 44-field sanitizer. These native fixture outcomes are NOT RUN locally;
+Windows source assertions do not prove Apple execution or phone compatibility.
+
+PASS: 63 device adapter, 42 integration and 118 package-tools Python checks;
+both workflow YAML parses, Git Bash syntax and git diff check. The initially
+selected Windows bash launcher was inaccessible; explicit Git Bash passed.
+An initial tools-directory unittest command used a nonexistent discovery root;
+the intended package-tools suite was rerun at its actual path and passed.
+Review corrected two fixture expectations (alignment status and thrown-call
+attempt count); native CI remains the compilation/runtime gate. Immutable inputs
+retain their known digests. Apple build, private candidate assembly/delivery and
+signed-phone Highlights appearance/playback remain pending.
+
+## Direct viewing experiment authorization and static prerequisites (2026-10-01)
+
+Owner explicitly approves the lower-level consumption-only test, not creation or
+a security relaxation. Parent read-only Mach-O parsing verifies ARM64 subtype 0,
+image UUID and the expected consumption pointer/stub/getter bytes. The pointer
+belongs to __DATA with initial/maximum read-write protections and a section named
+__objc_clsrefs; calling it a __got section would be inaccurate. Runtime writable
+mapping, ABI forwarding, synthetic tests, Apple compilation and signed-phone
+feature activation remain NOT RUN for the new experiment at this checkpoint.
+No guest bytes, signing settings, credentials or device data changed.
+
+## Highlights direct-call static finding (2026-10-01)
+
+PASS: pinned baseline rehash remains unchanged. Bounded read-only immediate
+ARM64 B/BL scan finds six references to the consumption getter trampoline and
+seven to the creation trampoline. Parent independently disassembles an outside
+consumption caller, verifies its BL and returned-bit test, follows both branch
+islands into the import stub, and verifies the pinned indirect pointer reaches
+the native consumption getter. This path does not consult the Objective-C
+method table changed by the current observer/experiment. An independently
+checked second consumption caller combines the getter result with two other
+Boolean values; their meaning/effective values remain unknown.
+
+This establishes a coverage gap in the current override, not the definitive
+cause of the phone result. The scan excludes indirect dispatch and does not
+identify which callers ran, which own the profile row, or whether additional
+data/eligibility conditions would permit Highlights. Do not infer that creation
+must be overridden. No guest initializer/app execution, network/account traffic,
+guest-byte modification or licensing code was involved. Only documentation
+changes this slice; no new IPA or device test.
+
+Decision candidate: separately reviewed temporary lower-level consumption-only
+experiment covering direct native calls, with original invocation/natural
+observations preserved and creation unchanged. This exceeds the exact-selector
+exception in ADR 0003; owner approval and safe ABI/signing/runtime feasibility
+checks are required before implementation. It remains a proposal, not a fix.
+
+## Highlights viewing-only phone result (2026-10-01)
+
+Owner-supplied marker `integration-23-highlights-viewing1` verifies the new
+candidate ran. All six hooks installed; both anchor-image scans complete over
+91,210 classes without a lookup failure. Mode is 1. Consumption reaches nine
+calls and `overrideCalls=9`; verified wrapper code delivers true on those eligible
+calls after one original invocation. Natural last l0 remains 0. Creation reaches
+eight calls with last l1=0 and was not overridden. Only last values are retained;
+do not claim all original calls returned false.
+
+Model/mount/update/height counters remain zero. Complete 10/15/20-second trees
+traverse 330 nodes and complete 30/35-second trees 369 nodes, across two windows,
+without the exact Highlights cell. The 5/25-second traversals are truncated and
+cannot establish absence. The narrow Objective-C consumption override alone did
+not activate an observed Highlights path/row in this run. Direct Swift calls,
+additional admission conditions and data availability remain unresolved; the
+increased creation count is not proof that creation must also be enabled.
+Visual same-profile result and audio/calculator behavior were not separately
+narrated, so usable Highlights and those lifecycle confirmations remain unclaimed.
+
+Synthetic controls READY; host-file read/write and host-only Keychain DENIED
+through pre-bookmark/post-bookmark/post-loader; expected app-ID control EXPOSED.
+Exports ABSENT, sentinel UNCHANGED, migration skipped. Extension completion and
+getpgid presence-to-ESRCH absence observed; independent signal-zero pre-revoke
+liveness still EPERM/unproved. These are bounded observations, not certification.
+
+Next: read-only static tracing of downstream/direct-call conditions, without
+creation override, persistent settings, account traffic, licensing changes or
+security relaxation. No new build or confirmed fix from this phone report.
+
 ## Highlights viewing experiment private delivery (2026-10-01)
 
 PASS: separately named prerelease is published in the verified-private artifact

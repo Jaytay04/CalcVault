@@ -4,6 +4,28 @@ Status: separate integration candidate authorized after owner acceptance of port
 
 ## Integration candidate 23: private immutable TikTok guest
 
+### Temporary direct-call viewing experiment (2026-10-01)
+
+After the method-only experiment failed to activate an observed Highlights row,
+offline inspection found native getter callers which bypass that method table.
+The owner explicitly approved extending the temporary consumption-only experiment
+to those calls. Use a separate default-off input, mutually exclusive with the
+method-only experiment, and a separately marked candidate. Only the pinned native
+consumption pointer may be rebound inside the guest process. Invoke the original
+exactly once and retain its natural scalar result separately from Objective-C
+observations, which may now see the delivered result. Creation remains unchanged.
+
+Validate the exact image identity, architecture, bounded Mach-O metadata, pointer,
+stub/getter bytes and non-executable read/write mapping before publication. Skip
+the experiment on mismatch or unsupported mapping; do not change page permissions,
+write executable instructions, strip pointer authentication or introduce JIT.
+Publish the original before atomic compare-exchange and never overwrite another
+hook. Recording stays bounded; the temporary gate ends at guest process exit.
+No persistent configuration, guest package byte, RX, licensing, credential,
+bookmark, entitlement, identity, portrait or lifecycle change is authorized.
+Synthetic forwarding/validation tests, Apple builds, unchanged-guest assembly
+and owner-operated signed-phone verification remain separate gates.
+
 ### Temporary viewing-only Highlights experiment (2026-10-01)
 
 After diagnostic 2 observed the consumption gate's last result false and no

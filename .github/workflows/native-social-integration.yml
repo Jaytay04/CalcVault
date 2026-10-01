@@ -11,12 +11,19 @@ on:
         description: 'Temporary viewing-only gate experiment; requires highlights_diagnostics'
         type: boolean
         default: false
+      highlights_direct_viewing_experiment:
+        description: 'Temporary native consumption-pointer experiment; requires diagnostics, excludes method experiment'
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       highlights_diagnostics:
         type: boolean
         default: false
       highlights_viewing_experiment:
+        type: boolean
+        default: false
+      highlights_direct_viewing_experiment:
         type: boolean
         default: false
 
@@ -33,8 +40,12 @@ jobs:
       - name: Validate explicit experiment scope
         env:
           VIEWING: ${{ inputs.highlights_viewing_experiment }}
+          DIRECT: ${{ inputs.highlights_direct_viewing_experiment }}
           DIAGNOSTICS: ${{ inputs.highlights_diagnostics }}
-        run: test "$VIEWING" != true || test "$DIAGNOSTICS" = true
+        run: |
+          test "$VIEWING" != true || test "$DIAGNOSTICS" = true
+          test "$DIRECT" != true || test "$DIAGNOSTICS" = true
+          test "$DIRECT" != true || test "$VIEWING" != true
 
       - name: Select pinned toolchain and prepare synthetic upstream
         shell: bash
@@ -58,9 +69,11 @@ jobs:
         if: inputs.highlights_diagnostics
         env:
           VIEWING: ${{ inputs.highlights_viewing_experiment }}
+          DIRECT: ${{ inputs.highlights_direct_viewing_experiment }}
         run: |
           args=()
           if [[ "$VIEWING" == true ]]; then args+=(--viewing-experiment); fi
+          if [[ "$DIRECT" == true ]]; then args+=(--direct-viewing-experiment); fi
           python3 experiments/native-social-integration/prepare-highlights.py "$CV_INTEGRATION_UPSTREAM" "${args[@]}"
 
       - name: Test synthetic integration adapter
@@ -78,7 +91,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: calcvault-integration-host-23${{ inputs.highlights_viewing_experiment && '-highlights-viewing1' || inputs.highlights_diagnostics && '-highlights2' || '' }}
+          name: calcvault-integration-host-23${{ inputs.highlights_direct_viewing_experiment && '-highlights-directviewing1' || inputs.highlights_viewing_experiment && '-highlights-viewing1' || inputs.highlights_diagnostics && '-highlights2' || '' }}
           path: |
             ${{ runner.temp }}/cv-integration/output/CalcVault-integration-host-23.ipa
             ${{ runner.temp }}/cv-integration/output/CalcVault-integration-host-23.ipa.sha256
@@ -89,7 +102,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: calcvault-integration-host-23${{ inputs.highlights_viewing_experiment && '-highlights-viewing1' || inputs.highlights_diagnostics && '-highlights2' || '' }}-evidence
+          name: calcvault-integration-host-23${{ inputs.highlights_direct_viewing_experiment && '-highlights-directviewing1' || inputs.highlights_viewing_experiment && '-highlights-viewing1' || inputs.highlights_diagnostics && '-highlights2' || '' }}-evidence
           path: |
             ${{ runner.temp }}/integration-xcode-version.log
             ${{ runner.temp }}/cv-integration/logs/

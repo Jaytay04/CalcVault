@@ -117,6 +117,18 @@ audio cessation. Do not mistake package checks for a successful device test.
 
 ## Opt-in Highlights diagnostic candidate
 
+The separately approved direct-call experiment requires
+`highlights_direct_viewing_experiment=true` with diagnostics enabled and the
+method-only experiment disabled. Its marker/suffix is `highlights-directviewing1`.
+It targets only the exact pinned native consumption pointer in a currently
+writable, non-executable data mapping. Image, architecture, metadata, original
+pointer and instruction checks must pass; mismatch skips rebinding. No page
+permission, executable byte, persistent preference, creation, RX, credential or
+lifecycle change is permitted. Original invocation and natural native results
+are observed separately: Objective-C observations can see the delivered result
+in this mode. CI runs all three synthetic configurations; owner-signed feature
+activation is still required before claiming a Highlights fix.
+
 The separately approved viewing experiment additionally requires
 `highlights_viewing_experiment=true`; it defaults false and invalid combinations
 fail before building. Its marker/artifact suffix is `highlights-viewing1`. Only
@@ -124,7 +136,7 @@ fail before building. Its marker/artifact suffix is `highlights-viewing1`. Only
 the natural result remains `l0`. Creation and all other results are unchanged.
 No preference is written. The override lasts for the guest process, not just the
 two-minute observation window. Lock/revocation, pinned guest/RX bytes and ordinary
-builds remain unchanged. CI runs the synthetic fixture in both configurations;
+builds remain unchanged. CI runs the synthetic fixture in all configurations;
 usable Highlights still requires owner phone evidence. The read-only descriptions
 below refer to observation-only mode, not this explicit experimental exception.
 
@@ -182,6 +194,17 @@ saturating `overrideCalls` count within the recording window. In mode 1 this
 counts eligible calls delivered as true, including naturally true results;
 `l0` still reports the original result. A configured mode is not proof that a
 hook installed: interpret installation status and counts together.
+
+The direct-call experiment appends `directMode`, `directStatus`, `directCalls`,
+`directLast` and `directOverrideCalls`. Direct status 0 means disabled; 1 installed;
+2 unsupported architecture; 3 unavailable image; 4 malformed image; 5 pin mismatch;
+6 section mismatch; 7 mapping rejected; 8 code mismatch; 9 consumption-pointer
+mismatch; 10 creation-pointer mismatch; 11 compare-exchange failure. Direct calls
+and overrides saturate and freeze when recording stops. `directLast=-1` is unknown;
+otherwise it retains the last original native Boolean, not per-call history.
+In direct mode the Objective-C `l0` can reflect the delivered true value and must
+not be called the original native result. Only calls through the designated slot
+after installation are covered; earlier calls or other paths remain unobserved.
 
 For a diagnostic phone run, open native TikTok and navigate to the comparison
 profile within two minutes. Leave it visible for at least 15 seconds, then Lock.

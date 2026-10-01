@@ -190,6 +190,267 @@ static BOOL CVLPFixtureRequire(BOOL condition, NSString *name, NSString **failur
     return NO;
 }
 
+// Synthetic virtual addresses exercise the production parser and installer.
+// The fake original address is never executed; forwarding uses a separate real
+// C function-pointer cell below. No proprietary payload or account is involved.
+typedef struct {
+    uint8_t header[sizeof(struct mach_header_64) + 24664];
+    uintptr_t base;
+    uintptr_t consumption;
+    uintptr_t creation;
+    uint8_t stub[12];
+    uint8_t getter[28];
+    BOOL rejectMapping;
+    BOOL rejectRead;
+    BOOL rejectCAS;
+    vm_prot_t slotProtection;
+    vm_prot_t codeProtection;
+    NSUInteger CASCalls;
+    BOOL originalPublished;
+} CVLPDirectFixtureMemory;
+
+static void CVLPDirectFixtureInitialize(CVLPDirectFixtureMemory *fixture) {
+    memset(fixture, 0, sizeof(*fixture));
+    fixture->base = 0x100000000ULL;
+    fixture->slotProtection = VM_PROT_READ | VM_PROT_WRITE;
+    fixture->codeProtection = VM_PROT_READ | VM_PROT_EXECUTE;
+    fixture->consumption = fixture->base + CVLPHighlightsDirectConsumptionVM;
+    fixture->creation = fixture->base + CVLPHighlightsDirectCreationVM;
+    memcpy(fixture->stub, CVLPHighlightsDirectExpectedStub, sizeof(fixture->stub));
+    memcpy(fixture->getter, CVLPHighlightsDirectExpectedGetter, sizeof(fixture->getter));
+    struct mach_header_64 header = { .magic = MH_MAGIC_64, .cputype = CPU_TYPE_ARM64,
+        .cpusubtype = CPU_SUBTYPE_ARM64_ALL, .filetype = MH_DYLIB,
+        .ncmds = 182, .sizeofcmds = 24664 };
+    memcpy(fixture->header, &header, sizeof(header));
+    uint8_t *cursor = fixture->header + sizeof(header);
+    struct uuid_command uuid = { .cmd = LC_UUID, .cmdsize = sizeof(uuid) };
+    memcpy(uuid.uuid, CVLPHighlightsDirectExpectedUUID, sizeof(uuid.uuid));
+    memcpy(cursor, &uuid, sizeof(uuid)); cursor += sizeof(uuid);
+    struct segment_command_64 text = { .cmd = LC_SEGMENT_64, .cmdsize = sizeof(text),
+        .vmaddr = 0, .vmsize = CVLPHighlightsDirectTextVMSize, .fileoff = 0,
+        .filesize = CVLPHighlightsDirectTextVMSize, .maxprot = VM_PROT_READ | VM_PROT_EXECUTE,
+        .initprot = VM_PROT_READ | VM_PROT_EXECUTE };
+    memcpy(text.segname, "__TEXT", 7);
+    memcpy(cursor, &text, sizeof(text)); cursor += sizeof(text);
+    struct segment_command_64 data = { .cmd = LC_SEGMENT_64,
+        .cmdsize = sizeof(data) + sizeof(struct section_64),
+        .vmaddr = CVLPHighlightsDirectDataVM, .vmsize = CVLPHighlightsDirectDataVMSize,
+        .filesize = CVLPHighlightsDirectDataFileSize, .maxprot = VM_PROT_READ | VM_PROT_WRITE,
+        .initprot = VM_PROT_READ | VM_PROT_WRITE, .nsects = 1 };
+    memcpy(data.segname, "__DATA", 7);
+    memcpy(cursor, &data, sizeof(data)); cursor += sizeof(data);
+    struct section_64 section = { .addr = CVLPHighlightsDirectClassRefsVM,
+        .size = CVLPHighlightsDirectClassRefsSize };
+    memcpy(section.sectname, "__objc_clsrefs", 15);
+    memcpy(section.segname, "__DATA", 7);
+    memcpy(cursor, &section, sizeof(section)); cursor += sizeof(section);
+    struct segment_command_64 executable = { .cmd = LC_SEGMENT_64,
+        .cmdsize = sizeof(executable), .vmaddr = CVLPHighlightsDirectExecutableVM,
+        .vmsize = CVLPHighlightsDirectExecutableVMSize,
+        .maxprot = VM_PROT_READ | VM_PROT_EXECUTE, .initprot = VM_PROT_READ | VM_PROT_EXECUTE };
+    memcpy(executable.segname, "__BD_TEXT", 10);
+    memcpy(cursor, &executable, sizeof(executable)); cursor += sizeof(executable);
+    // Four meaningful commands, then bounded opaque commands with exact count.
+    for (NSUInteger index = 4; index < 182; index++) {
+        struct load_command filler = { .cmd = 0, .cmdsize = sizeof(filler) };
+        if (index == 181) { filler.cmdsize = (uint32_t)(fixture->header + sizeof(fixture->header) - cursor); }
+        memcpy(cursor, &filler, sizeof(filler)); cursor += filler.cmdsize;
+    }
+}
+
+static BOOL CVLPDirectFixtureRegion(uintptr_t address, size_t length, vm_prot_t required,
+    vm_prot_t forbidden, void *opaque) {
+    CVLPDirectFixtureMemory *fixture = opaque;
+    if (fixture->rejectMapping) { return NO; }
+    vm_prot_t protection = fixture->codeProtection;
+    uintptr_t page = (fixture->base + CVLPHighlightsDirectConsumptionSlotVM) & ~((uintptr_t)vm_page_size - 1);
+    if (CVLPHighlightsDirectRangeContains(page, vm_page_size, address, length)) {
+        protection = fixture->slotProtection;
+    } else if (!CVLPHighlightsDirectRangeContains(fixture->base, sizeof(fixture->header), address, length) &&
+        !CVLPHighlightsDirectRangeContains(fixture->base + CVLPHighlightsDirectStubVM, 12, address, length) &&
+        !CVLPHighlightsDirectRangeContains(fixture->base + CVLPHighlightsDirectConsumptionVM, 28, address, length) &&
+        !CVLPHighlightsDirectRangeContains(fixture->base + CVLPHighlightsDirectCreationVM, 1, address, length)) {
+        return NO;
+    }
+    return (protection & required) == required && (protection & forbidden) == 0;
+}
+
+static BOOL CVLPDirectFixtureRead(uintptr_t address, void *destination, size_t length, void *opaque) {
+    CVLPDirectFixtureMemory *fixture = opaque;
+    if (fixture->rejectRead) { return NO; }
+    if (CVLPHighlightsDirectRangeContains(fixture->base, sizeof(fixture->header), address, length)) {
+        memcpy(destination, fixture->header + address - fixture->base, length);
+    } else if (address == fixture->base + CVLPHighlightsDirectConsumptionSlotVM && length == sizeof(uintptr_t)) {
+        memcpy(destination, &fixture->consumption, length);
+    } else if (address == fixture->base + CVLPHighlightsDirectCreationSlotVM && length == sizeof(uintptr_t)) {
+        memcpy(destination, &fixture->creation, length);
+    } else if (address == fixture->base + CVLPHighlightsDirectStubVM && length == sizeof(fixture->stub)) {
+        memcpy(destination, fixture->stub, length);
+    } else if (address == fixture->base + CVLPHighlightsDirectConsumptionVM && length == sizeof(fixture->getter)) {
+        memcpy(destination, fixture->getter, length);
+    } else { return NO; }
+    return YES;
+}
+
+static BOOL CVLPDirectFixtureCAS(uintptr_t address, uintptr_t expected, uintptr_t replacement, void *opaque) {
+    CVLPDirectFixtureMemory *fixture = opaque;
+    fixture->CASCalls++;
+    fixture->originalPublished = atomic_load_explicit(&CVLPHighlightsDirectOriginalAddress, memory_order_acquire) == expected;
+    if (fixture->rejectCAS || address != fixture->base + CVLPHighlightsDirectConsumptionSlotVM ||
+        fixture->consumption != expected) { return NO; }
+    fixture->consumption = replacement;
+    return YES;
+}
+
+static NSUInteger CVLPDirectFixtureOriginalCalls;
+static BOOL CVLPDirectFixtureNatural;
+static BOOL CVLPDirectFixtureThrow;
+static BOOL CVLPDirectFixtureOriginal(void) {
+    CVLPDirectFixtureOriginalCalls++;
+    errno = EDOM;
+    if (CVLPDirectFixtureThrow) { @throw CVLPFixtureForwardedException; }
+    return CVLPDirectFixtureNatural;
+}
+
+static BOOL CVLPHighlightsDirectRunFixture(NSString **failure) {
+    CVLPDirectFixtureMemory fixture;
+    CVLPHighlightsDirectImagePin pin;
+    CVLPDirectFixtureInitialize(&fixture);
+    ((struct mach_header_64 *)fixture.header)->filetype = MH_EXECUTE;
+    if (!CVLPFixtureRequire(CVLPHighlightsDirectParseImage(fixture.header, sizeof(fixture.header), &pin) ==
+        CVLPHighlightsDirectPinMismatch, @"direct_wrong_filetype_rejected", failure)) { return NO; }
+    CVLPDirectFixtureInitialize(&fixture);
+    if (!CVLPFixtureRequire(CVLPHighlightsDirectParseImage(fixture.header, sizeof(fixture.header), &pin) ==
+        CVLPHighlightsDirectInstalled, @"direct_pinned_synthetic_image_valid", failure)) { return NO; }
+    // Exercise malformed metadata in every mode, independently of installation.
+    struct mach_header_64 *header = (struct mach_header_64 *)fixture.header;
+    header->cpusubtype = 2;
+    if (!CVLPFixtureRequire(CVLPHighlightsDirectParseImage(fixture.header, sizeof(fixture.header), &pin) ==
+        CVLPHighlightsDirectUnsupportedArchitecture, @"direct_wrong_architecture_rejected", failure)) { return NO; }
+    CVLPDirectFixtureInitialize(&fixture);
+    fixture.header[sizeof(struct mach_header_64) + 8] ^= 1;
+    if (!CVLPFixtureRequire(CVLPHighlightsDirectParseImage(fixture.header, sizeof(fixture.header), &pin) ==
+        CVLPHighlightsDirectPinMismatch, @"direct_wrong_uuid_rejected", failure)) { return NO; }
+    CVLPDirectFixtureInitialize(&fixture);
+    ((struct load_command *)(fixture.header + sizeof(struct mach_header_64)))->cmdsize = UINT32_MAX;
+    if (!CVLPFixtureRequire(CVLPHighlightsDirectParseImage(fixture.header, sizeof(fixture.header), &pin) ==
+        CVLPHighlightsDirectMalformedImage, @"direct_command_bounds_rejected", failure)) { return NO; }
+    CVLPDirectFixtureInitialize(&fixture);
+    struct section_64 *section = (struct section_64 *)(fixture.header + sizeof(struct mach_header_64) +
+        sizeof(struct uuid_command) + 2 * sizeof(struct segment_command_64));
+    section->addr++;
+    if (!CVLPFixtureRequire(CVLPHighlightsDirectParseImage(fixture.header, sizeof(fixture.header), &pin) ==
+        CVLPHighlightsDirectSectionMismatch, @"direct_wrong_section_rejected", failure)) { return NO; }
+    CVLPDirectFixtureInitialize(&fixture);
+    CVLPHighlightsDirectMemory memory = { CVLPDirectFixtureRegion, CVLPDirectFixtureRead, CVLPDirectFixtureCAS, &fixture };
+#if !CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT
+    if (!CVLPFixtureRequire(CVLPHighlightsDirectValidateAndInstall(fixture.base, &memory) ==
+        CVLPHighlightsDirectDisabled && fixture.CASCalls == 0 &&
+        fixture.consumption == fixture.base + CVLPHighlightsDirectConsumptionVM,
+        @"direct_default_off_never_publishes", failure)) { return NO; }
+    return YES;
+#else
+    // All rejection cases must leave BOTH cells untouched and perform no CAS.
+    for (NSUInteger test = 0; test < 11; test++) {
+        CVLPDirectFixtureInitialize(&fixture);
+        CVLPHighlightsDirectInstallStatus expected;
+        switch (test) {
+            case 0: fixture.rejectMapping = YES; expected = CVLPHighlightsDirectMappingRejected; break;
+            case 1: fixture.rejectRead = YES; expected = CVLPHighlightsDirectMappingRejected; break;
+            case 2: fixture.stub[0] ^= 1; expected = CVLPHighlightsDirectCodeMismatch; break;
+            case 3: fixture.getter[0] ^= 1; expected = CVLPHighlightsDirectCodeMismatch; break;
+            case 4: fixture.consumption++; expected = CVLPHighlightsDirectConsumptionSlotMismatch; break;
+            case 5: fixture.creation++; expected = CVLPHighlightsDirectCreationSlotMismatch; break;
+            case 6: fixture.base++; expected = CVLPHighlightsDirectSectionMismatch; break;
+            case 7: fixture.slotProtection = VM_PROT_READ; expected = CVLPHighlightsDirectMappingRejected; break;
+            case 8: fixture.slotProtection |= VM_PROT_EXECUTE; expected = CVLPHighlightsDirectMappingRejected; break;
+            case 9: fixture.codeProtection |= VM_PROT_WRITE; expected = CVLPHighlightsDirectMappingRejected; break;
+            default: fixture.codeProtection = VM_PROT_READ; expected = CVLPHighlightsDirectMappingRejected; break;
+        }
+        uintptr_t consumptionBefore = fixture.consumption, creationBefore = fixture.creation;
+        if (!CVLPFixtureRequire(CVLPHighlightsDirectValidateAndInstall(fixture.base, &memory) == expected &&
+            fixture.CASCalls == 0 && fixture.consumption == consumptionBefore && fixture.creation == creationBefore,
+            @"direct_preflight_failure_never_mutates", failure)) { return NO; }
+    }
+    CVLPDirectFixtureInitialize(&fixture);
+    fixture.rejectCAS = YES;
+    uintptr_t consumptionBefore = fixture.consumption, creationBefore = fixture.creation;
+    if (!CVLPFixtureRequire(CVLPHighlightsDirectValidateAndInstall(fixture.base, &memory) ==
+        CVLPHighlightsDirectCompareExchangeFailed && fixture.CASCalls == 1 && fixture.originalPublished &&
+        fixture.consumption == consumptionBefore && fixture.creation == creationBefore,
+        @"direct_failed_cas_preserves_both_cells", failure)) { return NO; }
+    CVLPDirectFixtureInitialize(&fixture);
+    if (!CVLPFixtureRequire(CVLPHighlightsDirectValidateAndInstall(fixture.base, &memory) ==
+        CVLPHighlightsDirectInstalled && fixture.CASCalls == 1 && fixture.originalPublished &&
+        fixture.consumption == (uintptr_t)&CVLPHighlightsDirectReplacement &&
+        fixture.creation == fixture.base + CVLPHighlightsDirectCreationVM,
+        @"direct_installs_only_consumption_after_original_publication", failure)) { return NO; }
+
+    // Now use the real production Mach query/read/CAS on a synthetic RW cell.
+    uintptr_t cells[2] = { (uintptr_t)&CVLPDirectFixtureOriginal, (uintptr_t)&CVLPDirectFixtureOriginal };
+    uintptr_t readback = 0;
+    if (!CVLPFixtureRequire(CVLPHighlightsDirectMachRegionAllows((uintptr_t)cells, sizeof(cells),
+        VM_PROT_READ | VM_PROT_WRITE, VM_PROT_EXECUTE, NULL) &&
+        CVLPHighlightsDirectMachRead((uintptr_t)cells, &readback, sizeof(readback), NULL) && readback == cells[0],
+        @"direct_real_mach_rw_cell_query_and_read", failure)) { return NO; }
+    uintptr_t savedOriginal = atomic_load_explicit(&CVLPHighlightsDirectOriginalAddress, memory_order_acquire);
+    atomic_store_explicit(&CVLPHighlightsDirectOriginalAddress, cells[0], memory_order_release);
+    if (!CVLPFixtureRequire(CVLPHighlightsDirectMachCompareExchange((uintptr_t)cells, cells[0],
+        (uintptr_t)&CVLPHighlightsDirectReplacement, NULL) && cells[1] == (uintptr_t)&CVLPDirectFixtureOriginal &&
+        !CVLPHighlightsDirectMachCompareExchange((uintptr_t)cells, (uintptr_t)&CVLPDirectFixtureOriginal,
+        0, NULL) && cells[0] == (uintptr_t)&CVLPHighlightsDirectReplacement,
+        @"direct_real_cas_never_overwrites_mismatch_or_creation", failure)) { return NO; }
+    CVLPHighlightsHookState savedState = CVLPHighlightsState;
+    BOOL savedRecording = CVLPHighlightsRecording;
+    CFTimeInterval savedStart = CVLPHighlightsStartedAt;
+    CVLPHighlightsState.directStatus = CVLPHighlightsDirectInstalled;
+    CVLPHighlightsState.directCalls = CVLPHighlightsState.directOverrideCalls = 0;
+    CVLPHighlightsState.directLast = -1;
+    CVLPHighlightsRecording = YES;
+    CVLPHighlightsStartedAt = CACurrentMediaTime();
+    CVLPDirectFixtureOriginalCalls = 0;
+    CVLPDirectFixtureNatural = NO;
+    CVLPHighlightsDirectGateFunction call = (CVLPHighlightsDirectGateFunction)cells[0];
+    if (!CVLPFixtureRequire(call() && errno == EDOM && CVLPDirectFixtureOriginalCalls == 1 &&
+        CVLPHighlightsState.directLast == 0 && CVLPHighlightsState.directCalls == 1 &&
+        CVLPHighlightsState.directOverrideCalls == 1, @"direct_false_original_once_and_errno", failure)) { return NO; }
+    CVLPDirectFixtureNatural = YES;
+    if (!CVLPFixtureRequire(call() && CVLPDirectFixtureOriginalCalls == 2 && CVLPHighlightsState.directLast == 1 &&
+        CVLPHighlightsState.directCalls == 2, @"direct_true_original_once", failure)) { return NO; }
+    CVLPDirectFixtureThrow = YES;
+    BOOL caught = NO;
+    @try { (void)call(); } @catch (NSException *exception) { caught = exception == CVLPFixtureForwardedException; }
+    CVLPDirectFixtureThrow = NO;
+    if (!CVLPFixtureRequire(caught && CVLPDirectFixtureOriginalCalls == 3 && CVLPHighlightsState.directCalls == 3 &&
+        CVLPHighlightsState.directOverrideCalls == 2, @"direct_exception_preserved_without_override", failure)) { return NO; }
+    CVLPHighlightsState.directCalls = CVLPHighlightsState.directOverrideCalls = 65535;
+    (void)call();
+    if (!CVLPFixtureRequire(CVLPHighlightsState.directCalls == 65535 && CVLPHighlightsState.directOverrideCalls == 65535,
+        @"direct_counter_saturation", failure)) { return NO; }
+    CVLPHighlightsState.directCalls = CVLPHighlightsState.directOverrideCalls = 9;
+    CVLPHighlightsState.directLast = 0;
+    CVLPHighlightsStartedAt = CACurrentMediaTime() - CVLPHighlightsDeadline - 1;
+    CVLPDirectFixtureNatural = NO;
+    if (!CVLPFixtureRequire(call() && !CVLPHighlightsRecording && CVLPHighlightsState.directCalls == 9 &&
+        CVLPHighlightsState.directLast == 0, @"direct_deadline_freezes_recording_not_delivery", failure)) { return NO; }
+    CVLPHighlightsObserver *stopObserver = [CVLPHighlightsObserver new];
+    stopObserver->_startedAt = CACurrentMediaTime();
+    CVLPHighlightsRecording = YES;
+    CVLPHighlightsStartedAt = CACurrentMediaTime();
+    [stopObserver stopWithReason:CVLPHighlightsStopBackground];
+    NSUInteger linesAfterStop = CVLPFixtureDiagnosticLines.count;
+    if (!CVLPFixtureRequire(call() && !CVLPHighlightsRecording && CVLPHighlightsState.directCalls == 9 &&
+        CVLPFixtureDiagnosticLines.count == linesAfterStop,
+        @"direct_actual_background_stop_freezes_recording", failure)) { return NO; }
+    // Fixture cleanup only: the real guest override is never removed on stop.
+    atomic_store_explicit(&CVLPHighlightsDirectOriginalAddress, savedOriginal, memory_order_release);
+    CVLPHighlightsState = savedState;
+    CVLPHighlightsRecording = savedRecording;
+    CVLPHighlightsStartedAt = savedStart;
+    return YES;
+#endif
+}
+
 BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
     fprintf(stderr, "CV_HIGHLIGHTS_FIXTURE_STAGE core-start\n");
     if (failure != NULL) { *failure = nil; }
@@ -571,6 +832,13 @@ BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
         @"stopped_recording_freezes_count_but_experiment_delivery_continues", failure)) { return NO; }
 
     fprintf(stderr, "CV_HIGHLIGHTS_FIXTURE_STAGE forwarding-complete\n");
+    if (!CVLPHighlightsDirectRunFixture(failure)) { return NO; }
+    fprintf(stderr, "CV_HIGHLIGHTS_FIXTURE_STAGE direct-complete\n");
+    [CVLPFixtureDiagnosticLines removeAllObjects];
+    CVLPHighlightsState.directLast = -1;
+    CVLPHighlightsState.directCalls = CVLPHighlightsState.directOverrideCalls = 0;
+    CVLPHighlightsState.directStatus = CVLPHighlightsDirectViewingExperimentMode ?
+        CVLPHighlightsDirectImageUnavailable : CVLPHighlightsDirectDisabled;
     CVLPHighlightsObserver *lineObserver = [CVLPHighlightsObserver new];
     lineObserver->_startedAt = CACurrentMediaTime();
     lineObserver->_installStatuses[0] = CVLPHighlightsInstallInstalled;
@@ -633,6 +901,35 @@ BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
         CVLPHighlightsLineIsSanitized(maximumClassCount) &&
         CVLPHighlightsLineIsSanitized(maximumOverrideCalls) == (CVLPHighlightsViewingExperimentMode == 1),
         @"sanitizer_enforces_scope_mode_and_numeric_bounds", failure)) { return NO; }
+    NSString *directModeField = [NSString stringWithFormat:@"directMode=%d", CVLPHighlightsDirectViewingExperimentMode];
+    NSString *wrongDirectMode = [validLine stringByReplacingOccurrencesOfString:directModeField
+        withString:[NSString stringWithFormat:@"directMode=%d", !CVLPHighlightsDirectViewingExperimentMode]];
+    NSString *directStatusField = [NSString stringWithFormat:@"directStatus=%d", CVLPHighlightsState.directStatus];
+    NSArray<NSString *> *badDirectLines = @[
+        wrongDirectMode,
+        [validLine stringByReplacingOccurrencesOfString:directStatusField withString:@"directStatus=12"],
+        [validLine stringByReplacingOccurrencesOfString:@"directCalls=0" withString:@"directCalls=-1"],
+        [validLine stringByReplacingOccurrencesOfString:@"directCalls=0" withString:@"directCalls=65536"],
+        [validLine stringByReplacingOccurrencesOfString:@"directLast=-1" withString:@"directLast=2"],
+        [validLine stringByReplacingOccurrencesOfString:@"directLast=-1" withString:@"directLast=0"],
+        [validLine stringByReplacingOccurrencesOfString:@"directOverrideCalls=0" withString:@"directOverrideCalls=1"],
+    ];
+    for (NSString *badLine in badDirectLines) {
+        if (!CVLPFixtureRequire(!CVLPHighlightsLineIsSanitized(badLine),
+            @"direct_schema_rejects_mode_status_counts_and_unknown_mismatch", failure)) { return NO; }
+    }
+#if CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT
+    CVLPHighlightsState.directStatus = CVLPHighlightsDirectInstalled;
+    CVLPHighlightsState.directCalls = CVLPHighlightsState.directOverrideCalls = 2;
+    CVLPHighlightsState.directLast = 0;
+    CVLPHighlightsObserver *directLineObserver = [CVLPHighlightsObserver new];
+    directLineObserver->_startedAt = CACurrentMediaTime();
+    [directLineObserver appendLineForPhase:@"sample" sequence:1 reason:-1 tree:tree];
+    NSString *directLine = CVLPFixtureDiagnosticLines.lastObject;
+    if (!CVLPFixtureRequire(directLineObserver->_eventCount == 1 && CVLPHighlightsLineIsSanitized(directLine) &&
+        [directLine containsString:@"directMode=1 directStatus=1 directCalls=2 directLast=0 directOverrideCalls=2"],
+        @"direct_emitted_line_retains_original_false_distinct_from_delivery", failure)) { return NO; }
+#endif
     return YES;
 }
 
