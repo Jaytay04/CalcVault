@@ -236,6 +236,14 @@ class HighlightsDiagnosticsSourceTests(unittest.TestCase):
 
     def test_fixture_exercises_pass_through_and_finite_report_contract(self):
         self.assertIn("CV_HIGHLIGHTS_FIXTURE_PASS", self.fixture)
+        self.assertIn('getenv("CV_HIGHLIGHTS_RESULT_NAME")', self.fixture)
+        self.assertIn('resultName.length > 100', self.fixture)
+        self.assertIn('nameCharacters.invertedSet', self.fixture)
+        self.assertIn('NSTemporaryDirectory()', self.fixture)
+        self.assertIn('CV_HIGHLIGHTS_FIXTURE_PASS viewing=%d direct=%d', self.fixture)
+        self.assertLess(self.fixture.index('runFixtureSelfTest:&failure'),
+                        self.fixture.index('NSString *result = [NSString stringWithFormat:'))
+        self.assertIn('result writeToFile:resultPath atomically:YES', self.fixture)
         self.assertIn("feature_owner_unique_hook", self.fixture)
         self.assertIn("boolean_false_natural_observation_distinct_from_delivery", self.fixture)
         self.assertIn("boolean_true_natural_value_and_observation_preserved", self.fixture)

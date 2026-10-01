@@ -89,6 +89,11 @@ if [[ "${CV_HIGHLIGHTS_DIAGNOSTICS:-0}" == 1 ]]; then
             if [[ -f "$report" ]]; then cp "$report" "$evidence/"; fi
         done
     }
+    fixture_result_name="cv-highlights-$(uuidgen)-$fixture_mode.result"
+    fixture_data="$(xcrun simctl get_app_container "$simulator" org.example.synthetic.highlights-observer-tests data)"
+    fixture_result="$fixture_data/tmp/$fixture_result_name"
+    test ! -e "$fixture_result"
+    SIMCTL_CHILD_CV_HIGHLIGHTS_RESULT_NAME="$fixture_result_name" \
     xcrun simctl launch --terminate-running-process --console "$simulator" \
         org.example.synthetic.highlights-observer-tests \
         > "$evidence/highlights-fixture$fixture_suffix.log" 2>&1 || {
@@ -96,11 +101,20 @@ if [[ "${CV_HIGHLIGHTS_DIAGNOSTICS:-0}" == 1 ]]; then
             fixture_failure_evidence
             exit 1
         }
-    if ! grep -q '^CV_HIGHLIGHTS_FIXTURE_PASS$' "$evidence/highlights-fixture$fixture_suffix.log"; then
+    for fixture_result_attempt in {1..30}; do
+        test -f "$fixture_result" && break
+        sleep 1
+    done
+    if ! test -f "$fixture_result" ||
+        ! test "$(<"$fixture_result")" = "CV_HIGHLIGHTS_FIXTURE_PASS viewing=$viewing_mode direct=$direct_mode"; then
         cat "$evidence/highlights-fixture$fixture_suffix.log"
+        if [[ -f "$fixture_result" ]]; then cat "$fixture_result"; fi
         fixture_failure_evidence
         exit 1
     fi
+    cp "$fixture_result" "$evidence/highlights-fixture$fixture_suffix-result.log"
+    # This marker is emitted only after the exact fresh, mode-tagged result.
+    printf 'CV_HIGHLIGHTS_FIXTURE_PASS mode=%s\n' "$fixture_mode"
     done
 fi
 

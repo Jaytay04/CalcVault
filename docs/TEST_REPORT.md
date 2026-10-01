@@ -1,5 +1,38 @@
 # CalcVault test report
 
+## Direct fixture silent launch and durable evidence (2026-10-01)
+
+Actions 36850532864 at e870278: all fixture modes compile. Default and method
+mode logs contain startup/forwarding/direct checkpoints and explicit PASS.
+Direct mode console contains only the launched PID, without even unbuffered main,
+FAIL or PASS. The process-only unified log is empty and no crash file was captured.
+Cause is NOT established; direct execution is not accepted and no IPA is produced.
+
+Fixture-only collection correction: main now atomically writes a fixed mode-tagged
+result after the same complete self-test. Filename is bounded/allowlisted and
+freshly generated with UUID for each run/mode. The script requires its absence
+before launch, propagates it through simctl, obtains that synthetic app's data
+container, polls at most 30 seconds and accepts only exact expected PASS/modes.
+Failure, missing file, wrong modes or nonzero launch remain strict failures;
+console and durable result are retained. No test body or production code relaxed,
+no proprietary data or extra phone app involved. This measures completion despite
+possible console collection failure; it does not claim that is the root cause.
+Native execution of the new collection path remains pending.
+
+## Direct viewing corrected-source review (2026-10-01)
+
+Independent static pin verification and runtime/scope review find no remaining
+source-level blocker. Reviewer checked the final 11 preflight/protection cases,
+CAS failure/success, attempts versus completed overrides, original last Boolean,
+errno/exception, saturation, deadline/background behavior and numeric schema.
+Retaining the published original after failed CAS is accepted to avoid racing
+a successful install; the pointer remains untouched on failure. The later SDK
+API correction is independently reviewed with unchanged protection/CAS scope.
+PASS locally: corrected device adapter64 and integration42 checks; unchanged
+package-tools118 checks previously PASS. This review is not Apple execution or
+signed-device acceptance. Actions 36850532864 at e870278 is the pending native
+gate; Highlights activation remains unverified.
+
 ## Direct viewing first Apple compile failure (2026-10-01)
 
 FAIL: Actions 36849681187 at 4949d23 stops before native execution: the

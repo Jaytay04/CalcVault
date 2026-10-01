@@ -938,9 +938,30 @@ int main(void) {
     setbuf(stderr, NULL);
     fprintf(stderr, "CV_HIGHLIGHTS_FIXTURE_STAGE main\n");
     @autoreleasepool {
+        // A short-lived simulator process can finish before console capture is
+        // attached. Persist only a fixed test result, never application content.
+        const char *resultNameBytes = getenv("CV_HIGHLIGHTS_RESULT_NAME");
+        NSString *resultName = resultNameBytes ? [NSString stringWithUTF8String:resultNameBytes] : nil;
+        NSCharacterSet *nameCharacters = [NSCharacterSet characterSetWithCharactersInString:
+            @"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-."];
+        if (resultName.length == 0 || resultName.length > 100 ||
+            ![resultName hasPrefix:@"cv-highlights-"] ||
+            [resultName rangeOfCharacterFromSet:nameCharacters.invertedSet].location != NSNotFound) {
+            fprintf(stderr, "CV_HIGHLIGHTS_FIXTURE_FAIL result_name\n");
+            return 1;
+        }
+        NSString *resultPath = [NSTemporaryDirectory() stringByAppendingPathComponent:resultName];
         NSString *failure = nil;
         if (![CVLPHighlightsDiagnostics runFixtureSelfTest:&failure]) {
             fprintf(stderr, "CV_HIGHLIGHTS_FIXTURE_FAIL %s\n", failure.UTF8String ?: "unknown");
+            [@"CV_HIGHLIGHTS_FIXTURE_FAIL\n" writeToFile:resultPath atomically:YES
+                encoding:NSUTF8StringEncoding error:NULL];
+            return 1;
+        }
+        NSString *result = [NSString stringWithFormat:@"CV_HIGHLIGHTS_FIXTURE_PASS viewing=%d direct=%d\n",
+            CVLPHighlightsViewingExperimentMode, CVLPHighlightsDirectViewingExperimentMode];
+        if (![result writeToFile:resultPath atomically:YES encoding:NSUTF8StringEncoding error:NULL]) {
+            fprintf(stderr, "CV_HIGHLIGHTS_FIXTURE_FAIL result_write\n");
             return 1;
         }
         printf("CV_HIGHLIGHTS_FIXTURE_PASS\n");
