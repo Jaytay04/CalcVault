@@ -1,5 +1,43 @@
 # CalcVault test report
 
+## Highlights viewing experiment private delivery (2026-10-01)
+
+PASS: separately named prerelease is published in the verified-private artifact
+repository. Both IPA and checksum are uploaded, and server-reported digests/sizes
+match local files. Prior releases remain intact. Delivery identifiers are kept
+only in the ignored local receipt, not public source.
+
+NOT RUN: new SideStore .cv1 install, same-profile Highlights appearance/opening,
+and explicit Lock/audio/calculator check. Collect the refreshed marker
+`integration-23-highlights-viewing1` and `CVLP_HIGHLIGHTS` lines. `mode=1` alone
+does not prove hook activation; require installed st0 and positive overrideCalls.
+Natural l0 remains separate, and model/component/row observations may still be
+absent if additional data or eligibility conditions prevent Highlights.
+
+## Highlights viewing experiment Apple build and assembly (2026-10-01)
+
+PASS: Actions 36835225380 at 0ac2264, Xcode 26.6 (17F113), macos-26 arm64.
+Both `highlights-fixture.log` and `highlights-fixture-viewing.log` contain all
+five startup/forwarding checkpoints and explicit `CV_HIGHLIGHTS_FIXTURE_PASS`.
+Thus native execution passed for compile-time modes 0 and 1, not merely source
+assertions. iPhoneSimulator/iPhoneOS host builds and signature, entitlement,
+dependency-closure and ZIP packaging gates pass. Downloaded host SHA-256 matches
+CI: `ba9eff3ece96503a1c8067c04dca9fe6dd006e8ca7fabd07282a671e8f65c2b5`.
+
+PASS: pinned private input rehash, local no-overwrite merger, independent ZIP
+inventory/CRC/member-digest readback. All 2,424 guest files plus descriptor and
+RX are unchanged; 122 retained host files match the synthetic host, with only
+the two approved package metadata changes. Same identity, portrait and guest
+data directory; no signing exports or extra products. Marker is
+`integration-23-highlights-viewing1`. Prior inputs and working candidates remain
+unchanged. Private publication is in progress; private identifiers stay omitted.
+
+Simulator root evidence remains an unauthenticated, fail-closed host smoke test,
+not TikTok login or launch acceptance. Fresh SideStore signing, usable Highlights
+and phone Lock/audio/calculator behavior are NOT RUN for this new candidate.
+Synthetic isolation observations and the existing signal-zero uncertainty remain
+separate; no security certification or confirmed causal feature fix is claimed.
+
 ## Highlights viewing-only implementation checks (2026-10-01)
 
 PASS: 62 local device-adapter source checks and 41 integration checks. Both
