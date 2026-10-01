@@ -20,6 +20,7 @@ static NSException *CVLPFixtureForwardedException;
 static NSMutableArray<NSString *> *CVLPFixtureDiagnosticLines;
 static NSUInteger CVLPFixtureDisplacedCalls;
 static NSUInteger CVLPFixtureResolverCalls;
+static BOOL CVLPAdmissionFixtureCompleted = NO;
 
 typedef struct {
     CFTimeInterval now;
@@ -856,6 +857,7 @@ BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
     fprintf(stderr, "CV_HIGHLIGHTS_FIXTURE_STAGE direct-complete\n");
 #if defined(CVLP_HIGHLIGHTS_TESTING)
     if (!CVLPAdmissionRunFixtureCases(failure)) { return NO; }
+    CVLPAdmissionFixtureCompleted = YES;
     fprintf(stderr, "CV_ADMISSION_METADATA_FIXTURE_PASS\n");
 #endif
     [CVLPFixtureDiagnosticLines removeAllObjects];
@@ -985,9 +987,14 @@ int main(void) {
                 encoding:NSUTF8StringEncoding error:NULL];
             return 1;
         }
-        NSString *result = [NSString stringWithFormat:@"CV_HIGHLIGHTS_FIXTURE_PASS viewing=%d direct=%d early=%d admission=%d\n",
+        BOOL replayTerminal = NO;
+#if CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT
+        replayTerminal = CVLPEarlyLoaderReplayTerminalCompleted;
+#endif
+        NSString *result = [NSString stringWithFormat:@"CV_HIGHLIGHTS_FIXTURE_PASS viewing=%d direct=%d early=%d admission=%d admissionCases=%d replayTerminal=%d\n",
             CVLPHighlightsViewingExperimentMode, CVLPHighlightsDirectViewingExperimentMode,
-            CVLPHighlightsEarlyViewingExperimentMode, CVLP_HIGHLIGHTS_ADMISSION_METADATA];
+            CVLPHighlightsEarlyViewingExperimentMode, CVLP_HIGHLIGHTS_ADMISSION_METADATA,
+            CVLPAdmissionFixtureCompleted, replayTerminal];
         if (![result writeToFile:resultPath atomically:YES encoding:NSUTF8StringEncoding error:NULL]) {
             fprintf(stderr, "CV_HIGHLIGHTS_FIXTURE_FAIL result_write\n");
             return 1;

@@ -1,5 +1,23 @@
 # CalcVault test report
 
+Persisted-result correction validation: device-source81/integration51 PASS;
+package-tools118 PASS from the unchanged packaging slice (250 total). Bash
+syntax/diff checks PASS. Independent review confirms completion flags are set
+only after assertions, with exact fresh-result mode expectations. Apple-native
+re-execution remains required; no new IPA or phone result claimed here.
+
+## Admission native evidence correction (2026-10-01)
+
+Actions36928993962 at0510a6f compiled and executed native configurations0-3;
+their fresh exact result files pass. Configuration4 also wrote a fresh mode-tagged
+PASS result, but the required trailing replay console marker was not captured,
+so the build failed before configuration5 or IPA packaging. This is not a full
+native gate PASS. The corrected fixture persists two completion bits only after
+the admission cases and replay-terminal assertions respectively finish. Exact
+fresh-file readback replaces the lossy console-marker gate without removing any
+assertion. Production reader, guest and vault behavior are unchanged; corrected
+Apple build/execution and delivery remain pending.
+
 ## Admission fixture Apple compile correction (2026-10-01)
 
 Actions36928163021 at e25f4be FAIL: Apple Clang reports seven `cannot type cast

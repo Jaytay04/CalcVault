@@ -76,6 +76,21 @@ class EarlyLoaderFixtureTests(unittest.TestCase):
             "case=exact-target-replay-terminal",
         ):
             self.assertIn(token, replay_path)
+        terminal_marker = replay_path.index("case=exact-target-replay-terminal")
+        completion_flag = replay_path.index("CVLPEarlyLoaderReplayTerminalCompleted = YES;")
+        self.assertEqual(replay_path.count("CVLPEarlyLoaderReplayTerminalCompleted = YES;"), 1)
+        for terminal_assertion in (
+            "afterArm.earlyStatus == CVLPHighlightsEarlyReplaySkipped",
+            "afterArm.earlyMatches == 1",
+            "CVLPHighlightsEarlyTestCASAttempts() == 0",
+            "CVLPEarlyLoaderContext.targetReplayResolverCalls == 1",
+            "case=replay-terminal-blocks-later-mismatch",
+            "case=replay-only-finish-and-callback-inert",
+            "case=replay-only-observer-preserved-counters",
+            "case=exact-target-replay-terminal",
+        ):
+            self.assertLess(replay_path.index(terminal_assertion), completion_flag)
+        self.assertLess(completion_flag, replay_path.index("return YES;", completion_flag))
         self.assertIn('getenv("CV_HIGHLIGHTS_EARLY_REPLAY_ONLY")', self.fixture)
 
     def test_mismatch_duplicate_finish_and_observer_contracts(self):
@@ -116,9 +131,12 @@ class EarlyLoaderFixtureTests(unittest.TestCase):
         self.assertIn("CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT", self.highlights_fixture)
         self.assertIn("CVLP_HIGHLIGHTS_ADMISSION_METADATA", self.highlights_fixture)
         self.assertIn(
-            'CV_HIGHLIGHTS_FIXTURE_PASS viewing=%d direct=%d early=%d admission=%d\\n',
+            'CV_HIGHLIGHTS_FIXTURE_PASS viewing=%d direct=%d early=%d admission=%d admissionCases=%d replayTerminal=%d\\n',
             self.highlights_fixture,
         )
+        self.assertIn("replayTerminal = CVLPEarlyLoaderReplayTerminalCompleted;", self.highlights_fixture)
+        self.assertIn("CVLPAdmissionFixtureCompleted, replayTerminal];", self.highlights_fixture)
+        self.assertIn("CVLPAdmissionFixtureCompleted = YES;", self.highlights_fixture)
         self.assertIn("CVLPHighlightsEarlyViewingExperimentMode", self.highlights_fixture)
         self.assertIn("CVLPEarlyLoaderRunFixture(failure)", self.highlights_fixture)
         self.assertIn("CVLPEarlyLoaderRunFixture(NSString * _Nullable * _Nullable failure)", self.fixture_header)

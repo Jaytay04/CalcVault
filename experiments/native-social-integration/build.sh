@@ -131,21 +131,16 @@ if [[ "${CV_HIGHLIGHTS_DIAGNOSTICS:-0}" == 1 ]]; then
         sleep 1
     done
     if ! test -f "$fixture_result" ||
-        ! test "$(<"$fixture_result")" = "CV_HIGHLIGHTS_FIXTURE_PASS viewing=$viewing_mode direct=$((direct_mode || early_mode)) early=$early_mode admission=$admission_mode"; then
+        ! test "$(<"$fixture_result")" = "CV_HIGHLIGHTS_FIXTURE_PASS viewing=$viewing_mode direct=$((direct_mode || early_mode)) early=$early_mode admission=$admission_mode admissionCases=1 replayTerminal=$early_replay_only"; then
         cat "$evidence/highlights-fixture$fixture_suffix.log"
         if [[ -f "$fixture_result" ]]; then cat "$fixture_result"; fi
         fixture_failure_evidence
         exit 1
     fi
     cp "$fixture_result" "$evidence/highlights-fixture$fixture_suffix-result.log"
-    if [[ "$early_replay_only" == 1 ]]; then
-        grep -Fq 'CV_HIGHLIGHTS_EARLY_FIXTURE_PASS case=exact-target-replay-terminal' \
-            "$evidence/highlights-fixture$fixture_suffix.log"
-    fi
-    if [[ "$admission_mode" == 1 ]]; then
-        grep -Fq 'CV_ADMISSION_METADATA_FIXTURE_PASS' \
-            "$evidence/highlights-fixture$fixture_suffix.log"
-    fi
+    # Console output is kept as diagnostics, but can be truncated when the
+    # simulator process exits quickly. Require completion via the fresh,
+    # mode-tagged result file instead of grepping that lossy stream.
     # This marker is emitted only after the exact fresh, mode-tagged result.
     printf 'CV_HIGHLIGHTS_FIXTURE_PASS mode=%s\n' "$fixture_mode"
     done

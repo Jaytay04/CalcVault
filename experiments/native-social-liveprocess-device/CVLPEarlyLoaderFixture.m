@@ -38,6 +38,7 @@ typedef struct {
 // retain its context for the full process lifetime rather than pointing into
 // the runner's stack frame.
 static CVLPEarlyLoaderInstallerContext CVLPEarlyLoaderContext;
+static BOOL CVLPEarlyLoaderReplayTerminalCompleted = NO;
 
 static BOOL CVLPEarlyLoaderUUIDEquals(CVLPEarlyLoaderUUID left, CVLPEarlyLoaderUUID right) {
     return left.valid && right.valid && memcmp(left.uuid, right.uuid, sizeof(left.uuid)) == 0;
@@ -473,6 +474,7 @@ static BOOL CVLPEarlyLoaderRunReplayOnlyPath(CVLPEarlyLoaderUUID targetUUID,
     if (!CVLPEarlyLoaderRunObserverPreservationCheck(expectedState, failure)) { return NO; }
     fprintf(stderr, "CV_HIGHLIGHTS_EARLY_FIXTURE_PASS case=replay-only-observer-preserved-counters\n");
     fprintf(stderr, "CV_HIGHLIGHTS_EARLY_FIXTURE_PASS case=exact-target-replay-terminal\n");
+    CVLPEarlyLoaderReplayTerminalCompleted = YES;
     return YES;
 }
 
