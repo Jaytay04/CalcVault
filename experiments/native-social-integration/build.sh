@@ -56,7 +56,7 @@ fi
 xcrun simctl bootstatus "$simulator" -b
 
 if [[ "${CV_HIGHLIGHTS_DIAGNOSTICS:-0}" == 1 ]]; then
-    # Run default-off, method-viewing, late-direct and early-direct configurations.
+    # Run default-off, each isolated viewing mode, replay and admission discovery.
     # no proprietary guest, account or network is used by this executable.
     fixture_app="$work/HighlightsDiagnosticsFixture.app"
     mkdir -p "$fixture_app"
@@ -77,20 +77,23 @@ if [[ "${CV_HIGHLIGHTS_DIAGNOSTICS:-0}" == 1 ]]; then
             }
         codesign --force --sign - "$fixture_app/Frameworks/$fixture_library.dylib"
     done
-    for fixture_mode in 0 1 2 3 4; do
+    for fixture_mode in 0 1 2 3 4 5; do
     viewing_mode=0
     direct_mode=0
     early_mode=0
+    admission_mode=0
     early_replay_only=0
     fixture_suffix=""
     if [[ "$fixture_mode" == 1 ]]; then viewing_mode=1; fixture_suffix="-viewing"; fi
     if [[ "$fixture_mode" == 2 ]]; then direct_mode=1; fixture_suffix="-directviewing"; fi
     if [[ "$fixture_mode" == 3 ]]; then early_mode=1; fixture_suffix="-earlyviewing"; fi
     if [[ "$fixture_mode" == 4 ]]; then early_mode=1; early_replay_only=1; fixture_suffix="-earlyreplay"; fi
+    if [[ "$fixture_mode" == 5 ]]; then admission_mode=1; fixture_suffix="-admission"; fi
     xcrun --sdk iphonesimulator clang -arch arm64 -mios-simulator-version-min=18.0 \
         -DCVLP_HIGHLIGHTS_VIEWING_EXPERIMENT="$viewing_mode" \
         -DCVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT="$direct_mode" \
         -DCVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT="$early_mode" \
+        -DCVLP_HIGHLIGHTS_ADMISSION_METADATA="$admission_mode" \
         -fobjc-arc -fblocks -framework Foundation -framework UIKit -framework QuartzCore \
         -Wl,-rpath,@executable_path/Frameworks \
         -I "$device_project" -I "$upstream/LiveContainer" \
@@ -128,7 +131,7 @@ if [[ "${CV_HIGHLIGHTS_DIAGNOSTICS:-0}" == 1 ]]; then
         sleep 1
     done
     if ! test -f "$fixture_result" ||
-        ! test "$(<"$fixture_result")" = "CV_HIGHLIGHTS_FIXTURE_PASS viewing=$viewing_mode direct=$((direct_mode || early_mode)) early=$early_mode"; then
+        ! test "$(<"$fixture_result")" = "CV_HIGHLIGHTS_FIXTURE_PASS viewing=$viewing_mode direct=$((direct_mode || early_mode)) early=$early_mode admission=$admission_mode"; then
         cat "$evidence/highlights-fixture$fixture_suffix.log"
         if [[ -f "$fixture_result" ]]; then cat "$fixture_result"; fi
         fixture_failure_evidence
@@ -137,6 +140,10 @@ if [[ "${CV_HIGHLIGHTS_DIAGNOSTICS:-0}" == 1 ]]; then
     cp "$fixture_result" "$evidence/highlights-fixture$fixture_suffix-result.log"
     if [[ "$early_replay_only" == 1 ]]; then
         grep -Fq 'CV_HIGHLIGHTS_EARLY_FIXTURE_PASS case=exact-target-replay-terminal' \
+            "$evidence/highlights-fixture$fixture_suffix.log"
+    fi
+    if [[ "$admission_mode" == 1 ]]; then
+        grep -Fq 'CV_ADMISSION_METADATA_FIXTURE_PASS' \
             "$evidence/highlights-fixture$fixture_suffix.log"
     fi
     # This marker is emitted only after the exact fresh, mode-tagged result.

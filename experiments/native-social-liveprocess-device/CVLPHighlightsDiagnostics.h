@@ -37,6 +37,19 @@
 #define CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT 0
 #endif
 
+#ifndef CVLP_HIGHLIGHTS_ADMISSION_METADATA
+#define CVLP_HIGHLIGHTS_ADMISSION_METADATA 0
+#endif
+
+#if CVLP_HIGHLIGHTS_ADMISSION_METADATA != 0 && CVLP_HIGHLIGHTS_ADMISSION_METADATA != 1
+#error CVLP_HIGHLIGHTS_ADMISSION_METADATA must be 0 or 1
+#endif
+
+#if CVLP_HIGHLIGHTS_ADMISSION_METADATA && (CVLP_HIGHLIGHTS_VIEWING_EXPERIMENT || \
+    CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT || CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT)
+#error Admission metadata discovery cannot be combined with viewing overrides
+#endif
+
 #if CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT != 0 && CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT != 1
 #error CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT must be 0 or 1
 #endif
@@ -235,7 +248,7 @@ static BOOL CVLPHighlightsRecording = NO;
 static CFTimeInterval CVLPHighlightsStartedAt = 0.0;
 static __strong id CVLPHighlightsSharedObserver;
 
-#if CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT || CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT || defined(CVLP_HIGHLIGHTS_TESTING)
+#if CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT || CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT || defined(CVLP_HIGHLIGHTS_TESTING) || CVLP_HIGHLIGHTS_ADMISSION_METADATA
 typedef BOOL (*CVLPHighlightsDirectGateFunction)(void);
 _Static_assert(sizeof(uintptr_t) == sizeof(CVLPHighlightsDirectGateFunction),
     "Direct gate pointers must match arm64 pointer width.");
@@ -349,7 +362,7 @@ static void CVLPHighlightsRecordInvocation(CVLPHighlightsTarget target, int valu
     os_unfair_lock_unlock(&CVLPHighlightsStateLock);
 }
 
-#if CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT || CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT || defined(CVLP_HIGHLIGHTS_TESTING)
+#if CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT || CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT || defined(CVLP_HIGHLIGHTS_TESTING) || CVLP_HIGHLIGHTS_ADMISSION_METADATA
 static const uint8_t CVLPHighlightsDirectExpectedUUID[16] = {
     0xe9, 0x94, 0xf2, 0xc7, 0x83, 0x49, 0x3e, 0x53,
     0x92, 0xef, 0xd2, 0x1c, 0x10, 0xde, 0xd9, 0xfc,
@@ -1100,6 +1113,12 @@ void CVLPHighlightsEarlyTestReadState(int *status, uint16_t *matches,
 #endif
 #endif
 
+#if CVLP_HIGHLIGHTS_ADMISSION_METADATA || defined(CVLP_HIGHLIGHTS_TESTING)
+NS_ASSUME_NONNULL_END
+#import "CVLPAdmissionMetadata.h"
+NS_ASSUME_NONNULL_BEGIN
+#endif
+
 static BOOL CVLPHighlightsMethodHasExactSignature(Method method, const char *returnEncoding) {
     if (method == NULL || method_getNumberOfArguments(method) != 2) { return NO; }
     char *returnType = method_copyReturnType(method);
@@ -1422,6 +1441,9 @@ static CVLPHighlightsInstallStatus CVLPHighlightsInstallInstance(Class cls, SEL 
     int _classLookupReasons[2];
     NSUInteger _classLookupClasses[2];
     NSUInteger _eventCount;
+#if CVLP_HIGHLIGHTS_ADMISSION_METADATA
+    NSUInteger _admissionAttempts;
+#endif
     CFTimeInterval _startedAt;
     BOOL _stopped;
     __strong id _backgroundObserver;
@@ -1866,6 +1888,19 @@ static BOOL CVLPHighlightsLineIsSanitized(NSString *line) {
         [self stopWithReason:CVLPHighlightsStopDeadline];
         return;
     }
+#if CVLP_HIGHLIGHTS_ADMISSION_METADATA
+    // Metadata discovery is not a guest call observer. Sample after startup,
+    // at most twice, and never invoke or change the admission prerequisites.
+    if ((sampleNumber == 1 || sampleNumber == 4) && self->_admissionAttempts < 2) {
+        self->_admissionAttempts++;
+        NSString *admissionLine = CVLPAdmissionMetadataLineForAnchor(
+            objc_lookUpClass("TTKProfileBizDataStoryHighlightInfoModel"), (uint32_t)self->_admissionAttempts);
+        if (!self->_stopped && CACurrentMediaTime() - self->_startedAt < CVLPHighlightsDeadline &&
+            admissionLine != nil && CVLPAdmissionLineIsSanitized(admissionLine)) {
+            [CVLPProbe recordGuestDiagnostic:admissionLine];
+        }
+    }
+#endif
     CVLPHighlightsTreeSummary tree = CVLPHighlightsSampleTreeSafely();
     if (CACurrentMediaTime() - self->_startedAt < CVLPHighlightsDeadline) {
         [self appendLineForPhase:@"sample" sequence:sampleNumber reason:-1 tree:tree];

@@ -1,5 +1,104 @@
 # CalcVault test report
 
+## Admission metadata independent review (2026-10-01)
+
+Final read-only source review finds no blocking defect. It verifies default-off,
+mutually exclusive admission mode; exact image validation; raw-selector matching
+before name APIs; no guest method invocation or memory/page-protection writes;
+deadline cleanup, repeated selector-slot coverage and strict bounded output.
+Category origin, implementation provenance and caller identity remain unknown.
+All 249 local checks PASS. Apple compile/runtime was not verified by this review;
+native build/execution, private assembly/delivery and phone tests remain pending.
+
+## Admission metadata source validation (2026-10-01)
+
+Local source/tooling checks PASS: device-source80, integration51 and package
+tools118 (249 total), both workflow YAML parses, Bash syntax and diff checks.
+These checks do not execute Objective-C or establish Apple runtime behavior.
+The existing native fixture now gates six isolated configurations, including
+read-only admission mode, using fresh exact mode-tagged results and an admission
+case-suite pass marker. Cases exercise synthetic image/code/section pins,
+read/mapping failures, no CAS or slot writes, changed-reference cleanup, genuine
+inherited-method exclusion, instance/metaclass matching, repeated fixed selectors,
+unknown/ambiguous ABI metadata, caps/deadlines, no guest method/resolver invocation,
+strict numeric/identifier schema and embedded-NUL/DEL rejection.
+
+Parent independently reread the private baseline section metadata and the
+188-byte admission-body digest; only that SHA-256 is in public production source.
+Output is bounded code metadata, never arguments, return values or full type
+encodings. Example runtime classes do not establish category/IMP origin or caller
+ownership. Final independent review, Apple compile/native execution, private
+assembly/delivery and signed-phone acceptance remain pending at this checkpoint.
+All viewing overrides are off; no Highlights fix is claimed.
+
+## Admission metadata candidate approval (2026-10-01)
+
+Owner approved the proposed read-only diagnostic. Implementation and synthetic
+validation are in progress under ADR0003. All viewing overrides must remain off
+in this mode. Only the three fixed restored selector references, declared-method
+code identifiers and primitive signature metadata may be inspected/reported;
+no new call observer, guest method invocation or profile-data fetch is approved.
+Apple build/execution, private assembly/delivery and phone acceptance are NOT RUN
+at this checkpoint. RX, immutable guest bytes and all existing vault/lifecycle
+safeguards remain unchanged. This is discovery, not a confirmed Highlights fix.
+
+## Early-startup signed-phone outcome (2026-10-01)
+
+Owner supplied marker `integration-23-highlights-earlyviewing1`, PID26032,
+and explicitly confirmed Highlights were missing. This is FAIL for the requested
+feature, superseding the candidate's pending Highlights test below.
+
+The report records earlyMode=1, earlyStatus=2, earlyMatches=1 and earlyRetained=1:
+the targeted pointer installed and was retained at load completion. Retention is
+not rechecked continuously by later samples. Observer start records zero direct
+calls; that does not exclude other earlier/bypass paths. Supplied 5-20s samples
+record five completed direct consumption overrides and Objective-C c0=5/l0=1,
+observing delivered true. directLast=0 is only the last natural result, not a
+per-call history. Method-only override remains disabled. Creation is unchanged
+(c1=2/l1=0); exact model/component/height counters c2..c5 remain zero and their
+last values unknown. Complete supplied trees (n=330/w=2/r=0/trunc=0/err=0)
+exclude the exact monitored cell only in bounded sampled UIKit root subtrees.
+No absent-server-data, creation-gate necessity, version incompatibility or
+specific downstream cause is established. Early consumption timing alone did
+not restore Highlights in this run.
+
+Positive Keychain controls READY with independent readback; host sentinel
+UNCHANGED. Supplied pre-bookmark, post-bookmark and post-loader stages deny
+synthetic host file read/write and host-only Keychain, expose the expected app-ID
+control and find signing exports ABSENT. Migration is NOT RUN/SKIPPED as designed.
+Fixed immutable guest selection and full portrait geometry are recorded. The
+extension is revoked/completed; getpgid presence followed by ESRCH absence is
+observed, while signal-zero pre-revoke EPERM leaves settlement unproved. No new
+audio/calculator-return or three-cold-launch narrative was supplied, so those
+separate checks are not upgraded. This is not a security certification.
+
+Evidence-only update; no new runtime policy, guest/RX byte, override, IPA or
+deployment change. Continue bounded read-only downstream investigation.
+Local diagnostic source checks: 12/12 PASS; diff check PASS. Read-only SHA-256
+checks match the preserved baseline and delivered early candidate digests.
+Additional bounded static inspection finds zero on-disk base-method pointers in
+the three selected Highlights class/metaclass RO records. Decoded objc_const
+contains no literal 32/64-bit references to their RO/base-method addresses;
+this does not exclude encoded/indirect restoration. No new callable owner/ABI
+is established from these records. Only the existing isolated decompressor ran
+in synthetic memory; no guest initialization, licensing, endpoint or live data
+access occurred. Local analysis helper remains ignored/private.
+
+Independent bounded scan of file-backed ARM64 __text finds zero direct BLs to
+the previously identified admission function 0x1bac4d60. This excludes only that
+direct-call encoding in the scanned section, not indirect calls, wrappers or
+other executable sections. Parent independently verifies the sole literal
+absolute qword for that function at 0x3c401a0 in __objc_clsrefs. Its runtime
+dispatch use/writability and callable owner are not established. Disassembly
+uses x20 as the initial receiver without loading it from x0; an ordinary
+Objective-C/C wrapper signature cannot be assumed. No guessed hook is added.
+Decision pending: separately scoped, read-only runtime metadata diagnostics to
+resolve the three fixed restored selector references/admission path, without
+forcing another gate, fetching data or changing RX/vault safeguards. Exact
+mapping, metadata validity, ABI and synthetic privacy/forwarding validation must
+precede any additional call observer; metadata discovery itself must not invoke
+guest methods. No new candidate has been implemented or built.
+
 ## Early-startup Apple execution and immutable assembly (2026-10-01)
 
 Actions run 36914115481 at source98aa7c9d009902e904a6c7839e0ca2e6a763a8a1

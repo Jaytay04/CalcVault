@@ -461,6 +461,10 @@ static BOOL CVLPHighlightsDirectRunFixture(NSString **failure) {
 #endif
 }
 
+#if defined(CVLP_HIGHLIGHTS_TESTING)
+#import "AdmissionMetadataFixtureCases.h"
+#endif
+
 BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
     fprintf(stderr, "CV_HIGHLIGHTS_FIXTURE_STAGE core-start\n");
     if (failure != NULL) { *failure = nil; }
@@ -850,6 +854,10 @@ BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
     fprintf(stderr, "CV_HIGHLIGHTS_FIXTURE_STAGE forwarding-complete\n");
     if (!CVLPHighlightsDirectRunFixture(failure)) { return NO; }
     fprintf(stderr, "CV_HIGHLIGHTS_FIXTURE_STAGE direct-complete\n");
+#if defined(CVLP_HIGHLIGHTS_TESTING)
+    if (!CVLPAdmissionRunFixtureCases(failure)) { return NO; }
+    fprintf(stderr, "CV_ADMISSION_METADATA_FIXTURE_PASS\n");
+#endif
     [CVLPFixtureDiagnosticLines removeAllObjects];
     CVLPHighlightsState.directLast = -1;
     CVLPHighlightsState.directCalls = CVLPHighlightsState.directOverrideCalls = 0;
@@ -977,9 +985,9 @@ int main(void) {
                 encoding:NSUTF8StringEncoding error:NULL];
             return 1;
         }
-        NSString *result = [NSString stringWithFormat:@"CV_HIGHLIGHTS_FIXTURE_PASS viewing=%d direct=%d early=%d\n",
+        NSString *result = [NSString stringWithFormat:@"CV_HIGHLIGHTS_FIXTURE_PASS viewing=%d direct=%d early=%d admission=%d\n",
             CVLPHighlightsViewingExperimentMode, CVLPHighlightsDirectViewingExperimentMode,
-            CVLPHighlightsEarlyViewingExperimentMode];
+            CVLPHighlightsEarlyViewingExperimentMode, CVLP_HIGHLIGHTS_ADMISSION_METADATA];
         if (![result writeToFile:resultPath atomically:YES encoding:NSUTF8StringEncoding error:NULL]) {
             fprintf(stderr, "CV_HIGHLIGHTS_FIXTURE_FAIL result_write\n");
             return 1;

@@ -114,8 +114,9 @@ class EarlyLoaderFixtureTests(unittest.TestCase):
     def test_fixture_is_textually_linked_and_reports_numeric_mode_fields(self):
         self.assertIn('#import "CVLPEarlyLoaderFixture.m"', self.highlights_fixture)
         self.assertIn("CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT", self.highlights_fixture)
+        self.assertIn("CVLP_HIGHLIGHTS_ADMISSION_METADATA", self.highlights_fixture)
         self.assertIn(
-            'CV_HIGHLIGHTS_FIXTURE_PASS viewing=%d direct=%d early=%d\\n',
+            'CV_HIGHLIGHTS_FIXTURE_PASS viewing=%d direct=%d early=%d admission=%d\\n',
             self.highlights_fixture,
         )
         self.assertIn("CVLPHighlightsEarlyViewingExperimentMode", self.highlights_fixture)

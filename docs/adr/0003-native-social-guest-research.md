@@ -4,6 +4,47 @@ Status: separate integration candidate authorized after owner acceptance of port
 
 ## Integration candidate 23: private immutable TikTok guest
 
+### Read-only admission metadata discovery (2026-10-01)
+
+The owner approved a separate diagnostic after the early consumption override
+ran but Highlights remained missing. Enable independent default-off
+`highlights_admission_metadata`, requiring the existing diagnostic input and
+excluding all three viewing overrides. Marker:
+`integration-23-highlights-admission1`. Existing observations remain pass-through;
+this candidate must not force any feature result.
+
+After startup, read only three fixed restored selector references from the exact
+UUID/architecture/header/section/code-pinned guest image. Validate mappings,
+overflow, the existing admission pointer and a SHA-256 code fingerprint before
+reading; do not mutate instructions, slots or page protections. Never treat an
+arbitrary pointer as a selector or invoke the unidentified admission function.
+Match opaque values against selectors from non-inherited runtime method lists
+on registered classes defined by the pinned image. Only such matches may report
+bounded code identifiers, argument counts and one-character return-kind tokens
+(scalar, void or opaque object/class/selector/pointer kinds, never pointee types,
+class names from encodings or return values). A runtime class may
+include category methods from another image: the example class does not establish
+method declaration origin, implementation provenance or the static caller's owner.
+Runtime metadata APIs may realize/allocate metadata and
+cannot be preempted mid-call; check time and count bounds around them.
+
+Run discovery at most twice within the existing recording lifetime. Reject
+changed reference slots, malformed identifiers and stale/late output. No guest
+method invocation, resolver lookup, new call hook, object/argument inspection,
+data fetch, endpoint, profile content, account credential, cookie or private URL
+collection is authorized. Incomplete discovery means unknown, not absence.
+Apple's [declared-method metadata APIs](https://github.com/apple-oss-distributions/objc4/blob/main/runtime/runtime.h)
+provide selector names and method signatures without intentionally calling the
+method. Avoid arbitrary-selector APIs, whose [implementation](https://github.com/apple-oss-distributions/objc4/blob/main/runtime/objc-sel.mm)
+can dereference the supplied pointer.
+
+Preserve RX/guest bytes, identity, guest data directory, portrait, browser and
+download routes, credential gates and lifecycle revocation. Preserve earlier
+IPAs. Synthetic mapping/metadata/privacy tests, native Apple execution, immutable
+assembly/readback and private delivery precede owner-operated phone testing.
+No additional observer is authorized until its owner/signature is independently
+verified; resolving metadata alone does not prove execution or fix Highlights.
+
 ### Temporary pre-initializer viewing experiment (2026-10-01)
 
 The owner approved a separate early-startup test after the signed-phone direct
