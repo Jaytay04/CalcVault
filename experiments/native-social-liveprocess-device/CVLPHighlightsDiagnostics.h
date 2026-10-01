@@ -11,6 +11,14 @@
 #import <stdint.h>
 #import "CVLPProbe.h"
 
+#ifndef CVLP_HIGHLIGHTS_VIEWING_EXPERIMENT
+#define CVLP_HIGHLIGHTS_VIEWING_EXPERIMENT 0
+#endif
+
+#if CVLP_HIGHLIGHTS_VIEWING_EXPERIMENT != 0 && CVLP_HIGHLIGHTS_VIEWING_EXPERIMENT != 1
+#error CVLP_HIGHLIGHTS_VIEWING_EXPERIMENT must be 0 or 1
+#endif
+
 NS_ASSUME_NONNULL_BEGIN
 
 @interface CVLPProbe (CVLPHighlightsDiagnosticSink)
@@ -29,6 +37,7 @@ BOOL CVLPHighlightsRunFixtureSelfTest(NSString * _Nullable * _Nullable failure);
 #endif
 
 enum {
+    CVLPHighlightsViewingExperimentMode = CVLP_HIGHLIGHTS_VIEWING_EXPERIMENT,
     CVLPHighlightsMaximumEvents = 26,
     CVLPHighlightsMaximumSamples = 24,
     CVLPHighlightsMaximumClasses = 100000,
@@ -83,6 +92,7 @@ typedef NS_ENUM(NSUInteger, CVLPHighlightsTarget) {
 
 typedef struct {
     uint16_t counts[CVLPHighlightsTargetCount];
+    uint16_t overrideCalls;
     int lastConsumption;
     int lastCreation;
     int lastModelPresence;
@@ -144,6 +154,28 @@ static CVLPHighlightsTreeSummary CVLPHighlightsObserverLastTree(CVLPHighlightsOb
 
 static uint16_t CVLPHighlightsSaturatingIncrement(uint16_t value) {
     return value < CVLPHighlightsCountMaximum ? (uint16_t)(value + 1) : value;
+}
+
+static BOOL CVLPHighlightsShouldOverrideConsumption(CVLPHighlightsTarget target, SEL selector) {
+#if CVLP_HIGHLIGHTS_VIEWING_EXPERIMENT
+    return target == CVLPHighlightsConsumptionTarget &&
+        selector == sel_registerName("enableStoryHighlightConsumption");
+#else
+    (void)target;
+    (void)selector;
+    return NO;
+#endif
+}
+
+static void CVLPHighlightsRecordOverrideInvocation(void) {
+    os_unfair_lock_lock(&CVLPHighlightsStateLock);
+    if (CVLPHighlightsRecording && CACurrentMediaTime() - CVLPHighlightsStartedAt >= CVLPHighlightsDeadline) {
+        CVLPHighlightsRecording = NO;
+    }
+    if (CVLPHighlightsRecording) {
+        CVLPHighlightsState.overrideCalls = CVLPHighlightsSaturatingIncrement(CVLPHighlightsState.overrideCalls);
+    }
+    os_unfair_lock_unlock(&CVLPHighlightsStateLock);
 }
 
 static void CVLPHighlightsRecordInvocation(CVLPHighlightsTarget target, int valueKind, int integerValue, double doubleValue) {
@@ -417,11 +449,16 @@ static CVLPHighlightsInstallStatus CVLPHighlightsInstallClassBoolean(
     SEL exactSelector = selector;
     id block = ^BOOL(__unsafe_unretained id receiver) {
         IMP invocation = CVLPHighlightsReadForwarder(&original);
-        BOOL result = ((BOOL (*)(id, SEL))invocation)((id)receiver, exactSelector);
+        BOOL naturalResult = ((BOOL (*)(id, SEL))invocation)((id)receiver, exactSelector);
         int originalErrno = errno;
-        CVLPHighlightsRecordInvocation(target, 1, result ? 1 : 0, 0.0);
+        CVLPHighlightsRecordInvocation(target, 1, naturalResult ? 1 : 0, 0.0);
+        BOOL deliveredResult = naturalResult;
+        if (CVLPHighlightsShouldOverrideConsumption(target, exactSelector)) {
+            CVLPHighlightsRecordOverrideInvocation();
+            deliveredResult = YES;
+        }
         errno = originalErrno;
-        return result;
+        return deliveredResult;
     };
     IMP replacement = imp_implementationWithBlock(block);
     if (replacement == NULL) { return CVLPHighlightsInstallFailed; }
@@ -606,7 +643,7 @@ static const char *CVLPHighlightsFieldNames[] = {
     "seq", "ms", "reason", "st0", "st1", "st2", "st3", "st4", "st5",
     "c0", "c1", "c2", "c3", "c4", "c5", "l0", "l1", "l2", "l3", "l4", "l5",
     "n", "w", "r", "hidden", "alpha", "width", "height", "trunc", "err",
-    "scope", "why0", "why1", "classes0", "classes1",
+    "scope", "why0", "why1", "classes0", "classes1", "mode", "overrideCalls",
 };
 
 static BOOL CVLPHighlightsParseInteger(const char *value) {
@@ -653,7 +690,7 @@ static BOOL CVLPHighlightsLineIsSanitized(NSString *line) {
     });
     if ([line rangeOfCharacterFromSet:allowedCharacters.invertedSet].location != NSNotFound) { return NO; }
     NSArray<NSString *> *parts = [line componentsSeparatedByString:@" "];
-    if (parts.count != 37 || ![parts[0] isEqualToString:@"CVLP_HIGHLIGHTS"]) { return NO; }
+    if (parts.count != 39 || ![parts[0] isEqualToString:@"CVLP_HIGHLIGHTS"]) { return NO; }
     NSString *phase = nil;
     for (NSUInteger index = 1; index < parts.count; index++) {
         NSString *part = parts[index];
@@ -714,6 +751,12 @@ static BOOL CVLPHighlightsLineIsSanitized(NSString *line) {
         } else if (index == 35 || index == 36) {
             long long classes = strtoll(value, NULL, 10);
             if (classes < 0 || classes > CVLPHighlightsMaximumClasses) { return NO; }
+        } else if (index == 37) {
+            if (strtoll(value, NULL, 10) != CVLPHighlightsViewingExperimentMode) { return NO; }
+        } else if (index == 38) {
+            long long overrideCalls = strtoll(value, NULL, 10);
+            if (overrideCalls < 0 || overrideCalls > CVLPHighlightsCountMaximum ||
+                (CVLPHighlightsViewingExperimentMode == 0 && overrideCalls != 0)) { return NO; }
         }
     }
     return phase != nil;
@@ -859,7 +902,7 @@ static BOOL CVLPHighlightsLineIsSanitized(NSString *line) {
         @"CVLP_HIGHLIGHTS phase=%@ seq=%lu ms=%llu reason=%d st0=%d st1=%d st2=%d st3=%d st4=%d st5=%d "
          "c0=%u c1=%u c2=%u c3=%u c4=%u c5=%u l0=%d l1=%d l2=%d l3=%d l4=%d l5=%.6g "
          "n=%lu w=%lu r=%lu hidden=%d alpha=%.6g width=%.6g height=%.6g trunc=%d err=%d "
-         "scope=1 why0=%d why1=%d classes0=%lu classes1=%lu",
+         "scope=1 why0=%d why1=%d classes0=%lu classes1=%lu mode=%d overrideCalls=%u",
         phase, (unsigned long)sequence, elapsed, reason,
         self->_installStatuses[0], self->_installStatuses[1], self->_installStatuses[2],
         self->_installStatuses[3], self->_installStatuses[4], self->_installStatuses[5],
@@ -869,7 +912,8 @@ static BOOL CVLPHighlightsLineIsSanitized(NSString *line) {
         state.lastHeight, (unsigned long)tree.nodes, (unsigned long)tree.windows, (unsigned long)tree.rows,
         tree.hidden, tree.alpha, tree.width, tree.height, tree.truncated, tree.error,
         self->_classLookupReasons[0], self->_classLookupReasons[1],
-        (unsigned long)self->_classLookupClasses[0], (unsigned long)self->_classLookupClasses[1]];
+        (unsigned long)self->_classLookupClasses[0], (unsigned long)self->_classLookupClasses[1],
+        CVLPHighlightsViewingExperimentMode, (unsigned int)state.overrideCalls];
     if (!CVLPHighlightsLineIsSanitized(line)) { return; }
     self->_eventCount++;
     CVLPHighlightsStoreLastTree(self, tree);

@@ -119,6 +119,19 @@ class HighlightsDiagnosticsSourceTests(unittest.TestCase):
         self.assertIn("errno = originalErrno;", self.header)
         self.assertIn("CVLPHighlightsState.counts[target]", self.header)
         self.assertIn("CVLPHighlightsCountMaximum = 65535", self.header)
+        self.assertIn("#define CVLP_HIGHLIGHTS_VIEWING_EXPERIMENT 0", self.header)
+        self.assertIn("CVLPHighlightsShouldOverrideConsumption(target, exactSelector)", self.header)
+        self.assertIn('selector == sel_registerName("enableStoryHighlightConsumption")', self.header)
+        self.assertIn("target == CVLPHighlightsConsumptionTarget", self.header)
+        consumption_wrapper = self.header.split("id block = ^BOOL(__unsafe_unretained id receiver) {", 1)[1].split("};", 1)[0]
+        self.assertIn("BOOL naturalResult = ((BOOL (*)(id, SEL))invocation)", consumption_wrapper)
+        self.assertLess(
+            consumption_wrapper.index("CVLPHighlightsRecordInvocation(target, 1, naturalResult ? 1 : 0, 0.0)"),
+            consumption_wrapper.index("CVLPHighlightsShouldOverrideConsumption(target, exactSelector)"),
+        )
+        self.assertIn("deliveredResult = YES", consumption_wrapper)
+        self.assertIn("CVLPHighlightsRecordOverrideInvocation", consumption_wrapper)
+        self.assertIn("if (CVLPHighlightsRecording)", self.header.split("static void CVLPHighlightsRecordOverrideInvocation", 1)[1].split("static void CVLPHighlightsRecordInvocation", 1)[0])
         self.assertNotIn("imp_removeBlock", self.header)
         self.assertNotIn("method_setImplementation(method, original)", self.header)
         self.assertNotIn("@try", self.header[:self.header.index("static CVLPHighlightsTreeSummary CVLPHighlightsSampleTreeSafely")])
@@ -136,9 +149,12 @@ class HighlightsDiagnosticsSourceTests(unittest.TestCase):
         self.assertIn('CVLPHighlightsRecording = NO;', self.header)
         self.assertIn('[self appendLineForPhase:@"stopped"', self.header)
         self.assertIn('line.length > 2048', self.header)
-        self.assertIn('parts.count != 37', self.header)
-        self.assertIn('"scope", "why0", "why1", "classes0", "classes1"', self.header)
-        self.assertIn('scope=1 why0=%d why1=%d classes0=%lu classes1=%lu', self.header)
+        self.assertIn('parts.count != 39', self.header)
+        self.assertIn('"scope", "why0", "why1", "classes0", "classes1", "mode", "overrideCalls"', self.header)
+        self.assertIn('scope=1 why0=%d why1=%d classes0=%lu classes1=%lu mode=%d overrideCalls=%u', self.header)
+        self.assertIn('strtoll(value, NULL, 10) != CVLPHighlightsViewingExperimentMode', self.header)
+        self.assertIn('(CVLPHighlightsViewingExperimentMode == 0 && overrideCalls != 0)', self.header)
+        self.assertIn('overrideCalls > CVLPHighlightsCountMaximum', self.header)
         self.assertIn('hasPrefix:@"CVLP_HIGHLIGHTS "', self.header)
         self.assertIn('containsObject:phase', self.header)
         start = self.header.split('- (void)startOnMainQueue {', 1)[1].split('- (void)scheduleSample:', 1)[0]
@@ -164,17 +180,23 @@ class HighlightsDiagnosticsSourceTests(unittest.TestCase):
     def test_fixture_exercises_pass_through_and_finite_report_contract(self):
         self.assertIn("CV_HIGHLIGHTS_FIXTURE_PASS", self.fixture)
         self.assertIn("feature_owner_unique_hook", self.fixture)
-        self.assertIn("boolean_false_distinct_from_unknown", self.fixture)
+        self.assertIn("boolean_false_natural_observation_distinct_from_delivery", self.fixture)
+        self.assertIn("boolean_true_natural_value_and_observation_preserved", self.fixture)
+        self.assertIn("creation_false_unchanged_by_experiment", self.fixture)
+        self.assertIn("creation_true_unchanged_by_experiment", self.fixture)
+        self.assertIn("override_requires_exact_selector_and_target", self.fixture)
+        self.assertIn("other_selector_remains_natural", self.fixture)
+        self.assertIn("stopped_recording_freezes_count_but_experiment_delivery_continues", self.fixture)
         self.assertIn("original_exception_forwarded", self.fixture)
+        self.assertIn("consumption_original_exception_forwarded_without_override", self.fixture)
         self.assertIn("model_presence_without_extra_getter", self.fixture)
         self.assertIn("wrong_abi_not_modified", self.fixture)
         self.assertIn("inherited_method_not_modified", self.fixture)
         self.assertIn("runtime_image_ambiguity_does_not_modify_either_owner", self.fixture)
-        self.assertIn("stopped_wrappers_forward_without_recording", self.fixture)
         self.assertIn("counter_saturates", self.fixture)
         self.assertIn("late_hook_disables_recording", self.fixture)
         self.assertIn("terminal_line_bound_and_no_post_stop_emit", self.fixture)
-        self.assertIn("sanitizer_enforces_scope_reason_and_class_count_bounds", self.fixture)
+        self.assertIn("sanitizer_enforces_scope_mode_and_numeric_bounds", self.fixture)
         self.assertIn("discovery_never_invokes_resolvers", self.fixture)
         for case in (
             "image_inventory_unique_owner",
@@ -191,7 +213,7 @@ class HighlightsDiagnosticsSourceTests(unittest.TestCase):
             "inherited_class_method_is_not_a_declaration",
             "same_image_duplicate_declarations_are_ambiguous",
             "runtime_image_ambiguity_does_not_modify_either_owner",
-            "sanitizer_enforces_scope_reason_and_class_count_bounds",
+            "sanitizer_enforces_scope_mode_and_numeric_bounds",
         ):
             self.assertIn(case, self.fixture)
         self.assertNotIn("UIApplicationMain", self.fixture)

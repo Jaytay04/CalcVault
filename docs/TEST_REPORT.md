@@ -1,5 +1,75 @@
 # CalcVault test report
 
+## Highlights viewing-only implementation checks (2026-10-01)
+
+PASS: 62 local device-adapter source checks and 41 integration checks. Both
+workflow YAML files parse and integration build script passes Bash syntax.
+Independent read-only review finds no remaining forwarding/scope blocker.
+Invalid option combinations fail rather than silently selecting another build.
+The compile-time macro defaults 0; only the exact consumption target/selector
+can deliver true after one original call. Scalar l0 remains natural; mode and
+overrideCalls explicitly distinguish the experiment. The latter freezes after
+the recording deadline/stop; delivery override persists until process exit.
+Creation, exceptions/errno and displaced-IMP chaining are preserved by design.
+
+Native fixture now exercises both natural Boolean results, consumption/creation
+exceptions, unchanged creation/other selectors, post-stop delivery, bounded
+schema and existing ambiguous/incomplete/wrong-ABI checks. Native execution is
+NOT RUN here: Windows source tests do not substitute for the two Apple simulator
+fixture configurations. Build/IPA/phone acceptance and a causal Highlights fix
+remain pending. No licensing, immutable guest byte or security-gate changes.
+
+## Highlights viewing-only experiment approval (2026-10-01)
+
+Owner explicitly approves the proposed separate experiment. ADR 0003 records the
+narrow exception: only consumption returns true after one original invocation;
+natural observations remain distinct, creation is unchanged, and no persistent
+preference or security policy changes. Default-off and experimental synthetic
+tests, Apple compilation and private assembly/delivery are pending. Device
+Highlights activation and causality remain NOT RUN, not an inferred fix.
+
+## Highlights diagnostic 2 phone result (2026-10-01)
+
+Owner supplied `integration-23-highlights2` through the 20-second sample. All
+six observers report installed. Both image scans complete with `scope=1`,
+`why0=why1=0` and 91,210 classes; the start line is at 44ms. This verifies the
+revised lookup on the signed phone for this run. Consumption invocation count
+reaches 8 and creation count 2; each supplied post-start sample has last result
+false for both. Only the last value is retained, so the report does not prove
+every individual call returned false.
+
+Model getter, mount, UI update and height counters remain zero. Complete samples
+at 10/15/20 seconds traverse 330 nodes across two windows with no exact Highlight
+cell (`r=0`, `trunc=0`, `err=0`). The initial 5-second tree is truncated and is
+not used to establish absence. This supports a feature-gate lead; it does not
+prove that enabling the gate would mount a row, that server data is available,
+or why the current effective result is false.
+
+Read-only bounded static tracing confirms the previously recovered methods
+reach separate initialization/configuration paths, rather than a viewport-only
+calculation. Local baseline digest still matches the pinned input. Initializer
+fields alone do not establish default semantics or distinguish local, cached,
+remote, account or version eligibility. No app initializer, private endpoint,
+real account traffic, feature override or licensing code was executed/modified.
+
+Supplied boundary controls are READY, sentinel unchanged, and all three stages
+through post-loader deny host-file read/write and host-only Keychain while the
+app-ID control remains exposed. Signing exports are absent; migration is not
+repeated. Revocation/completion and getpgid presence-to-absence are observed;
+signal-zero liveness remains unproved. Audio/calculator behavior was not separately
+narrated in this report. No new IPA/build or confirmed Highlights fix this slice.
+
+Decision candidate: a separate default-off experiment returning true only from
+`enableStoryHighlightConsumption` after executing its original implementation
+exactly once. Preserve the natural result in scalar diagnostics, keep creation
+and other guest functions unchanged, and make no persistent setting/data change.
+Keep the working candidate available. Exact ABI/unique-owner checks, forwarding,
+exceptions/errno, credential protection and revocation remain required. Test
+whether the same profile then invokes the model/component path and displays
+usable Highlights; server eligibility may still prevent success. This experiment
+is proposed only: the current approved ADR explicitly excludes feature forcing,
+so implementation and delivery require a new owner decision.
+
 ## Highlights diagnostic 2 build and private assembly (2026-10-01)
 
 Delivery confirmed: the verified-private repository has the new published

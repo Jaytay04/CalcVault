@@ -31,6 +31,16 @@ class HighlightsAdapterTests(unittest.TestCase):
         self.assertIn('[CVLPHighlightsDiagnostics start];', updated)
         self.assertIn('untouched_report_transport();', updated)
         self.assertIn('// credential, bookmark and lifecycle sentinel', updated)
+        self.assertNotIn('#define CVLP_HIGHLIGHTS_VIEWING_EXPERIMENT', updated)
+
+    def test_viewing_experiment_is_explicit_and_separately_marked(self):
+        updated = adapter.transform(source(), viewing_experiment=True)
+        self.assertIn('#define CVLP_HIGHLIGHTS_VIEWING_EXPERIMENT 1\n#import "CVLPHighlightsDiagnostics.h"', updated)
+        self.assertIn('Build marker: integration-23-highlights-viewing1.', updated)
+        self.assertNotIn('Build marker: integration-23-highlights2.', updated)
+        self.assertIn('// credential, bookmark and lifecycle sentinel', updated)
+        with self.assertRaises(ValueError):
+            adapter.transform(updated, viewing_experiment=True)
 
     def test_reapplication_and_anchor_drift_fail(self):
         with self.assertRaises(ValueError):
@@ -59,14 +69,19 @@ class HighlightsAdapterTests(unittest.TestCase):
         self.assertIn('simctl install "$simulator" "$fixture_app"', script)
         self.assertIn('org.example.synthetic.highlights-observer-tests', script)
         self.assertIn("grep -q '^CV_HIGHLIGHTS_FIXTURE_PASS$'", script)
+        self.assertIn('for viewing_mode in 0 1; do', script)
+        self.assertIn('-DCVLP_HIGHLIGHTS_VIEWING_EXPERIMENT="$viewing_mode"', script)
         self.assertIn('ditto "$device_host" "$output/Payload/LiveContainer.app"', script)
         self.assertNotIn('ditto "$fixture_app"', script)
         workflow = (root.parents[1] / '.github/workflows/native-social-integration.yml').read_text()
-        self.assertEqual(workflow.count('default: false'), 2)
+        self.assertEqual(workflow.count('default: false'), 4)
         self.assertIn('if: inputs.highlights_diagnostics', workflow)
         entry = (root.parents[1] / '.github/workflows/native-social-liveprocess-device.yml').read_text()
         self.assertIn('highlights_diagnostics: ${{ inputs.highlights_diagnostics }}', entry)
         self.assertIn('if: ${{ inputs.integration_guest }}', entry)
+        self.assertIn('highlights_viewing_experiment: ${{ inputs.highlights_viewing_experiment }}', entry)
+        self.assertIn('test "$VIEWING" != true || test "$DIAGNOSTICS" = true', workflow)
+        self.assertIn('test "$VIEWING" != true && test "$DIAGNOSTICS" != true', entry)
 
 
 if __name__ == '__main__':

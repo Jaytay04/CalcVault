@@ -15,6 +15,10 @@ on:
         description: 'Enable bounded Highlights observations (requires integration_guest)'
         type: boolean
         default: false
+      highlights_viewing_experiment:
+        description: 'Temporary viewing-only experiment (requires integration_guest and highlights_diagnostics)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -26,6 +30,11 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
+      - name: Reject Highlights options outside integration
+        env:
+          VIEWING: ${{ inputs.highlights_viewing_experiment }}
+          DIAGNOSTICS: ${{ inputs.highlights_diagnostics }}
+        run: test "$VIEWING" != true && test "$DIAGNOSTICS" != true
       - name: Test synthetic packaging rules
         run: python3 -m unittest discover -s experiments/native-social-liveprocess-device -p 'test_*.py' -v
       - name: Select pinned toolchain and source
@@ -512,3 +521,4 @@ jobs:
     uses: ./.github/workflows/native-social-integration.yml
     with:
       highlights_diagnostics: ${{ inputs.highlights_diagnostics }}
+      highlights_viewing_experiment: ${{ inputs.highlights_viewing_experiment }}

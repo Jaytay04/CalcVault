@@ -9,6 +9,11 @@ static NSUInteger CVLPFixtureMountCalls = 0;
 static NSUInteger CVLPFixtureUpdateCalls = 0;
 static NSUInteger CVLPFixtureHeightCalls = 0;
 static BOOL CVLPFixtureConsumptionResult = NO;
+static BOOL CVLPFixtureShouldThrowConsumption = NO;
+static BOOL CVLPFixtureCreationResult = NO;
+static BOOL CVLPFixtureShouldThrowCreation = NO;
+static BOOL CVLPFixtureAlternateResult = NO;
+static NSUInteger CVLPFixtureAlternateCalls = 0;
 static double CVLPFixtureHeightResult = 42.75;
 static id CVLPFixtureModelResult;
 static NSException *CVLPFixtureForwardedException;
@@ -66,17 +71,26 @@ static BOOL CVLPFixtureInterveningHook(id receiver, SEL selector) {
 @interface CVLPFixtureFeatureOwner : NSObject
 + (BOOL)enableStoryHighlightConsumption;
 + (BOOL)enableStoryHighlightCreation;
++ (BOOL)alternateFeatureEligibility;
 @end
 
 @implementation CVLPFixtureFeatureOwner
 + (BOOL)enableStoryHighlightConsumption {
     CVLPFixtureConsumptionCalls++;
     errno = EDOM;
+    if (CVLPFixtureShouldThrowConsumption) { @throw CVLPFixtureForwardedException; }
     return CVLPFixtureConsumptionResult;
 }
 + (BOOL)enableStoryHighlightCreation {
     CVLPFixtureCreationCalls++;
-    @throw CVLPFixtureForwardedException;
+    errno = EILSEQ;
+    if (CVLPFixtureShouldThrowCreation) { @throw CVLPFixtureForwardedException; }
+    return CVLPFixtureCreationResult;
+}
++ (BOOL)alternateFeatureEligibility {
+    CVLPFixtureAlternateCalls++;
+    errno = ERANGE;
+    return CVLPFixtureAlternateResult;
 }
 @end
 
@@ -199,6 +213,11 @@ BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
     CVLPFixtureUpdateCalls = 0;
     CVLPFixtureHeightCalls = 0;
     CVLPFixtureConsumptionResult = NO;
+    CVLPFixtureShouldThrowConsumption = NO;
+    CVLPFixtureCreationResult = NO;
+    CVLPFixtureShouldThrowCreation = NO;
+    CVLPFixtureAlternateResult = NO;
+    CVLPFixtureAlternateCalls = 0;
     CVLPFixtureHeightResult = 42.75;
     CVLPFixtureModelResult = [NSObject new];
     CVLPFixtureForwardedException = [NSException exceptionWithName:@"CVLPFixtureForwarded" reason:@"fixed" userInfo:nil];
@@ -355,25 +374,88 @@ BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
         sel_registerName("enableStoryHighlightCreation"), CVLPHighlightsCreationTarget,
         TTKProfileBizDataStoryHighlightInfoModel.class, NULL);
     if (!CVLPFixtureRequire(creationStatus == CVLPHighlightsInstallInstalled, @"creation_hook", failure)) { return NO; }
+    CVLPHighlightsInstallStatus alternateStatus = CVLPHighlightsInstallClassBoolean(
+        sel_registerName("alternateFeatureEligibility"), CVLPHighlightsConsumptionTarget,
+        TTKProfileBizDataStoryHighlightInfoModel.class, NULL);
+    if (!CVLPFixtureRequire(alternateStatus == CVLPHighlightsInstallInstalled,
+        @"alternate_boolean_hook", failure)) { return NO; }
     fprintf(stderr, "CV_HIGHLIGHTS_FIXTURE_STAGE runtime-image-complete\n");
+
+    SEL consumptionSelector = sel_registerName("enableStoryHighlightConsumption");
+    SEL alternateSelector = sel_registerName("alternateFeatureEligibility");
+    if (!CVLPFixtureRequire(
+        CVLPHighlightsShouldOverrideConsumption(CVLPHighlightsConsumptionTarget, consumptionSelector) ==
+            (CVLPHighlightsViewingExperimentMode == 1) &&
+        !CVLPHighlightsShouldOverrideConsumption(CVLPHighlightsConsumptionTarget, alternateSelector) &&
+        !CVLPHighlightsShouldOverrideConsumption(CVLPHighlightsCreationTarget, consumptionSelector),
+        @"override_requires_exact_selector_and_target", failure)) { return NO; }
+
+    errno = 0;
+    BOOL alternateResult = [CVLPFixtureFeatureOwner alternateFeatureEligibility];
+    if (!CVLPFixtureRequire(!alternateResult && CVLPFixtureAlternateCalls == 1 && errno == ERANGE &&
+        CVLPHighlightsState.overrideCalls == 0, @"other_selector_remains_natural", failure)) { return NO; }
+    CVLPHighlightsState.counts[CVLPHighlightsConsumptionTarget] = 0;
+    CVLPHighlightsState.lastConsumption = -1;
 
     if (!CVLPFixtureRequire(CVLPHighlightsState.counts[CVLPHighlightsConsumptionTarget] == 0 &&
         CVLPHighlightsState.lastConsumption == -1, @"boolean_unknown_before_call", failure)) { return NO; }
     errno = 0;
     BOOL consumptionResult = [CVLPFixtureFeatureOwner enableStoryHighlightConsumption];
-    if (!CVLPFixtureRequire(!consumptionResult && CVLPFixtureConsumptionCalls == 1 && errno == EDOM,
-        @"boolean_false_and_errno_forwarded_once", failure)) { return NO; }
+    if (!CVLPFixtureRequire(consumptionResult == (CVLPHighlightsViewingExperimentMode == 1) &&
+        CVLPFixtureConsumptionCalls == 1 && errno == EDOM,
+        @"boolean_false_natural_value_and_errno_forwarded_once", failure)) { return NO; }
     if (!CVLPFixtureRequire(CVLPHighlightsState.counts[CVLPHighlightsConsumptionTarget] == 1 &&
-        CVLPHighlightsState.lastConsumption == 0, @"boolean_false_distinct_from_unknown", failure)) { return NO; }
+        CVLPHighlightsState.lastConsumption == 0 &&
+        CVLPHighlightsState.overrideCalls == (CVLPHighlightsViewingExperimentMode == 1 ? 1 : 0),
+        @"boolean_false_natural_observation_distinct_from_delivery", failure)) { return NO; }
 
+    CVLPFixtureConsumptionResult = YES;
+    errno = 0;
+    BOOL naturalTrueResult = [CVLPFixtureFeatureOwner enableStoryHighlightConsumption];
+    if (!CVLPFixtureRequire(naturalTrueResult && CVLPFixtureConsumptionCalls == 2 && errno == EDOM &&
+        CVLPHighlightsState.lastConsumption == 1 && CVLPHighlightsState.counts[CVLPHighlightsConsumptionTarget] == 2 &&
+        CVLPHighlightsState.overrideCalls == (CVLPHighlightsViewingExperimentMode == 1 ? 2 : 0),
+        @"boolean_true_natural_value_and_observation_preserved", failure)) { return NO; }
+
+    CVLPFixtureShouldThrowConsumption = YES;
+    BOOL caughtConsumptionException = NO;
+    @try {
+        (void)[CVLPFixtureFeatureOwner enableStoryHighlightConsumption];
+    } @catch (NSException *exception) {
+        caughtConsumptionException = exception == CVLPFixtureForwardedException;
+    }
+    if (!CVLPFixtureRequire(caughtConsumptionException && CVLPFixtureConsumptionCalls == 3 &&
+        CVLPHighlightsState.overrideCalls == (CVLPHighlightsViewingExperimentMode == 1 ? 2 : 0),
+        @"consumption_original_exception_forwarded_without_override", failure)) { return NO; }
+    CVLPFixtureShouldThrowConsumption = NO;
+    CVLPFixtureConsumptionResult = NO;
+
+    CVLPFixtureCreationResult = NO;
+    errno = 0;
+    BOOL creationFalse = [CVLPFixtureFeatureOwner enableStoryHighlightCreation];
+    if (!CVLPFixtureRequire(!creationFalse && CVLPFixtureCreationCalls == 1 && errno == EILSEQ &&
+        CVLPHighlightsState.lastCreation == 0 && CVLPHighlightsState.overrideCalls ==
+            (CVLPHighlightsViewingExperimentMode == 1 ? 2 : 0),
+        @"creation_false_unchanged_by_experiment", failure)) { return NO; }
+    CVLPFixtureCreationResult = YES;
+    errno = 0;
+    BOOL creationTrue = [CVLPFixtureFeatureOwner enableStoryHighlightCreation];
+    if (!CVLPFixtureRequire(creationTrue && CVLPFixtureCreationCalls == 2 && errno == EILSEQ &&
+        CVLPHighlightsState.lastCreation == 1 && CVLPHighlightsState.overrideCalls ==
+            (CVLPHighlightsViewingExperimentMode == 1 ? 2 : 0),
+        @"creation_true_unchanged_by_experiment", failure)) { return NO; }
+    CVLPFixtureShouldThrowCreation = YES;
     BOOL caughtOriginalException = NO;
     @try {
         (void)[CVLPFixtureFeatureOwner enableStoryHighlightCreation];
     } @catch (NSException *exception) {
         caughtOriginalException = exception == CVLPFixtureForwardedException;
     }
-    if (!CVLPFixtureRequire(caughtOriginalException && CVLPFixtureCreationCalls == 1 &&
-        CVLPHighlightsState.counts[CVLPHighlightsCreationTarget] == 0, @"original_exception_forwarded", failure)) { return NO; }
+    if (!CVLPFixtureRequire(caughtOriginalException && CVLPFixtureCreationCalls == 3 &&
+        CVLPHighlightsState.counts[CVLPHighlightsCreationTarget] == 2 &&
+        CVLPHighlightsState.overrideCalls == (CVLPHighlightsViewingExperimentMode == 1 ? 2 : 0),
+        @"original_exception_forwarded", failure)) { return NO; }
+    CVLPFixtureShouldThrowCreation = NO;
 
     Class modelClass = objc_getClass("TTKProfileBizDataStoryHighlightInfoModel");
     CVLPHighlightsInstallStatus modelStatus = CVLPHighlightsInstallInstance(
@@ -476,14 +558,17 @@ BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
 
     CVLPHighlightsRecording = NO;
     uint16_t beforeStoppedCount = CVLPHighlightsState.counts[CVLPHighlightsConsumptionTarget];
-    (void)[CVLPFixtureFeatureOwner enableStoryHighlightConsumption];
+    uint16_t beforeStoppedOverrideCalls = CVLPHighlightsState.overrideCalls;
+    BOOL stoppedConsumptionResult = [CVLPFixtureFeatureOwner enableStoryHighlightConsumption];
     [(TTKProfileBizDataStoryHighlightInfoModel *)[modelClass new] storyHighlightInfo];
     [collection updateUI];
     (void)[collection viewHeight];
-    if (!CVLPFixtureRequire(CVLPFixtureConsumptionCalls == 4 && CVLPFixtureGetterCalls == 3 &&
+    if (!CVLPFixtureRequire(stoppedConsumptionResult == (CVLPHighlightsViewingExperimentMode == 1) &&
+        CVLPHighlightsState.overrideCalls == beforeStoppedOverrideCalls &&
+        CVLPFixtureConsumptionCalls == 6 && CVLPFixtureGetterCalls == 3 &&
         CVLPFixtureUpdateCalls == 2 && CVLPFixtureHeightCalls == 3 &&
         CVLPHighlightsState.counts[CVLPHighlightsConsumptionTarget] == beforeStoppedCount,
-        @"stopped_wrappers_forward_without_recording", failure)) { return NO; }
+        @"stopped_recording_freezes_count_but_experiment_delivery_continues", failure)) { return NO; }
 
     fprintf(stderr, "CV_HIGHLIGHTS_FIXTURE_STAGE forwarding-complete\n");
     CVLPHighlightsObserver *lineObserver = [CVLPHighlightsObserver new];
@@ -507,7 +592,8 @@ BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
         if (!CVLPFixtureRequire(CVLPHighlightsLineIsSanitized(line), @"diagnostic_schema", failure)) { return NO; }
     }
     NSString *validLine = CVLPFixtureDiagnosticLines.firstObject;
-    NSString *arbitraryText = [validLine stringByReplacingOccurrencesOfString:@"l0=0" withString:@"l0=secret"];
+    NSString *lastConsumptionField = [NSString stringWithFormat:@"l0=%d", CVLPHighlightsState.lastConsumption];
+    NSString *arbitraryText = [validLine stringByReplacingOccurrencesOfString:lastConsumptionField withString:@"l0=secret"];
     NSString *extraField = [validLine stringByAppendingString:@" private=1"];
     NSString *nonfiniteFloat = [validLine stringByReplacingOccurrencesOfString:@"l5=42.75" withString:@"l5=nan"];
     NSString *overflowFloat = [validLine stringByReplacingOccurrencesOfString:@"alpha=-1" withString:@"alpha=1e999"];
@@ -520,14 +606,33 @@ BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
     NSString *largeClassCount = [validLine stringByReplacingOccurrencesOfString:@"classes0=0" withString:@"classes0=100001"];
     NSString *negativeClassCount = [validLine stringByReplacingOccurrencesOfString:@"classes0=0" withString:@"classes0=-1"];
     NSString *maximumClassCount = [validLine stringByReplacingOccurrencesOfString:@"classes0=0" withString:@"classes0=100000"];
+    NSString *expectedMode = [NSString stringWithFormat:@"mode=%d", CVLPHighlightsViewingExperimentMode];
+    NSString *wrongMode = [validLine stringByReplacingOccurrencesOfString:expectedMode
+        withString:[NSString stringWithFormat:@"mode=%d", CVLPHighlightsViewingExperimentMode == 0 ? 1 : 0]];
+    NSString *overrideCallsField = [NSString stringWithFormat:@"overrideCalls=%u", (unsigned int)CVLPHighlightsState.overrideCalls];
+    NSString *negativeOverrideCalls = [validLine stringByReplacingOccurrencesOfString:overrideCallsField
+        withString:@"overrideCalls=-1"];
+    NSString *largeOverrideCalls = [validLine stringByReplacingOccurrencesOfString:overrideCallsField
+        withString:@"overrideCalls=65536"];
+    NSString *maximumOverrideCalls = [validLine stringByReplacingOccurrencesOfString:overrideCallsField
+        withString:@"overrideCalls=65535"];
+    NSString *disabledModeOverrideCalls = [validLine stringByReplacingOccurrencesOfString:expectedMode
+        withString:@"mode=0"];
+    disabledModeOverrideCalls = [disabledModeOverrideCalls stringByReplacingOccurrencesOfString:overrideCallsField
+        withString:@"overrideCalls=1"];
     if (!CVLPFixtureRequire(!CVLPHighlightsLineIsSanitized(arbitraryText) &&
         !CVLPHighlightsLineIsSanitized(extraField) && !CVLPHighlightsLineIsSanitized(nonfiniteFloat) &&
         !CVLPHighlightsLineIsSanitized(overflowFloat) && !CVLPHighlightsLineIsSanitized(missingField) &&
         !CVLPHighlightsLineIsSanitized(reorderedFields) && !CVLPHighlightsLineIsSanitized(wrongScope) &&
         !CVLPHighlightsLineIsSanitized(largeReason) && !CVLPHighlightsLineIsSanitized(negativeReason) &&
         !CVLPHighlightsLineIsSanitized(largeClassCount) && !CVLPHighlightsLineIsSanitized(negativeClassCount) &&
-        CVLPHighlightsLineIsSanitized(maximumClassCount),
-        @"sanitizer_enforces_scope_reason_and_class_count_bounds", failure)) { return NO; }
+        !CVLPHighlightsLineIsSanitized(wrongMode) &&
+        !CVLPHighlightsLineIsSanitized(negativeOverrideCalls) &&
+        !CVLPHighlightsLineIsSanitized(largeOverrideCalls) &&
+        !CVLPHighlightsLineIsSanitized(disabledModeOverrideCalls) &&
+        CVLPHighlightsLineIsSanitized(maximumClassCount) &&
+        CVLPHighlightsLineIsSanitized(maximumOverrideCalls) == (CVLPHighlightsViewingExperimentMode == 1),
+        @"sanitizer_enforces_scope_mode_and_numeric_bounds", failure)) { return NO; }
     return YES;
 }
 

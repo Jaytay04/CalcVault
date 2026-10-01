@@ -117,6 +117,17 @@ audio cessation. Do not mistake package checks for a successful device test.
 
 ## Opt-in Highlights diagnostic candidate
 
+The separately approved viewing experiment additionally requires
+`highlights_viewing_experiment=true`; it defaults false and invalid combinations
+fail before building. Its marker/artifact suffix is `highlights-viewing1`. Only
+`+enableStoryHighlightConsumption` returns true after one original invocation;
+the natural result remains `l0`. Creation and all other results are unchanged.
+No preference is written. The override lasts for the guest process, not just the
+two-minute observation window. Lock/revocation, pinned guest/RX bytes and ordinary
+builds remain unchanged. CI runs the synthetic fixture in both configurations;
+usable Highlights still requires owner phone evidence. The read-only descriptions
+below refer to observation-only mode, not this explicit experimental exception.
+
 Dispatch the registered `native-social-liveprocess-device.yml` workflow with
 `integration_guest=true` and `highlights_diagnostics=true`. Its reusable
 `native-social-integration.yml` workflow receives the default-off input, which
@@ -165,6 +176,12 @@ Diagnostic 2 appends `scope=1` for the verified anchor-image inventory,
 8 ambiguous declaration, and 9 anchor not encountered. `why=0` alone does not
 mean installation succeeded; interpret it with the corresponding `st` value.
 An incomplete lookup must never be treated as a false feature value.
+
+Both modes append `mode` (0 observation-only, 1 viewing experiment) and a
+saturating `overrideCalls` count within the recording window. In mode 1 this
+counts eligible calls delivered as true, including naturally true results;
+`l0` still reports the original result. A configured mode is not proof that a
+hook installed: interpret installation status and counts together.
 
 For a diagnostic phone run, open native TikTok and navigate to the comparison
 profile within two minutes. Leave it visible for at least 15 seconds, then Lock.

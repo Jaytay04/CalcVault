@@ -56,17 +56,21 @@ fi
 xcrun simctl bootstatus "$simulator" -b
 
 if [[ "${CV_HIGHLIGHTS_DIAGNOSTICS:-0}" == 1 ]]; then
-    # Synthetic Objective-C fixtures exercise exact-ABI pass-through observation;
+    # Run both default-off and viewing-experiment synthetic configurations.
     # no proprietary guest, account or network is used by this executable.
     fixture_app="$work/HighlightsDiagnosticsFixture.app"
     mkdir -p "$fixture_app"
     cp "$device_project/HighlightsDiagnosticsFixture-Info.plist" "$fixture_app/Info.plist"
+    for viewing_mode in 0 1; do
+    fixture_suffix=""
+    if [[ "$viewing_mode" == 1 ]]; then fixture_suffix="-viewing"; fi
     xcrun --sdk iphonesimulator clang -arch arm64 -mios-simulator-version-min=18.0 \
+        -DCVLP_HIGHLIGHTS_VIEWING_EXPERIMENT="$viewing_mode" \
         -fobjc-arc -fblocks -framework Foundation -framework UIKit -framework QuartzCore \
         -I "$device_project" -I "$upstream/LiveContainer" \
         "$device_project/HighlightsDiagnosticsFixture.m" \
-        -o "$fixture_app/HighlightsDiagnosticsFixture" > "$logs/highlights-fixture-compile.log" 2>&1 || {
-            tail -n 100 "$logs/highlights-fixture-compile.log"
+        -o "$fixture_app/HighlightsDiagnosticsFixture" > "$logs/highlights-fixture$fixture_suffix-compile.log" 2>&1 || {
+            tail -n 100 "$logs/highlights-fixture$fixture_suffix-compile.log"
             exit 1
         }
     codesign --force --sign - "$fixture_app"
@@ -83,16 +87,17 @@ if [[ "${CV_HIGHLIGHTS_DIAGNOSTICS:-0}" == 1 ]]; then
     }
     xcrun simctl launch --terminate-running-process --console "$simulator" \
         org.example.synthetic.highlights-observer-tests \
-        > "$evidence/highlights-fixture.log" 2>&1 || {
-            cat "$evidence/highlights-fixture.log"
+        > "$evidence/highlights-fixture$fixture_suffix.log" 2>&1 || {
+            cat "$evidence/highlights-fixture$fixture_suffix.log"
             fixture_failure_evidence
             exit 1
         }
-    if ! grep -q '^CV_HIGHLIGHTS_FIXTURE_PASS$' "$evidence/highlights-fixture.log"; then
-        cat "$evidence/highlights-fixture.log"
+    if ! grep -q '^CV_HIGHLIGHTS_FIXTURE_PASS$' "$evidence/highlights-fixture$fixture_suffix.log"; then
+        cat "$evidence/highlights-fixture$fixture_suffix.log"
         fixture_failure_evidence
         exit 1
     fi
+    done
 fi
 
 build_target iphonesimulator 'generic/platform=iOS Simulator' "$sim_products"

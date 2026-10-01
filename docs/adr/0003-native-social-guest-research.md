@@ -4,6 +4,25 @@ Status: separate integration candidate authorized after owner acceptance of port
 
 ## Integration candidate 23: private immutable TikTok guest
 
+### Temporary viewing-only Highlights experiment (2026-10-01)
+
+After diagnostic 2 observed the consumption gate's last result false and no
+model/component calls, the owner explicitly approved a separate default-off
+viewing-only experiment. This narrowly supersedes the unchanged-result restriction
+below for `+enableStoryHighlightConsumption` only: invoke its original exactly
+once, retain its natural scalar result in diagnostics, then return true. Creation
+and every other target retain their original results. Exact ABI and unique-image
+owner checks still fail closed. No persistent setting, guest binary, licensing,
+credential, bookmark, entitlement or lifecycle policy changes are permitted.
+
+The override exists only in the separately marked experimental guest process;
+it persists until that process exits, independently of the bounded diagnostic
+recording window. Lock revocation remains unchanged. Ordinary and observation-only
+builds default off. Run synthetic fixtures in both configurations, preserve the
+working RX-enabled candidate, and assemble locally with unchanged pinned guest
+bytes. Existing private delivery authority applies. Whether this activates usable
+Highlights still requires owner-operated signed-phone testing.
+
 ### Opt-in Highlights observations (2026-09-30)
 
 After the RX-disabled comparison did not reveal Highlights, the owner approved a
