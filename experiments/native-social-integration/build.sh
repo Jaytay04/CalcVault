@@ -71,14 +71,26 @@ if [[ "${CV_HIGHLIGHTS_DIAGNOSTICS:-0}" == 1 ]]; then
         }
     codesign --force --sign - "$fixture_app"
     xcrun simctl install "$simulator" "$fixture_app"
+    fixture_failure_evidence() {
+        # This simulator contains synthetic fixtures only. Limit captured logs
+        # and crash reports to this fixture process, never a private guest.
+        xcrun simctl spawn "$simulator" log show --last 5m --style compact \
+            --predicate 'process == "HighlightsDiagnosticsFixture"' \
+            > "$evidence/highlights-fixture-runtime.log" 2>&1 || true
+        for report in "$HOME"/Library/Logs/DiagnosticReports/HighlightsDiagnosticsFixture*.ips; do
+            if [[ -f "$report" ]]; then cp "$report" "$evidence/"; fi
+        done
+    }
     xcrun simctl launch --terminate-running-process --console "$simulator" \
         org.example.synthetic.highlights-observer-tests \
         > "$evidence/highlights-fixture.log" 2>&1 || {
             cat "$evidence/highlights-fixture.log"
+            fixture_failure_evidence
             exit 1
         }
     if ! grep -q '^CV_HIGHLIGHTS_FIXTURE_PASS$' "$evidence/highlights-fixture.log"; then
         cat "$evidence/highlights-fixture.log"
+        fixture_failure_evidence
         exit 1
     fi
 fi

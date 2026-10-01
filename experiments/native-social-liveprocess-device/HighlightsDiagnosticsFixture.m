@@ -177,6 +177,7 @@ static BOOL CVLPFixtureRequire(BOOL condition, NSString *name, NSString **failur
 }
 
 BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
+    fprintf(stderr, "CV_HIGHLIGHTS_FIXTURE_STAGE core-start\n");
     if (failure != NULL) { *failure = nil; }
     // Deterministically reproduce an intervening hook between lookup and swap.
     SEL chainSelector = @selector(chainFlag);
@@ -334,6 +335,7 @@ BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
         ambiguousSearch.matches == 2 && !ambiguousSearch.complete,
         @"same_image_duplicate_declarations_are_ambiguous", failure)) { return NO; }
 
+    fprintf(stderr, "CV_HIGHLIGHTS_FIXTURE_STAGE runtime-image-start\n");
     CVLPHighlightsClassMethodSearch consumptionSearch = {0};
     CVLPHighlightsInstallStatus consumptionStatus = CVLPHighlightsInstallClassBoolean(
         sel_registerName("enableStoryHighlightConsumption"), CVLPHighlightsConsumptionTarget,
@@ -353,6 +355,7 @@ BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
         sel_registerName("enableStoryHighlightCreation"), CVLPHighlightsCreationTarget,
         TTKProfileBizDataStoryHighlightInfoModel.class, NULL);
     if (!CVLPFixtureRequire(creationStatus == CVLPHighlightsInstallInstalled, @"creation_hook", failure)) { return NO; }
+    fprintf(stderr, "CV_HIGHLIGHTS_FIXTURE_STAGE runtime-image-complete\n");
 
     if (!CVLPFixtureRequire(CVLPHighlightsState.counts[CVLPHighlightsConsumptionTarget] == 0 &&
         CVLPHighlightsState.lastConsumption == -1, @"boolean_unknown_before_call", failure)) { return NO; }
@@ -482,6 +485,7 @@ BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
         CVLPHighlightsState.counts[CVLPHighlightsConsumptionTarget] == beforeStoppedCount,
         @"stopped_wrappers_forward_without_recording", failure)) { return NO; }
 
+    fprintf(stderr, "CV_HIGHLIGHTS_FIXTURE_STAGE forwarding-complete\n");
     CVLPHighlightsObserver *lineObserver = [CVLPHighlightsObserver new];
     lineObserver->_startedAt = CACurrentMediaTime();
     lineObserver->_installStatuses[0] = CVLPHighlightsInstallInstalled;
@@ -528,6 +532,9 @@ BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
 }
 
 int main(void) {
+    setbuf(stdout, NULL);
+    setbuf(stderr, NULL);
+    fprintf(stderr, "CV_HIGHLIGHTS_FIXTURE_STAGE main\n");
     @autoreleasepool {
         NSString *failure = nil;
         if (![CVLPHighlightsDiagnostics runFixtureSelfTest:&failure]) {

@@ -2,6 +2,13 @@
 
 ## Highlights diagnostic 2 local verification (2026-09-30)
 
+First native attempt `36825921801` at `4b4852e` FAILED before package creation:
+the Objective-C fixture compiled (warnings, no compile error), but simulator
+console output contained only its launch identifier, with no PASS/FAIL marker.
+That does not establish a lookup failure, crash cause or successful test run.
+The next synthetic-only attempt adds unbuffered fixed stage markers and scoped
+fixture runtime/crash evidence capture; production observer behavior is unchanged.
+
 Marker `integration-23-highlights2` changes only the opt-in observer variant.
 The class-method lookup uses a verified loaded image containing the existing
 Highlights model anchor, requires that anchor to be enumerated, and records
