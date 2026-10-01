@@ -60,7 +60,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: calcvault-integration-host-23${{ inputs.highlights_diagnostics && '-highlights1' || '' }}
+          name: calcvault-integration-host-23${{ inputs.highlights_diagnostics && '-highlights2' || '' }}
           path: |
             ${{ runner.temp }}/cv-integration/output/CalcVault-integration-host-23.ipa
             ${{ runner.temp }}/cv-integration/output/CalcVault-integration-host-23.ipa.sha256
@@ -71,7 +71,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: calcvault-integration-host-23${{ inputs.highlights_diagnostics && '-highlights1' || '' }}-evidence
+          name: calcvault-integration-host-23${{ inputs.highlights_diagnostics && '-highlights2' || '' }}-evidence
           path: |
             ${{ runner.temp }}/integration-xcode-version.log
             ${{ runner.temp }}/cv-integration/logs/

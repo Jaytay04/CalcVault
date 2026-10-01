@@ -121,10 +121,20 @@ Dispatch the registered `native-social-liveprocess-device.yml` workflow with
 `integration_guest=true` and `highlights_diagnostics=true`. Its reusable
 `native-social-integration.yml` workflow receives the default-off input, which
 adds only the approved observer to generated integration-host sources. Its default
-is false. The report marker is `integration-23-highlights1`; the containing app
+is false. The report marker is `integration-23-highlights2`; the containing app
 identity/build contract and `integration-native-23` data directory stay unchanged.
 Public CI still builds synthetic code only. Use the existing pinned local merger
 to retain all RX-enabled guest bytes; preserve both previous candidate IPAs.
+
+Diagnostic 2 replaces the whole-process class inventory with incremental
+enumeration of the loaded image containing the known Highlights model class.
+The image/header must be verified and the anchor encountered. A method match is
+unique only among the enumerated classes in that image; categories on classes
+defined elsewhere and dynamically registered classes remain outside this scope.
+A scoped miss is not proof that the feature is globally absent. The 100,000-class
+and 0.5-second limits remain; a runtime metadata call can itself overrun the
+deadline before control returns, so this is not a hard real-time guarantee.
+No guest feature getter is invoked by discovery and no feature value is forced.
 
 The observer aggregates only results of naturally occurring, exact-signature
 Highlights calls and bounded view geometry. It does not invoke a provider API,
@@ -146,6 +156,15 @@ counts and the first matched cell's own hidden/alpha/size values. They do not
 establish effective visibility through ancestors or server eligibility. `trunc=1`
 or `err=1` means the tree observation is incomplete; zero matched rows must not
 be interpreted as proof that no Highlights implementation exists.
+
+Diagnostic 2 appends `scope=1` for the verified anchor-image inventory,
+`classes0`/`classes1` for the bounded number of classes visited, and
+`why0`/`why1` for the two class-method lookup results: 0 no lookup failure,
+1 missing anchor, 2 missing image, 3 anchor/image-address mismatch,
+4 class limit, 5 deadline, 6 invalid class, 7 class/image mismatch,
+8 ambiguous declaration, and 9 anchor not encountered. `why=0` alone does not
+mean installation succeeded; interpret it with the corresponding `st` value.
+An incomplete lookup must never be treated as a false feature value.
 
 For a diagnostic phone run, open native TikTok and navigate to the comparison
 profile within two minutes. Leave it visible for at least 15 seconds, then Lock.

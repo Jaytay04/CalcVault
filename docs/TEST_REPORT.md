@@ -1,5 +1,67 @@
 # CalcVault test report
 
+## Highlights diagnostic 2 local verification (2026-09-30)
+
+Marker `integration-23-highlights2` changes only the opt-in observer variant.
+The class-method lookup uses a verified loaded image containing the existing
+Highlights model anchor, requires that anchor to be enumerated, and records
+scoped numeric reasons/counts. Count/deadline limits remain unchanged; no
+incomplete result installs a hook. No eligibility forcing, private endpoint,
+guest payload, credential gate, revocation gate or data-directory change.
+
+Local Python checks PASS: 62 device-adapter, 40 integration and 118 shared-package
+tests. `git diff --check` PASS; workflow YAML parsing and build shell syntax PASS.
+Source-contract checks supplement, but do not replace, the native fixture.
+The fixture now covers the actual image iterator, absent/unseen anchor, missing
+image, class limits, elapsed-budget failure, wrong-image/invalid classes, own vs
+inherited declarations, same-image ambiguity and unchanged implementations on
+incomplete/ambiguous installation. Strict 37-field schema cases cover scope,
+reason/count bounds, missing/reordered fields and nonfinite/text rejection.
+Existing original-call/return/exception/errno and resolver-trap checks remain.
+
+Independent read-only review found no blocking logic issue after adding the
+explicit incomplete-install/no-mutation regression. Metadata enumeration can
+realize classes and allocate internally; the 0.5-second budget cannot preempt a
+runtime call. Large-image device timing and actual Highlights values remain
+unknown. Native simulator fixture, Apple SDK builds, private assembly/delivery
+and phone measurements are not yet run for this revision.
+
+## Highlights diagnostic 1 phone result (2026-09-30)
+
+Owner supplied marker `integration-23-highlights1` and samples through 20 seconds.
+Both class-feature hooks have status 6 (bounded/incomplete), with no observed
+values. The four model/component hooks have status 1 (installed) but zero calls;
+their results remain unknown. Two-window view samples traverse 213 then 330 nodes
+with `r=0`, `trunc=0`, `err=0`: no exact Highlights cell is found in those trees.
+No profile/account content is captured, so the report cannot independently
+identify the page being viewed. No conclusion about server eligibility or a
+confirmed missing-data/configuration cause follows from these zeros.
+
+The first observer line is at 377ms, before either individual 500ms scan deadline
+could normally expire. Source review finds status 6 conflates count-limit,
+allocation, registry-count change and deadline failures. Read-only static metadata
+inspection finds 91,210 classes in the pinned MusicallyCore image alone; the
+100,000 whole-process cap is a plausible cause, not a measured device count.
+Synthetic CI's smaller registry did not exercise that production-size condition.
+The next diagnostic will scope metadata discovery to the image of the existing
+known Highlights model class and emit numeric lookup reasons. It must not force
+a result, call a guest getter, or treat an incomplete scan as disabled/missing.
+
+Independent review selected incremental image enumeration over a full copied
+class-name list. Apple's public [runtime header](https://github.com/apple-oss-distributions/objc4/blob/main/runtime/runtime.h)
+declares `objc_enumerateClasses` for iOS 16 and later, accepting a loaded image
+header and a stoppable callback. The implementation still validates the selected
+image and applies count/deadline guards; internal runtime metadata work cannot
+be interrupted mid-call. Scope is explicitly one image, not global ownership
+proof. This is a diagnostic design revision, not an established Highlights fix.
+
+Both Keychain fixture controls are READY, host sentinel UNCHANGED, and the three
+supplied stages through post-loader deny host-file read/write and host-only
+Keychain while retaining the expected exposed app-ID control. Signing exports
+are absent; migration is explicitly not repeated. Revocation/completion and
+getpgid presence-to-absence are observed. Signal-zero liveness remains unproved;
+no security certification or separately narrated audio/calculator confirmation.
+
 ## Opt-in Highlights observer build and assembly (2026-09-30)
 
 Delivery complete: separate candidate and checksum uploaded to the verified-private

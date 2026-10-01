@@ -26,7 +26,7 @@ class HighlightsAdapterTests(unittest.TestCase):
         original = source()
         updated = adapter.transform(original)
         self.assertEqual(original, source())
-        self.assertIn('Build marker: integration-23-highlights1.', updated)
+        self.assertIn('Build marker: integration-23-highlights2.', updated)
         self.assertIn('!CVLPHighlightsLineIsSanitized(line)', updated)
         self.assertIn('[CVLPHighlightsDiagnostics start];', updated)
         self.assertIn('untouched_report_transport();', updated)

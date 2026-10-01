@@ -16,6 +16,24 @@ static NSMutableArray<NSString *> *CVLPFixtureDiagnosticLines;
 static NSUInteger CVLPFixtureDisplacedCalls;
 static NSUInteger CVLPFixtureResolverCalls;
 
+typedef struct {
+    CFTimeInterval now;
+    CFTimeInterval advancePerRead;
+    Class mismatchedClass;
+} CVLPFixtureLookupContext;
+
+static CFTimeInterval CVLPFixtureLookupClock(void *opaque) {
+    CVLPFixtureLookupContext *context = opaque;
+    CFTimeInterval now = context->now;
+    context->now += context->advancePerRead;
+    return now;
+}
+
+static const char *CVLPFixtureLookupImageName(Class cls, void *opaque) {
+    CVLPFixtureLookupContext *context = opaque;
+    return cls == context->mismatchedClass ? "/fixture/other-image" : "/fixture/highlights-image";
+}
+
 @interface CVLPFixtureResolverTrap : NSObject
 @end
 @implementation CVLPFixtureResolverTrap
@@ -60,6 +78,36 @@ static BOOL CVLPFixtureInterveningHook(id receiver, SEL selector) {
     CVLPFixtureCreationCalls++;
     @throw CVLPFixtureForwardedException;
 }
+@end
+
+@interface CVLPFixtureAmbiguousOwnerA : NSObject
++ (BOOL)ambiguousFixtureClassMethod;
+@end
+
+@implementation CVLPFixtureAmbiguousOwnerA
++ (BOOL)ambiguousFixtureClassMethod { return YES; }
+@end
+
+@interface CVLPFixtureAmbiguousOwnerB : NSObject
++ (BOOL)ambiguousFixtureClassMethod;
+@end
+
+@implementation CVLPFixtureAmbiguousOwnerB
++ (BOOL)ambiguousFixtureClassMethod { return NO; }
+@end
+
+@interface CVLPFixtureInheritedClassMethodBase : NSObject
++ (BOOL)inheritedFixtureClassMethod;
+@end
+
+@implementation CVLPFixtureInheritedClassMethodBase
++ (BOOL)inheritedFixtureClassMethod { return YES; }
+@end
+
+@interface CVLPFixtureInheritedClassMethodChild : CVLPFixtureInheritedClassMethodBase
+@end
+
+@implementation CVLPFixtureInheritedClassMethodChild
 @end
 
 @interface TTKProfileBizDataStoryHighlightInfoModel : NSObject
@@ -128,12 +176,6 @@ static BOOL CVLPFixtureRequire(BOOL condition, NSString *name, NSString **failur
     return NO;
 }
 
-static BOOL CVLPFixtureDuplicateConsumption(id receiver, SEL selector) {
-    (void)receiver;
-    (void)selector;
-    return YES;
-}
-
 BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
     if (failure != NULL) { *failure = nil; }
     // Deterministically reproduce an intervening hook between lookup and swap.
@@ -164,20 +206,152 @@ BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
     CVLPHighlightsRecording = YES;
     CVLPHighlightsStartedAt = CACurrentMediaTime();
 
+    // Exercise the same class-by-class core independently of the real image
+    // iterator so failure causes are repeatable on a simulator and device.
+    CVLPFixtureLookupContext lookupContext = { .now = 10.0 };
+    Class uniqueClasses[] = { CVLPFixtureFeatureOwner.class };
+    CVLPHighlightsClassMethodSearch uniqueSearch = CVLPHighlightsSearchProvidedClasses(
+        sel_registerName("enableStoryHighlightConsumption"), CVLPFixtureFeatureOwner.class,
+        "/fixture/highlights-image", uniqueClasses, 1, lookupContext.now,
+        CVLPFixtureLookupClock, CVLPFixtureLookupImageName, &lookupContext);
+    if (!CVLPFixtureRequire(uniqueSearch.complete && uniqueSearch.matches == 1 &&
+        uniqueSearch.owner == CVLPFixtureFeatureOwner.class && uniqueSearch.classes == 1,
+        @"image_inventory_unique_owner", failure)) { return NO; }
+
+    CVLPFixtureLookupContext missingAnchorContext = { .now = 10.0 };
+    CVLPHighlightsClassMethodSearch missingAnchorSearch = CVLPHighlightsSearchProvidedClasses(
+        sel_registerName("enableStoryHighlightConsumption"), Nil, "/fixture/highlights-image",
+        NULL, 0, missingAnchorContext.now, CVLPFixtureLookupClock,
+        CVLPFixtureLookupImageName, &missingAnchorContext);
+    if (!CVLPFixtureRequire(!missingAnchorSearch.complete &&
+        missingAnchorSearch.reason == CVLPHighlightsLookupReasonMissingAnchor,
+        @"missing_anchor_is_incomplete", failure)) { return NO; }
+
+    NSUInteger incompleteMatches = 0;
+    Method incompleteMethod = CVLPHighlightsDeclaredMethod(
+        object_getClass(CVLPFixtureFeatureOwner.class),
+        sel_registerName("enableStoryHighlightConsumption"), &incompleteMatches);
+    IMP incompleteOriginal = method_getImplementation(incompleteMethod);
+    CVLPHighlightsInstallStatus incompleteStatus = CVLPHighlightsInstallClassBoolean(
+        sel_registerName("enableStoryHighlightConsumption"), CVLPHighlightsConsumptionTarget,
+        Nil, NULL);
+    if (!CVLPFixtureRequire(incompleteMatches == 1 && incompleteOriginal != NULL &&
+        incompleteStatus == CVLPHighlightsInstallBoundedIncomplete &&
+        method_getImplementation(incompleteMethod) == incompleteOriginal,
+        @"incomplete_lookup_does_not_modify_implementation", failure)) { return NO; }
+
+    CVLPFixtureLookupContext anchorNotEnumeratedContext = { .now = 10.0 };
+    Class nonAnchorClasses[] = { CVLPFixtureAbsentTarget.class };
+    CVLPHighlightsClassMethodSearch anchorNotEnumeratedSearch = CVLPHighlightsSearchProvidedClasses(
+        sel_registerName("enableStoryHighlightConsumption"), CVLPFixtureFeatureOwner.class,
+        "/fixture/highlights-image", nonAnchorClasses, 1, anchorNotEnumeratedContext.now,
+        CVLPFixtureLookupClock, CVLPFixtureLookupImageName, &anchorNotEnumeratedContext);
+    if (!CVLPFixtureRequire(anchorNotEnumeratedSearch.reason ==
+        CVLPHighlightsLookupReasonAnchorNotEnumerated && !anchorNotEnumeratedSearch.complete,
+        @"inventory_must_contain_anchor", failure)) { return NO; }
+
+    CVLPFixtureLookupContext missingImageContext = { .now = 10.0 };
+    CVLPHighlightsClassMethodSearch missingImageSearch = CVLPHighlightsSearchProvidedClasses(
+        sel_registerName("enableStoryHighlightConsumption"), CVLPFixtureFeatureOwner.class,
+        NULL, NULL, 0, missingImageContext.now, CVLPFixtureLookupClock,
+        CVLPFixtureLookupImageName, &missingImageContext);
+    if (!CVLPFixtureRequire(missingImageSearch.reason == CVLPHighlightsLookupReasonMissingImage,
+        @"missing_anchor_image_is_incomplete", failure)) { return NO; }
+
+    CVLPFixtureLookupContext capContext = { .now = 10.0 };
+    CVLPHighlightsClassMethodSearch capSearch = CVLPHighlightsSearchProvidedClasses(
+        sel_registerName("enableStoryHighlightConsumption"), CVLPFixtureFeatureOwner.class,
+        "/fixture/highlights-image", uniqueClasses, CVLPHighlightsMaximumClasses + 1,
+        capContext.now, CVLPFixtureLookupClock, CVLPFixtureLookupImageName, &capContext);
+    if (!CVLPFixtureRequire(capSearch.reason == CVLPHighlightsLookupReasonClassLimit &&
+        capSearch.classes == CVLPHighlightsMaximumClasses,
+        @"image_inventory_limit_is_reported_and_clamped", failure)) { return NO; }
+
+    CVLPFixtureLookupContext capAccumulatorContext = { .now = 10.0 };
+    CVLPHighlightsClassMethodSearch capAccumulator = CVLPHighlightsClassSearchCreate(
+        sel_registerName("enableStoryHighlightConsumption"), CVLPFixtureFeatureOwner.class,
+        "/fixture/highlights-image", capAccumulatorContext.now,
+        CVLPFixtureLookupClock, CVLPFixtureLookupImageName, &capAccumulatorContext);
+    capAccumulator.classes = CVLPHighlightsMaximumClasses;
+    if (!CVLPFixtureRequire(!CVLPHighlightsClassSearchObserve(&capAccumulator,
+        CVLPFixtureFeatureOwner.class) && capAccumulator.reason == CVLPHighlightsLookupReasonClassLimit &&
+        capAccumulator.classes == CVLPHighlightsMaximumClasses,
+        @"runtime_class_callback_limit_is_clamped", failure)) { return NO; }
+
+    CVLPFixtureLookupContext expiredContext = { .now = 11.0 };
+    CVLPHighlightsClassMethodSearch expiredSearch = CVLPHighlightsSearchProvidedClasses(
+        sel_registerName("enableStoryHighlightConsumption"), CVLPFixtureFeatureOwner.class,
+        "/fixture/highlights-image", uniqueClasses, 1, 10.0, CVLPFixtureLookupClock,
+        CVLPFixtureLookupImageName, &expiredContext);
+    if (!CVLPFixtureRequire(expiredSearch.reason == CVLPHighlightsLookupReasonDeadline &&
+        expiredSearch.classes == 0, @"expired_inventory_stops_before_metadata", failure)) { return NO; }
+
+    CVLPFixtureLookupContext metadataDeadlineContext = { .now = 10.0, .advancePerRead = 0.3 };
+    CVLPHighlightsClassMethodSearch metadataDeadlineSearch = CVLPHighlightsSearchProvidedClasses(
+        sel_registerName("enableStoryHighlightConsumption"), CVLPFixtureFeatureOwner.class,
+        "/fixture/highlights-image", uniqueClasses, 1, metadataDeadlineContext.now,
+        CVLPFixtureLookupClock, CVLPFixtureLookupImageName, &metadataDeadlineContext);
+    if (!CVLPFixtureRequire(metadataDeadlineSearch.reason == CVLPHighlightsLookupReasonDeadline &&
+        metadataDeadlineSearch.classes == 1,
+        @"metadata_copy_time_is_inside_deadline", failure)) { return NO; }
+
+    CVLPFixtureLookupContext unresolvedContext = { .now = 10.0 };
+    Class unresolvedClasses[] = { Nil };
+    CVLPHighlightsClassMethodSearch unresolvedSearch = CVLPHighlightsSearchProvidedClasses(
+        sel_registerName("enableStoryHighlightConsumption"), CVLPFixtureFeatureOwner.class,
+        "/fixture/highlights-image", unresolvedClasses, 1, unresolvedContext.now,
+        CVLPFixtureLookupClock, CVLPFixtureLookupImageName, &unresolvedContext);
+    if (!CVLPFixtureRequire(unresolvedSearch.reason == CVLPHighlightsLookupReasonInvalidClass,
+        @"invalid_enumerated_class_fails_closed", failure)) { return NO; }
+
+    CVLPFixtureLookupContext mismatchContext = {
+        .now = 10.0, .mismatchedClass = CVLPFixtureAbsentTarget.class,
+    };
+    Class mismatchClasses[] = { CVLPFixtureFeatureOwner.class, CVLPFixtureAbsentTarget.class };
+    CVLPHighlightsClassMethodSearch mismatchSearch = CVLPHighlightsSearchProvidedClasses(
+        sel_registerName("enableStoryHighlightConsumption"), CVLPFixtureFeatureOwner.class,
+        "/fixture/highlights-image", mismatchClasses, 2, mismatchContext.now,
+        CVLPFixtureLookupClock, CVLPFixtureLookupImageName, &mismatchContext);
+    if (!CVLPFixtureRequire(mismatchSearch.reason == CVLPHighlightsLookupReasonClassImageMismatch &&
+        mismatchSearch.classes == 2, @"class_from_other_image_fails_closed", failure)) { return NO; }
+
+    CVLPFixtureLookupContext inheritedContext = { .now = 10.0 };
+    Class inheritedClasses[] = { CVLPFixtureInheritedClassMethodChild.class };
+    CVLPHighlightsClassMethodSearch inheritedSearch = CVLPHighlightsSearchProvidedClasses(
+        sel_registerName("inheritedFixtureClassMethod"), CVLPFixtureInheritedClassMethodChild.class,
+        "/fixture/highlights-image", inheritedClasses, 1, inheritedContext.now,
+        CVLPFixtureLookupClock, CVLPFixtureLookupImageName, &inheritedContext);
+    if (!CVLPFixtureRequire(inheritedSearch.complete && inheritedSearch.matches == 0 &&
+        inheritedSearch.owner == Nil, @"inherited_class_method_is_not_a_declaration", failure)) { return NO; }
+
+    Class ambiguousClasses[] = { CVLPFixtureAmbiguousOwnerA.class, CVLPFixtureAmbiguousOwnerB.class };
+    CVLPFixtureLookupContext ambiguousContext = { .now = 10.0 };
+    CVLPHighlightsClassMethodSearch ambiguousSearch = CVLPHighlightsSearchProvidedClasses(
+        sel_registerName("ambiguousFixtureClassMethod"), CVLPFixtureAmbiguousOwnerA.class,
+        "/fixture/highlights-image", ambiguousClasses, 2, ambiguousContext.now,
+        CVLPFixtureLookupClock, CVLPFixtureLookupImageName, &ambiguousContext);
+    if (!CVLPFixtureRequire(ambiguousSearch.reason == CVLPHighlightsLookupReasonAmbiguous &&
+        ambiguousSearch.matches == 2 && !ambiguousSearch.complete,
+        @"same_image_duplicate_declarations_are_ambiguous", failure)) { return NO; }
+
+    CVLPHighlightsClassMethodSearch consumptionSearch = {0};
     CVLPHighlightsInstallStatus consumptionStatus = CVLPHighlightsInstallClassBoolean(
-        sel_registerName("enableStoryHighlightConsumption"), CVLPHighlightsConsumptionTarget);
+        sel_registerName("enableStoryHighlightConsumption"), CVLPHighlightsConsumptionTarget,
+        TTKProfileBizDataStoryHighlightInfoModel.class, &consumptionSearch);
     if (consumptionStatus != CVLPHighlightsInstallInstalled) {
         CVLPHighlightsClassMethodSearch retry = CVLPHighlightsFindClassMethod(
-            sel_registerName("enableStoryHighlightConsumption"));
+            sel_registerName("enableStoryHighlightConsumption"), TTKProfileBizDataStoryHighlightInfoModel.class);
         Method known = class_getClassMethod(CVLPFixtureFeatureOwner.class,
             @selector(enableStoryHighlightConsumption));
-        fprintf(stderr, "CV_HIGHLIGHTS_FIXTURE_LOOKUP status=%d classes=%d retryComplete=%d retryMatches=%lu knownABI=%d\n",
-            consumptionStatus, objc_getClassList(NULL, 0), retry.complete,
-            (unsigned long)retry.matches, CVLPHighlightsMethodHasExactSignature(known, "B"));
+        fprintf(stderr, "CV_HIGHLIGHTS_FIXTURE_LOOKUP status=%d reason=%d classes=%lu retryComplete=%d retryMatches=%lu retryReason=%d retryClasses=%lu knownABI=%d\n",
+            consumptionStatus, consumptionSearch.reason, (unsigned long)consumptionSearch.classes,
+            retry.complete, (unsigned long)retry.matches, retry.reason, (unsigned long)retry.classes,
+            CVLPHighlightsMethodHasExactSignature(known, "B"));
     }
     if (!CVLPFixtureRequire(consumptionStatus == CVLPHighlightsInstallInstalled, @"feature_owner_unique_hook", failure)) { return NO; }
     CVLPHighlightsInstallStatus creationStatus = CVLPHighlightsInstallClassBoolean(
-        sel_registerName("enableStoryHighlightCreation"), CVLPHighlightsCreationTarget);
+        sel_registerName("enableStoryHighlightCreation"), CVLPHighlightsCreationTarget,
+        TTKProfileBizDataStoryHighlightInfoModel.class, NULL);
     if (!CVLPFixtureRequire(creationStatus == CVLPHighlightsInstallInstalled, @"creation_hook", failure)) { return NO; }
 
     if (!CVLPFixtureRequire(CVLPHighlightsState.counts[CVLPHighlightsConsumptionTarget] == 0 &&
@@ -223,7 +397,8 @@ BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
     CVLPHighlightsInstallStatus absentInstanceStatus = CVLPHighlightsInstallInstance(
         CVLPFixtureResolverTrap.class, sel_registerName("missingFixtureMethod"), "v", CVLPHighlightsMountTarget);
     CVLPHighlightsInstallStatus absentClassStatus = CVLPHighlightsInstallClassBoolean(
-        sel_registerName("missingFixtureClassMethod"), CVLPHighlightsConsumptionTarget);
+        sel_registerName("missingFixtureClassMethod"), CVLPHighlightsConsumptionTarget,
+        CVLPFixtureResolverTrap.class, NULL);
     if (!CVLPFixtureRequire(absentInstanceStatus == CVLPHighlightsInstallNotFound &&
         absentClassStatus == CVLPHighlightsInstallNotFound, @"absent_targets_report_not_found", failure)) { return NO; }
     NSUInteger absentDeclarations = 0;
@@ -263,20 +438,25 @@ BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
         CVLPHighlightsState.counts[CVLPHighlightsHeightTarget] == 2 &&
         CVLPHighlightsState.lastHeight == 42.75, @"nonfinite_height_return_preserved_and_not_recorded", failure)) { return NO; }
 
-    Class duplicateClass = objc_allocateClassPair(NSObject.class, "CVLPFixtureDuplicateFeatureOwner", 0);
-    if (!CVLPFixtureRequire(duplicateClass != Nil, @"duplicate_class_allocate", failure)) { return NO; }
-    Class duplicateMeta = object_getClass(duplicateClass);
-    SEL consumptionSelector = sel_registerName("enableStoryHighlightConsumption");
-    const char *booleanTypes = "B16@0:8";
-    if (!CVLPFixtureRequire(class_addMethod(duplicateMeta, consumptionSelector,
-        (IMP)CVLPFixtureDuplicateConsumption, booleanTypes), @"duplicate_method_add", failure)) { return NO; }
-    objc_registerClassPair(duplicateClass);
-    Method duplicateMethod = class_getClassMethod(duplicateClass, consumptionSelector);
-    IMP duplicateOriginal = method_getImplementation(duplicateMethod);
+    SEL ambiguousSelector = sel_registerName("ambiguousFixtureClassMethod");
+    NSUInteger ambiguousMatchesA = 0;
+    NSUInteger ambiguousMatchesB = 0;
+    Method ambiguousMethodA = CVLPHighlightsDeclaredMethod(
+        object_getClass(CVLPFixtureAmbiguousOwnerA.class), ambiguousSelector, &ambiguousMatchesA);
+    Method ambiguousMethodB = CVLPHighlightsDeclaredMethod(
+        object_getClass(CVLPFixtureAmbiguousOwnerB.class), ambiguousSelector, &ambiguousMatchesB);
+    IMP ambiguousOriginalA = method_getImplementation(ambiguousMethodA);
+    IMP ambiguousOriginalB = method_getImplementation(ambiguousMethodB);
+    CVLPHighlightsClassMethodSearch runtimeAmbiguousSearch = {0};
     CVLPHighlightsInstallStatus ambiguousStatus = CVLPHighlightsInstallClassBoolean(
-        consumptionSelector, CVLPHighlightsConsumptionTarget);
+        ambiguousSelector, CVLPHighlightsConsumptionTarget, CVLPFixtureFeatureOwner.class,
+        &runtimeAmbiguousSearch);
     if (!CVLPFixtureRequire(ambiguousStatus == CVLPHighlightsInstallAmbiguous &&
-        method_getImplementation(duplicateMethod) == duplicateOriginal, @"ambiguous_owner_not_modified", failure)) { return NO; }
+        runtimeAmbiguousSearch.reason == CVLPHighlightsLookupReasonAmbiguous &&
+        runtimeAmbiguousSearch.matches > 1 &&
+        method_getImplementation(ambiguousMethodA) == ambiguousOriginalA &&
+        method_getImplementation(ambiguousMethodB) == ambiguousOriginalB,
+        @"runtime_image_ambiguity_does_not_modify_either_owner", failure)) { return NO; }
 
     CVLPHighlightsRecording = YES;
     CVLPHighlightsStartedAt = CACurrentMediaTime();
@@ -327,9 +507,23 @@ BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
     NSString *extraField = [validLine stringByAppendingString:@" private=1"];
     NSString *nonfiniteFloat = [validLine stringByReplacingOccurrencesOfString:@"l5=42.75" withString:@"l5=nan"];
     NSString *overflowFloat = [validLine stringByReplacingOccurrencesOfString:@"alpha=-1" withString:@"alpha=1e999"];
+    NSString *missingField = [validLine stringByReplacingOccurrencesOfString:@" classes1=0" withString:@""];
+    NSString *reorderedFields = [validLine stringByReplacingOccurrencesOfString:
+        @"scope=1 why0=0" withString:@"why0=0 scope=1"];
+    NSString *wrongScope = [validLine stringByReplacingOccurrencesOfString:@"scope=1" withString:@"scope=2"];
+    NSString *largeReason = [validLine stringByReplacingOccurrencesOfString:@"why0=0" withString:@"why0=10"];
+    NSString *negativeReason = [validLine stringByReplacingOccurrencesOfString:@"why0=0" withString:@"why0=-1"];
+    NSString *largeClassCount = [validLine stringByReplacingOccurrencesOfString:@"classes0=0" withString:@"classes0=100001"];
+    NSString *negativeClassCount = [validLine stringByReplacingOccurrencesOfString:@"classes0=0" withString:@"classes0=-1"];
+    NSString *maximumClassCount = [validLine stringByReplacingOccurrencesOfString:@"classes0=0" withString:@"classes0=100000"];
     if (!CVLPFixtureRequire(!CVLPHighlightsLineIsSanitized(arbitraryText) &&
         !CVLPHighlightsLineIsSanitized(extraField) && !CVLPHighlightsLineIsSanitized(nonfiniteFloat) &&
-        !CVLPHighlightsLineIsSanitized(overflowFloat), @"sanitizer_rejects_text_extra_and_nonfinite", failure)) { return NO; }
+        !CVLPHighlightsLineIsSanitized(overflowFloat) && !CVLPHighlightsLineIsSanitized(missingField) &&
+        !CVLPHighlightsLineIsSanitized(reorderedFields) && !CVLPHighlightsLineIsSanitized(wrongScope) &&
+        !CVLPHighlightsLineIsSanitized(largeReason) && !CVLPHighlightsLineIsSanitized(negativeReason) &&
+        !CVLPHighlightsLineIsSanitized(largeClassCount) && !CVLPHighlightsLineIsSanitized(negativeClassCount) &&
+        CVLPHighlightsLineIsSanitized(maximumClassCount),
+        @"sanitizer_enforces_scope_reason_and_class_count_bounds", failure)) { return NO; }
     return YES;
 }
 

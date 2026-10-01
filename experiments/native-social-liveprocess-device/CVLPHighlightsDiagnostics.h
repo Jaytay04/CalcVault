@@ -3,6 +3,7 @@
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 #import <os/lock.h>
+#import <dlfcn.h>
 #import <math.h>
 #import <stdlib.h>
 #import <string.h>
@@ -55,6 +56,19 @@ typedef NS_ENUM(int, CVLPHighlightsStopReason) {
     CVLPHighlightsStopDeadline = 0,
     CVLPHighlightsStopBackground = 1,
     CVLPHighlightsStopSceneDeactivated = 2,
+};
+
+typedef NS_ENUM(int, CVLPHighlightsLookupReason) {
+    CVLPHighlightsLookupReasonNone = 0,
+    CVLPHighlightsLookupReasonMissingAnchor = 1,
+    CVLPHighlightsLookupReasonMissingImage = 2,
+    CVLPHighlightsLookupReasonImageAddressMismatch = 3,
+    CVLPHighlightsLookupReasonClassLimit = 4,
+    CVLPHighlightsLookupReasonDeadline = 5,
+    CVLPHighlightsLookupReasonInvalidClass = 6,
+    CVLPHighlightsLookupReasonClassImageMismatch = 7,
+    CVLPHighlightsLookupReasonAmbiguous = 8,
+    CVLPHighlightsLookupReasonAnchorNotEnumerated = 9,
 };
 
 typedef NS_ENUM(NSUInteger, CVLPHighlightsTarget) {
@@ -215,60 +229,185 @@ typedef struct {
     Class owner;
     Method method;
     NSUInteger matches;
+    NSUInteger classes;
     BOOL complete;
+    BOOL anchorSeen;
+    CVLPHighlightsLookupReason reason;
+    SEL selector;
+    Class anchor;
+    const char *anchorImage;
+    CFTimeInterval startedAt;
+    CFTimeInterval (*clock)(void *context);
+    const char *(*imageName)(Class cls, void *context);
+    void *context;
 } CVLPHighlightsClassMethodSearch;
 
-static CVLPHighlightsClassMethodSearch CVLPHighlightsFindClassMethod(SEL selector) {
-    CVLPHighlightsClassMethodSearch result = { Nil, NULL, 0, NO };
-    int reportedCount = objc_getClassList(NULL, 0);
-    if (reportedCount < 0 || (NSUInteger)reportedCount > CVLPHighlightsMaximumClasses) { return result; }
-    NSUInteger capacity = (NSUInteger)reportedCount;
-    if (capacity == 0) { result.complete = YES; return result; }
-    Class __unsafe_unretained *classes = (__unsafe_unretained Class *)calloc(capacity, sizeof(Class));
-    if (classes == NULL) { return result; }
-    int copiedCount = objc_getClassList(classes, (int)capacity);
-    int verifiedCount = objc_getClassList(NULL, 0);
-    if (copiedCount < 0 || (NSUInteger)copiedCount != capacity || verifiedCount != reportedCount) {
-        free(classes);
-        return result;
-    }
-
-    CFTimeInterval startedAt = CACurrentMediaTime();
-    for (NSUInteger index = 0; index < capacity; index++) {
-        if ((index & 127U) == 0U && CACurrentMediaTime() - startedAt >= CVLPHighlightsClassScanDeadline) {
-            free(classes);
-            return result;
-        }
-        Class cls = classes[index];
-        NSUInteger ownMatches = 0;
-        Method method = CVLPHighlightsDeclaredMethod(object_getClass(cls), selector, &ownMatches);
-        if (ownMatches != 0) {
-            result.matches += ownMatches;
-            if (result.matches == 1) {
-                result.owner = cls;
-                result.method = method;
-            }
-            if (result.matches > 1) {
-                result.owner = Nil;
-                result.method = NULL;
-            }
-        }
-    }
-    free(classes);
-    if (CACurrentMediaTime() - startedAt >= CVLPHighlightsClassScanDeadline ||
-        objc_getClassList(NULL, 0) != reportedCount) {
-        result.owner = Nil;
-        result.method = NULL;
-        return result;
-    }
-    result.complete = YES;
-    return result;
+static CFTimeInterval CVLPHighlightsRuntimeClock(__unused void *context) {
+    return CACurrentMediaTime();
 }
 
-static CVLPHighlightsInstallStatus CVLPHighlightsInstallClassBoolean(SEL selector, CVLPHighlightsTarget target) {
-    CVLPHighlightsClassMethodSearch search = CVLPHighlightsFindClassMethod(selector);
+static const char *CVLPHighlightsRuntimeImageName(Class cls, __unused void *context) {
+    return class_getImageName(cls);
+}
+
+static CVLPHighlightsClassMethodSearch CVLPHighlightsClassSearchCreate(
+    SEL selector, Class anchor, const char *anchorImage, CFTimeInterval startedAt,
+    CFTimeInterval (*clock)(void *), const char *(*imageName)(Class, void *), void *context) {
+    CVLPHighlightsClassMethodSearch search = {0};
+    search.selector = selector;
+    search.anchor = anchor;
+    search.anchorImage = anchorImage;
+    search.startedAt = startedAt;
+    search.clock = clock;
+    search.imageName = imageName;
+    search.context = context;
+    if (anchor == Nil) {
+        search.reason = CVLPHighlightsLookupReasonMissingAnchor;
+    } else if (anchorImage == NULL || anchorImage[0] == '\0') {
+        search.reason = CVLPHighlightsLookupReasonMissingImage;
+    } else if (clock == NULL || imageName == NULL) {
+        search.reason = CVLPHighlightsLookupReasonMissingImage;
+    }
+    return search;
+}
+
+// The same per-class accumulator is used by the image iterator and the
+// deterministic fixture. Runtime metadata calls may realize classes and may
+// allocate internally; elapsed time is checked on both sides of each method
+// list copy, but those runtime calls cannot be interrupted.
+static BOOL CVLPHighlightsClassSearchObserve(CVLPHighlightsClassMethodSearch *search, Class cls) {
+    if (search == NULL || search->reason != CVLPHighlightsLookupReasonNone) { return NO; }
+    if (search->clock(search->context) - search->startedAt >= CVLPHighlightsClassScanDeadline) {
+        search->reason = CVLPHighlightsLookupReasonDeadline;
+        return NO;
+    }
+    if (search->classes >= CVLPHighlightsMaximumClasses) {
+        search->classes = CVLPHighlightsMaximumClasses;
+        search->reason = CVLPHighlightsLookupReasonClassLimit;
+        return NO;
+    }
+    search->classes++;
+    if (cls == Nil) {
+        search->reason = CVLPHighlightsLookupReasonInvalidClass;
+        return NO;
+    }
+    if (cls == search->anchor) { search->anchorSeen = YES; }
+    const char *candidateImage = search->imageName(cls, search->context);
+    if (candidateImage == NULL || strcmp(candidateImage, search->anchorImage) != 0) {
+        search->reason = CVLPHighlightsLookupReasonClassImageMismatch;
+        return NO;
+    }
+
+    CFTimeInterval beforeMethodList = search->clock(search->context);
+    if (beforeMethodList - search->startedAt >= CVLPHighlightsClassScanDeadline) {
+        search->reason = CVLPHighlightsLookupReasonDeadline;
+        return NO;
+    }
+    NSUInteger ownMatches = 0;
+    Method method = CVLPHighlightsDeclaredMethod(object_getClass(cls), search->selector, &ownMatches);
+    CFTimeInterval afterMethodList = search->clock(search->context);
+    if (afterMethodList - search->startedAt >= CVLPHighlightsClassScanDeadline) {
+        search->reason = CVLPHighlightsLookupReasonDeadline;
+        return NO;
+    }
+    if (ownMatches > 1) {
+        search->reason = CVLPHighlightsLookupReasonAmbiguous;
+        search->matches += ownMatches;
+        return NO;
+    }
+    if (ownMatches == 1) {
+        search->matches++;
+        if (search->matches == 1) {
+            search->owner = cls;
+            search->method = method;
+        } else {
+            search->owner = Nil;
+            search->method = NULL;
+            search->reason = CVLPHighlightsLookupReasonAmbiguous;
+            return NO;
+        }
+    }
+    return YES;
+}
+
+static CVLPHighlightsClassMethodSearch CVLPHighlightsClassSearchFinish(
+    CVLPHighlightsClassMethodSearch search) {
+    if (search.reason != CVLPHighlightsLookupReasonNone) { return search; }
+    if (search.clock(search.context) - search.startedAt >= CVLPHighlightsClassScanDeadline) {
+        search.reason = CVLPHighlightsLookupReasonDeadline;
+        return search;
+    }
+    if (!search.anchorSeen) {
+        search.reason = CVLPHighlightsLookupReasonAnchorNotEnumerated;
+        return search;
+    }
+    search.complete = YES;
+    return search;
+}
+
+#if defined(CVLP_HIGHLIGHTS_TESTING)
+static CVLPHighlightsClassMethodSearch CVLPHighlightsSearchProvidedClasses(
+    SEL selector, Class anchor, const char *anchorImage, Class const *classes, NSUInteger count,
+    CFTimeInterval startedAt, CFTimeInterval (*clock)(void *),
+    const char *(*imageName)(Class, void *), void *context) {
+    CVLPHighlightsClassMethodSearch search = CVLPHighlightsClassSearchCreate(
+        selector, anchor, anchorImage, startedAt, clock, imageName, context);
+    if (search.reason != CVLPHighlightsLookupReasonNone) { return search; }
+    if (count > CVLPHighlightsMaximumClasses) {
+        search.classes = CVLPHighlightsMaximumClasses;
+        search.reason = CVLPHighlightsLookupReasonClassLimit;
+        return search;
+    }
+    if (count > 0 && classes == NULL) {
+        search.reason = CVLPHighlightsLookupReasonInvalidClass;
+        return search;
+    }
+    for (NSUInteger index = 0; index < count; index++) {
+        if (!CVLPHighlightsClassSearchObserve(&search, classes[index])) { return search; }
+    }
+    return CVLPHighlightsClassSearchFinish(search);
+}
+#endif
+
+static CVLPHighlightsClassMethodSearch CVLPHighlightsFindClassMethod(SEL selector, Class anchor) {
+    CFTimeInterval startedAt = CACurrentMediaTime();
+    const char *anchorImage = anchor == Nil ? NULL : class_getImageName(anchor);
+    __block CVLPHighlightsClassMethodSearch search = CVLPHighlightsClassSearchCreate(
+        selector, anchor, anchorImage, startedAt, CVLPHighlightsRuntimeClock,
+        CVLPHighlightsRuntimeImageName, NULL);
+    if (search.reason != CVLPHighlightsLookupReasonNone) { return search; }
+
+    Dl_info imageInfo = {0};
+    if (dladdr((__bridge const void *)anchor, &imageInfo) == 0 ||
+        imageInfo.dli_fbase == NULL || imageInfo.dli_fname == NULL) {
+        search.reason = CVLPHighlightsLookupReasonMissingImage;
+        return search;
+    }
+    if (strcmp(anchorImage, imageInfo.dli_fname) != 0) {
+        search.reason = CVLPHighlightsLookupReasonImageAddressMismatch;
+        return search;
+    }
+    if (CACurrentMediaTime() - startedAt >= CVLPHighlightsClassScanDeadline) {
+        search.reason = CVLPHighlightsLookupReasonDeadline;
+        return search;
+    }
+
+    // objc_enumerateClasses is image-scoped and does not copy a process-wide
+    // class array. It may do runtime work between callbacks, so the deadline
+    // is best-effort around each callback and at completion, not preemptive.
+    objc_enumerateClasses(imageInfo.dli_fbase, NULL, NULL, Nil, ^(__unused Class cls, BOOL *stop) {
+        if (!CVLPHighlightsClassSearchObserve(&search, cls)) { *stop = YES; }
+    });
+    return CVLPHighlightsClassSearchFinish(search);
+}
+
+static CVLPHighlightsInstallStatus CVLPHighlightsInstallClassBoolean(
+    SEL selector, CVLPHighlightsTarget target, Class anchor,
+    CVLPHighlightsClassMethodSearch *searchDetails) {
+    CVLPHighlightsClassMethodSearch search = CVLPHighlightsFindClassMethod(selector, anchor);
+    if (searchDetails != NULL) { *searchDetails = search; }
+    if (search.reason == CVLPHighlightsLookupReasonAmbiguous) { return CVLPHighlightsInstallAmbiguous; }
     if (!search.complete) { return CVLPHighlightsInstallBoundedIncomplete; }
-    if (search.matches > 1) { return CVLPHighlightsInstallAmbiguous; }
     if (search.matches == 0) { return CVLPHighlightsInstallNotFound; }
     if (search.method == NULL || search.owner == Nil) { return CVLPHighlightsInstallFailed; }
     if (!CVLPHighlightsMethodHasExactSignature(search.method, "B")) { return CVLPHighlightsInstallWrongABI; }
@@ -352,6 +491,8 @@ static CVLPHighlightsInstallStatus CVLPHighlightsInstallInstance(Class cls, SEL 
 @interface CVLPHighlightsObserver : NSObject {
 @public
     int _installStatuses[CVLPHighlightsTargetCount];
+    int _classLookupReasons[2];
+    NSUInteger _classLookupClasses[2];
     NSUInteger _eventCount;
     CFTimeInterval _startedAt;
     BOOL _stopped;
@@ -465,6 +606,7 @@ static const char *CVLPHighlightsFieldNames[] = {
     "seq", "ms", "reason", "st0", "st1", "st2", "st3", "st4", "st5",
     "c0", "c1", "c2", "c3", "c4", "c5", "l0", "l1", "l2", "l3", "l4", "l5",
     "n", "w", "r", "hidden", "alpha", "width", "height", "trunc", "err",
+    "scope", "why0", "why1", "classes0", "classes1",
 };
 
 static BOOL CVLPHighlightsParseInteger(const char *value) {
@@ -511,7 +653,7 @@ static BOOL CVLPHighlightsLineIsSanitized(NSString *line) {
     });
     if ([line rangeOfCharacterFromSet:allowedCharacters.invertedSet].location != NSNotFound) { return NO; }
     NSArray<NSString *> *parts = [line componentsSeparatedByString:@" "];
-    if (parts.count != 32 || ![parts[0] isEqualToString:@"CVLP_HIGHLIGHTS"]) { return NO; }
+    if (parts.count != 37 || ![parts[0] isEqualToString:@"CVLP_HIGHLIGHTS"]) { return NO; }
     NSString *phase = nil;
     for (NSUInteger index = 1; index < parts.count; index++) {
         NSString *part = parts[index];
@@ -563,6 +705,15 @@ static BOOL CVLPHighlightsLineIsSanitized(NSString *line) {
         } else if (index == 30 || index == 31) {
             long long flag = strtoll(value, NULL, 10);
             if (flag < 0 || flag > 1) { return NO; }
+        } else if (index == 32) {
+            if (strtoll(value, NULL, 10) != 1) { return NO; }
+        } else if (index == 33 || index == 34) {
+            long long lookupReason = strtoll(value, NULL, 10);
+            if (lookupReason < CVLPHighlightsLookupReasonNone ||
+                lookupReason > CVLPHighlightsLookupReasonAnchorNotEnumerated) { return NO; }
+        } else if (index == 35 || index == 36) {
+            long long classes = strtoll(value, NULL, 10);
+            if (classes < 0 || classes > CVLPHighlightsMaximumClasses) { return NO; }
         }
     }
     return phase != nil;
@@ -581,6 +732,10 @@ static BOOL CVLPHighlightsLineIsSanitized(NSString *line) {
         observer->_startedAt = CACurrentMediaTime();
         for (NSUInteger index = 0; index < CVLPHighlightsTargetCount; index++) {
             observer->_installStatuses[index] = CVLPHighlightsInstallUnknown;
+        }
+        for (NSUInteger index = 0; index < 2; index++) {
+            observer->_classLookupReasons[index] = CVLPHighlightsLookupReasonNone;
+            observer->_classLookupClasses[index] = 0;
         }
         CVLPHighlightsSharedObserver = observer;
         [observer startOnMainQueue];
@@ -608,14 +763,21 @@ static BOOL CVLPHighlightsLineIsSanitized(NSString *line) {
     os_unfair_lock_unlock(&CVLPHighlightsStateLock);
     CVLPHighlightsStoreLastTree(self, CVLPHighlightsEmptyTree());
 
-    self->_installStatuses[CVLPHighlightsConsumptionTarget] =
-        CVLPHighlightsInstallClassBoolean(sel_registerName("enableStoryHighlightConsumption"), CVLPHighlightsConsumptionTarget);
-    self->_installStatuses[CVLPHighlightsCreationTarget] =
-        CVLPHighlightsInstallClassBoolean(sel_registerName("enableStoryHighlightCreation"), CVLPHighlightsCreationTarget);
-
     Class modelClass = objc_lookUpClass("TTKProfileBizDataStoryHighlightInfoModel");
     Class componentClass = objc_lookUpClass("TTKProfileStoryHighlightComponent");
     Class collectionClass = objc_lookUpClass("TTKProfileStoryHighlightCollectionComponent");
+    CVLPHighlightsClassMethodSearch consumptionSearch = {0};
+    CVLPHighlightsClassMethodSearch creationSearch = {0};
+    self->_installStatuses[CVLPHighlightsConsumptionTarget] = CVLPHighlightsInstallClassBoolean(
+        sel_registerName("enableStoryHighlightConsumption"), CVLPHighlightsConsumptionTarget,
+        modelClass, &consumptionSearch);
+    self->_classLookupReasons[0] = consumptionSearch.reason;
+    self->_classLookupClasses[0] = MIN(consumptionSearch.classes, CVLPHighlightsMaximumClasses);
+    self->_installStatuses[CVLPHighlightsCreationTarget] = CVLPHighlightsInstallClassBoolean(
+        sel_registerName("enableStoryHighlightCreation"), CVLPHighlightsCreationTarget,
+        modelClass, &creationSearch);
+    self->_classLookupReasons[1] = creationSearch.reason;
+    self->_classLookupClasses[1] = MIN(creationSearch.classes, CVLPHighlightsMaximumClasses);
     self->_installStatuses[CVLPHighlightsModelTarget] = CVLPHighlightsInstallInstance(
         modelClass, sel_registerName("storyHighlightInfo"), "@", CVLPHighlightsModelTarget);
     self->_installStatuses[CVLPHighlightsMountTarget] = CVLPHighlightsInstallInstance(
@@ -696,7 +858,8 @@ static BOOL CVLPHighlightsLineIsSanitized(NSString *line) {
     NSString *line = [NSString stringWithFormat:
         @"CVLP_HIGHLIGHTS phase=%@ seq=%lu ms=%llu reason=%d st0=%d st1=%d st2=%d st3=%d st4=%d st5=%d "
          "c0=%u c1=%u c2=%u c3=%u c4=%u c5=%u l0=%d l1=%d l2=%d l3=%d l4=%d l5=%.6g "
-         "n=%lu w=%lu r=%lu hidden=%d alpha=%.6g width=%.6g height=%.6g trunc=%d err=%d",
+         "n=%lu w=%lu r=%lu hidden=%d alpha=%.6g width=%.6g height=%.6g trunc=%d err=%d "
+         "scope=1 why0=%d why1=%d classes0=%lu classes1=%lu",
         phase, (unsigned long)sequence, elapsed, reason,
         self->_installStatuses[0], self->_installStatuses[1], self->_installStatuses[2],
         self->_installStatuses[3], self->_installStatuses[4], self->_installStatuses[5],
@@ -704,7 +867,9 @@ static BOOL CVLPHighlightsLineIsSanitized(NSString *line) {
         (unsigned int)state.counts[3], (unsigned int)state.counts[4], (unsigned int)state.counts[5],
         state.lastConsumption, state.lastCreation, state.lastModelPresence, state.lastMount, state.lastUpdate,
         state.lastHeight, (unsigned long)tree.nodes, (unsigned long)tree.windows, (unsigned long)tree.rows,
-        tree.hidden, tree.alpha, tree.width, tree.height, tree.truncated, tree.error];
+        tree.hidden, tree.alpha, tree.width, tree.height, tree.truncated, tree.error,
+        self->_classLookupReasons[0], self->_classLookupReasons[1],
+        (unsigned long)self->_classLookupClasses[0], (unsigned long)self->_classLookupClasses[1]];
     if (!CVLPHighlightsLineIsSanitized(line)) { return; }
     self->_eventCount++;
     CVLPHighlightsStoreLastTree(self, tree);

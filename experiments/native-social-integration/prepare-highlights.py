@@ -29,7 +29,7 @@ def transform(probe):
                  'if (!CVLPGuestDiagnosticsLineIsSanitized(line) &&\n'
                  '        !CVLPHighlightsLineIsSanitized(line)) { return; }')
     return once(probe, 'Build marker: integration-23.',
-                'Build marker: integration-23-highlights1.')
+                'Build marker: integration-23-highlights2.')
 
 
 def main():

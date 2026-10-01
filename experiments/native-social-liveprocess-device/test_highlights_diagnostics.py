@@ -91,12 +91,21 @@ class HighlightsDiagnosticsSourceTests(unittest.TestCase):
     def test_class_owner_search_is_bounded_and_only_unique_declarations_install(self):
         self.assertIn("CVLPHighlightsMaximumClasses = 100000", self.header)
         self.assertIn("CVLPHighlightsClassScanDeadline = 0.5", self.header)
-        self.assertIn("objc_getClassList(NULL, 0)", self.header)
-        self.assertIn("(index & 127U) == 0U", self.header)
-        self.assertIn("CVLPHighlightsDeclaredMethod(object_getClass(cls), selector, &ownMatches)", self.header)
-        self.assertIn("search.matches > 1", self.header)
+        self.assertIn("objc_enumerateClasses(imageInfo.dli_fbase, NULL, NULL, Nil", self.header)
+        self.assertIn("class_getImageName(anchor)", self.header)
+        self.assertIn("dladdr((__bridge const void *)anchor, &imageInfo)", self.header)
+        self.assertIn("CVLPHighlightsClassSearchObserve(&search, cls)", self.header)
+        self.assertIn("CVLPHighlightsDeclaredMethod(object_getClass(cls), search->selector, &ownMatches)", self.header)
+        self.assertIn("beforeMethodList = search->clock(search->context)", self.header)
+        self.assertIn("afterMethodList = search->clock(search->context)", self.header)
+        self.assertNotIn("objc_getClassList(", self.header)
         self.assertIn("search.matches == 0", self.header)
-        self.assertIn("objc_getClassList(NULL, 0) != reportedCount", self.header)
+        self.assertIn("search.reason == CVLPHighlightsLookupReasonAmbiguous", self.header)
+        self.assertIn("CVLPHighlightsLookupReasonClassLimit", self.header)
+        self.assertIn("CVLPHighlightsLookupReasonDeadline", self.header)
+        self.assertIn("CVLPHighlightsLookupReasonClassImageMismatch", self.header)
+        self.assertIn("CVLPHighlightsLookupReasonAnchorNotEnumerated", self.header)
+        self.assertIn("not preemptive", self.header)
 
     def test_wrappers_forward_once_preserve_values_and_do_not_retain_state(self):
         self.assertIn("((BOOL (*)(id, SEL))invocation)((id)receiver, exactSelector)", self.header)
@@ -127,7 +136,9 @@ class HighlightsDiagnosticsSourceTests(unittest.TestCase):
         self.assertIn('CVLPHighlightsRecording = NO;', self.header)
         self.assertIn('[self appendLineForPhase:@"stopped"', self.header)
         self.assertIn('line.length > 2048', self.header)
-        self.assertIn('parts.count != 32', self.header)
+        self.assertIn('parts.count != 37', self.header)
+        self.assertIn('"scope", "why0", "why1", "classes0", "classes1"', self.header)
+        self.assertIn('scope=1 why0=%d why1=%d classes0=%lu classes1=%lu', self.header)
         self.assertIn('hasPrefix:@"CVLP_HIGHLIGHTS "', self.header)
         self.assertIn('containsObject:phase', self.header)
         start = self.header.split('- (void)startOnMainQueue {', 1)[1].split('- (void)scheduleSample:', 1)[0]
@@ -158,13 +169,31 @@ class HighlightsDiagnosticsSourceTests(unittest.TestCase):
         self.assertIn("model_presence_without_extra_getter", self.fixture)
         self.assertIn("wrong_abi_not_modified", self.fixture)
         self.assertIn("inherited_method_not_modified", self.fixture)
-        self.assertIn("ambiguous_owner_not_modified", self.fixture)
+        self.assertIn("runtime_image_ambiguity_does_not_modify_either_owner", self.fixture)
         self.assertIn("stopped_wrappers_forward_without_recording", self.fixture)
         self.assertIn("counter_saturates", self.fixture)
         self.assertIn("late_hook_disables_recording", self.fixture)
         self.assertIn("terminal_line_bound_and_no_post_stop_emit", self.fixture)
-        self.assertIn("sanitizer_rejects_text_extra_and_nonfinite", self.fixture)
+        self.assertIn("sanitizer_enforces_scope_reason_and_class_count_bounds", self.fixture)
         self.assertIn("discovery_never_invokes_resolvers", self.fixture)
+        for case in (
+            "image_inventory_unique_owner",
+            "missing_anchor_is_incomplete",
+            "incomplete_lookup_does_not_modify_implementation",
+            "missing_anchor_image_is_incomplete",
+            "image_inventory_limit_is_reported_and_clamped",
+            "runtime_class_callback_limit_is_clamped",
+            "inventory_must_contain_anchor",
+            "expired_inventory_stops_before_metadata",
+            "metadata_copy_time_is_inside_deadline",
+            "invalid_enumerated_class_fails_closed",
+            "class_from_other_image_fails_closed",
+            "inherited_class_method_is_not_a_declaration",
+            "same_image_duplicate_declarations_are_ambiguous",
+            "runtime_image_ambiguity_does_not_modify_either_owner",
+            "sanitizer_enforces_scope_reason_and_class_count_bounds",
+        ):
+            self.assertIn(case, self.fixture)
         self.assertNotIn("UIApplicationMain", self.fixture)
 
     def test_existing_geometry_transform_remains_independent(self):
