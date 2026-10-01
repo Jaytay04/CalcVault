@@ -1,5 +1,38 @@
 # CalcVault test report
 
+## Admission private delivery (2026-10-01)
+
+Separate private prerelease delivery PASS: repository confirmed PRIVATE before
+and after upload; release is not draft. GitHub reports the IPA SHA256/size as
+202cc77febce0a511dfaaa815a9c10c3185552577b50c4010a0caee8087f76e7/702861797bytes,
+matching local verified output. Portable checksum asset SHA256/size is
+0617f4927bb3e7a7f4f10123f448f8ac7b72252a1d74e2ad38e496c499909de0/131bytes,
+also matching locally. Receipt and release URL remain ignored/private. Previous
+IPAs are preserved. Phone signing/install, affected-profile metadata, playback
+and Lock/calculator, and X/Instagram/download regression remain NOT RUN.
+The candidate is read-only discovery with all viewing overrides off; no Highlights
+fix or security certification is claimed.
+
+## Admission native gate and immutable assembly (2026-10-01)
+
+Actions36930831514 at5e421e8 PASS on Xcode26.6/17F113. Downloaded fresh exact
+native results verify all six configurations, each with admissionCases=1 and
+only mode4 with replayTerminal=1. Admission-only mode5 runs with all viewing
+overrides disabled. The admission console contains only the process line,
+demonstrating why completion is gated by saved evidence rather than console
+capture. Simulator/device Kit and host builds and package checks pass. Locked
+root smoke records CV_INTEGRATION_ROOT_ACTIVE; it does not launch a private guest.
+
+Host SHA256 aece87c940798286b1a1fe6c8d02618d4b7ac4c1ef84cb0fb6ca5a0da2817432
+matches CI. Private no-overwrite assembly and independent full-member readback
+verify122 unchanged host files,2424 guest files plus the unchanged descriptor,
+RX, identities, portrait-only host, file-sharing restrictions, absence of signing
+exports, original inputs and compiled diagnostic marker. Candidate SHA256
+202cc77febce0a511dfaaa815a9c10c3185552577b50c4010a0caee8087f76e7,702861797bytes.
+The assembly needs fresh SideStore signing; it is not a valid final signature.
+Private upload is in progress; signed-phone runtime metadata, installation and
+Highlights acceptance remain NOT RUN. No Highlights fix/security claim inferred.
+
 Persisted-result correction validation: device-source81/integration51 PASS;
 package-tools118 PASS from the unchanged packaging slice (250 total). Bash
 syntax/diff checks PASS. Independent review confirms completion flags are set
