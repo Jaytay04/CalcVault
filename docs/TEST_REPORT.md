@@ -1,5 +1,17 @@
 # CalcVault test report
 
+## Direct viewing first Apple compile failure (2026-10-01)
+
+FAIL: Actions 36849681187 at 4949d23 stops before native execution: the
+iPhoneSimulator SDK emits `mach_vm.h unsupported`, undeclared mach_vm_region
+and mach_vm_read_overwrite errors, and `#endif without #if`. No IPA produced.
+Independent source review missed these compile issues; Windows assertions were
+not sufficient. Corrected the include/terminator and switched to SDK-declared
+vm_region_64/vm_read_overwrite; native-width static assertions reject pointer
+or length truncation. Same self-task read/query, protection checks and single
+data-pointer CAS; no permission relaxation. New preprocessor/API regression
+check added. Apple compilation/execution still pending on rerun.
+
 ## Direct viewing implementation and local validation (2026-10-01)
 
 Implemented the separately approved default-off native consumption-slot test.

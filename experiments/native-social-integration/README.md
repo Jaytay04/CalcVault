@@ -199,8 +199,10 @@ The direct-call experiment appends `directMode`, `directStatus`, `directCalls`,
 `directLast` and `directOverrideCalls`. Direct status 0 means disabled; 1 installed;
 2 unsupported architecture; 3 unavailable image; 4 malformed image; 5 pin mismatch;
 6 section mismatch; 7 mapping rejected; 8 code mismatch; 9 consumption-pointer
-mismatch; 10 creation-pointer mismatch; 11 compare-exchange failure. Direct calls
-and overrides saturate and freeze when recording stops. `directLast=-1` is unknown;
+mismatch; 10 creation-pointer mismatch; 11 compare-exchange failure. `directCalls`
+counts attempts before the original runs; `directOverrideCalls` counts returned
+overrides, so a throwing original can increase only the attempt count. Both
+saturate and freeze when recording stops. `directLast=-1` is unknown;
 otherwise it retains the last original native Boolean, not per-call history.
 In direct mode the Objective-C `l0` can reflect the delivered true value and must
 not be called the original native result. Only calls through the designated slot

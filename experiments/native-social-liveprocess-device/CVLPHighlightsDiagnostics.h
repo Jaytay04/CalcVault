@@ -11,7 +11,6 @@
 #import <limits.h>
 #import <stdint.h>
 #import <mach/mach.h>
-#import <mach/mach_vm.h>
 #import <mach-o/loader.h>
 #import <mach-o/nlist.h>
 #import <stdatomic.h>
@@ -613,12 +612,13 @@ static CVLPHighlightsDirectInstallStatus CVLPHighlightsDirectValidateAndInstall(
 static BOOL CVLPHighlightsDirectMachRegionAllows(uintptr_t address, size_t length,
     vm_prot_t required, vm_prot_t forbidden, __unused void *context) {
     if (length == 0 || address > UINTPTR_MAX - length) { return NO; }
-    mach_vm_address_t regionAddress = (mach_vm_address_t)address;
-    mach_vm_size_t regionSize = 0;
+    _Static_assert(sizeof(vm_address_t) == sizeof(uintptr_t), "VM address must preserve native pointers");
+    vm_address_t regionAddress = (vm_address_t)address;
+    vm_size_t regionSize = 0;
     vm_region_basic_info_data_64_t information = {0};
     mach_msg_type_number_t informationCount = VM_REGION_BASIC_INFO_COUNT_64;
     mach_port_t objectName = MACH_PORT_NULL;
-    kern_return_t result = mach_vm_region(mach_task_self(), &regionAddress, &regionSize,
+    kern_return_t result = vm_region_64(mach_task_self(), &regionAddress, &regionSize,
         VM_REGION_BASIC_INFO_64, (vm_region_info_t)&information, &informationCount, &objectName);
     if (objectName != MACH_PORT_NULL) { mach_port_deallocate(mach_task_self(), objectName); }
     if (result != KERN_SUCCESS || address < regionAddress ||
@@ -632,9 +632,10 @@ static BOOL CVLPHighlightsDirectMachRegionAllows(uintptr_t address, size_t lengt
 static BOOL CVLPHighlightsDirectMachRead(uintptr_t address, void *destination,
     size_t length, __unused void *context) {
     if (destination == NULL || length == 0) { return NO; }
-    mach_vm_size_t copied = 0;
-    kern_return_t result = mach_vm_read_overwrite(mach_task_self(), (mach_vm_address_t)address,
-        (mach_vm_size_t)length, (mach_vm_address_t)(uintptr_t)destination, &copied);
+    _Static_assert(sizeof(vm_size_t) == sizeof(size_t), "VM size must preserve native lengths");
+    vm_size_t copied = 0;
+    kern_return_t result = vm_read_overwrite(mach_task_self(), (vm_address_t)address,
+        (vm_size_t)length, (vm_address_t)(uintptr_t)destination, &copied);
     return result == KERN_SUCCESS && copied == length;
 }
 
@@ -667,7 +668,6 @@ static CVLPHighlightsDirectInstallStatus CVLPHighlightsDirectInstallForAnchor(Cl
     return CVLPHighlightsDirectValidateAndInstall((uintptr_t)imageInfo.dli_fbase, &memory);
 #endif
 }
-#endif
 #endif
 
 static BOOL CVLPHighlightsMethodHasExactSignature(Method method, const char *returnEncoding) {

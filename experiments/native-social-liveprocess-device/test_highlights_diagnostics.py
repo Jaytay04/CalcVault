@@ -1,6 +1,7 @@
 """Source-contract checks for the bounded native Highlights diagnostic fixture."""
 
 import importlib.util
+import re
 from pathlib import Path
 import unittest
 
@@ -171,6 +172,21 @@ class HighlightsDiagnosticsSourceTests(unittest.TestCase):
         self.assertIn("#if !CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT", direct_install)
         self.assertIn("return CVLPHighlightsDirectDisabled", direct_install)
         self.assertNotIn("compareExchange(creationSlot", direct_install)
+
+    def test_ios_vm_api_and_preprocessor_balance(self):
+        self.assertNotIn("#import <mach/mach_vm.h>", self.header)
+        self.assertIn("vm_region_64(mach_task_self()", self.header)
+        self.assertIn("vm_read_overwrite(mach_task_self()", self.header)
+        self.assertIn("sizeof(vm_address_t) == sizeof(uintptr_t)", self.header)
+        self.assertIn("sizeof(vm_size_t) == sizeof(size_t)", self.header)
+        depth = 0
+        for line in self.header.splitlines():
+            if re.match(r"^\s*#\s*(if|ifdef|ifndef)\b", line):
+                depth += 1
+            elif re.match(r"^\s*#\s*endif\b", line):
+                depth -= 1
+                self.assertGreaterEqual(depth, 0)
+        self.assertEqual(depth, 0)
 
     def test_scheduler_lifecycle_and_line_output_are_bounded(self):
         self.assertIn("CVLPHighlightsMaximumEvents = 26", self.header)
