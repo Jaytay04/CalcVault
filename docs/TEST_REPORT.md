@@ -2,6 +2,19 @@
 
 ## TikTok47 private testing IPA production (2026-10-02)
 
+Delivery update: owner explicitly authorized the reviewed source/derived-metadata
+public push and private release upload. The two pending commits4bcdaa1/bdd6d39
+were pushed; remote source head verified bdd6d391636ede55fad7453063ef97cf464ed36c.
+Private repository visibility was verified before upload and immediately before
+publication. New separate prerelease is published (non-draft), contains exactly
+the unchanged IPA and checksum, and leaves prior releases intact. GitHub asset
+state/size/digest match local: IPA996792270bytes/SHA79821f30ed106ed6c463691ae4aaaf87ea07955260d53182b948ec8f29d87ec0;
+checksum111bytes/SHA270fd7baff05cc5af92aa6433957f9ba07b169678631d427bdaee520ed06af87.
+Final published-state checks PASS; release and asset URLs/IDs are recorded only
+in ignored private delivery notes. No private payload/key bytes went to public
+source or CI. This verifies publication integrity, not phone signing, installation,
+native launch, live login or Highlights. Those physical-device gates remain NOT RUN.
+
 Actual final IPA: `build/tiktok47-inspection-20261002/CalcVault-native-TikTok47-integration-24.ipa`,
 996792270 bytes, SHA79821f30ed106ed6c463691ae4aaaf87ea07955260d53182b948ec8f29d87ec0.
 Actions37004741094 completed successfully at host source0e3a953e69133369d4907d04c0fff3a22e83145d;
