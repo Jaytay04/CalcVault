@@ -1,5 +1,19 @@
 # CalcVault test report
 
+## Independent TKPlus stream receiver 2026-10-02
+
+The new incremental receiver and fixtures are source-only. Local Clang18.1.8
+static analysis of both portable core units and the new stream fixture completed
+without diagnostics. The stream fixture passes 67,745 explicit checks with C11,
+warnings as errors and `DNDEBUG`; the existing transfer fixture passes 16,502
+checks and all six reference tests pass. Coverage includes split/coalesced input,
+actual payload bytes, header/body truncation, trailing bytes, budgets, input
+overlap, sink failure, cancellation, revocation and reentrant parsing.
+Apple sanitizer and iPhoneOS object scripts pass Bash syntax checks. On Windows
+they exit 77 explicitly because Apple tools are absent; these are NOT RUN, not
+passing skips. Public CI is pending.
+No transport, media decode, encrypted import, app linking, signing or IPA build.
+
 ## Independent TKPlus public source checks 2026-10-02
 
 Authorized destination: public `Jaytay04/CalcVault`, separate branch

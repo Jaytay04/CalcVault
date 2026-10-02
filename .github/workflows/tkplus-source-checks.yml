@@ -32,6 +32,12 @@ jobs:
           python3 --version
       - name: Run portable synthetic transfer checks
         run: python3 -m unittest discover -s experiments/tkplus/Tests -p test_transfer.py -v
+      - name: Run fragmented-stream receiver checks
+        run: python3 -m unittest discover -s experiments/tkplus/Tests -p test_stream_reader.py -v
+      - name: Run portable fixtures with sanitizers
+        run: bash experiments/tkplus/Tests/test_sanitizers.sh
+      - name: Compile independent source for iPhoneOS
+        run: bash experiments/tkplus/Tests/test_ios_compile.sh
       - name: Run original-media selection fixture
         run: bash experiments/tkplus/Tests/test_media_selection.sh
       - name: Run guarded profile-controls fixtures

@@ -1,5 +1,17 @@
 # CalcVault task ledger
 
+## Independent TKPlus stream receiver 2026-10-02
+
+Added an isolated incremental receiver with one fixed frame buffer, encoded-byte
+and record budgets, tentative sink output, finish plus host-observed EOF, and
+fail-closed overlap/reentrancy handling. Cancellation and revocation stop further
+output, including after finish but before EOF. It is not a filesystem outbox or
+an import authorization gate. Added macOS sanitizer fixtures and standalone
+arm64 iPhoneOS object compilation to the approved public source-check branch.
+Apple CI results are pending; shipping code, main and private IPAs are unchanged.
+Protected host staging, actual media validation, confirmation and revocable
+encrypted import remain the next integration work.
+
 ## Independent TKPlus public source checks 2026-10-02
 
 The owner requested the public `Jaytay04/CalcVault` repository for Actions.

@@ -28,6 +28,7 @@ That package change has not been made in this slice.
 | Guest original-media selection | Bounded candidate lists, exact approved host matching, HTTPS-only URLs, no credentials/fragments, no thumbnail fallback or quality guessing. | CDN host policy, selected private-model adapters, downloader and real surface coverage. |
 | Guest profile eligibility controls | Explicit opt-in installation on two exact runtime selectors with method ownership, ABI and image checks. Default behavior forwards originals. Synthetic macOS Apple compilation and ten fixture modes pass. | iOS compilation, actual TikTok47 class/ABI/image eligibility and provider anonymity. |
 | Portable transfer lease | Bounded versioned records, host-issued opaque ID/generation, ordered chunks, exact completion size and irreversible revocation. | IPC transport, OS isolation, media decoding, protected staging, confirmation and encrypted commit. |
+| Incremental stream receiver | Fixed one-frame buffer; fragmented/coalesced input; encoded-byte and record budgets; validated tentative output; finish plus explicit host-observed EOF; fail-closed sink failure, overlap and reentrancy. | Filesystem outbox, actual media validation, protected staging and session-authorized import. |
 
 These components are not wired into the current phone build. There is no new
 IPA, visible Settings toggle or Save button yet. Do not describe source-level
@@ -56,6 +57,10 @@ alive after lock; that authority is separate and remains session-revocable.
 All access to each C lease must be serialized by its caller, including
 cancellation and inspection. It is not a concurrent API; host lock must revoke
 session/import authority independently of an in-flight accounting operation.
+The incremental receiver's outer state, not its embedded lease, determines
+whether EOF-checked byte accounting completed. Its sink writes are tentative:
+discard them on failure, cancellation, revocation or host lock. Never feed from
+storage overlapping the reader itself or retain its borrowed payload pointer.
 
 The host must still validate actual media type and decode bounds, copy into
 protected host-owned storage, request explicit confirmation under a current

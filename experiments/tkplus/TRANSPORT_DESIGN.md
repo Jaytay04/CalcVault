@@ -2,6 +2,8 @@
 
 Status: reviewed direction, not implemented or device-validated. This proposal
 does not authorize new bookmarks, an App Group, another extension or App ID.
+The portable `TKPStreamReader` is an implemented parsing prerequisite, not an
+outbox reader, filesystem grant or working media handoff.
 
 ## Why a new transport is needed
 
@@ -37,10 +39,16 @@ its location does not establish confidentiality, authenticity or isolation.
    Never wait on a guest-controlled FIFO or import directly from a guest URL.
 4. Stream the bounded records into a newly created, protected host-owned staging
    file. Check record identity, generation, order, payload and aggregate limits
-   through `TKPTransfer`. Require exact completion and EOF; reject partial reads,
+   through `TKPStreamReader` and its `TKPTransfer` lease. Gate success on the outer
+   reader state after finalization at host-observed EOF, not the embedded lease's
+   earlier finish state. Require exact completion and EOF; reject partial reads,
    trailing records/bytes, oversized input and inconsistent file metadata.
    Check input identity and size across the copy; these checks do not prove that
    a hostile guest left every byte unchanged. The copied bytes are still hostile.
+   Feed from separate stable storage, with serialized calls and a synchronous
+   tentative staging sink. Discard tentative output on any failure, cancellation,
+   revocation or host lock, including after a finish record. The receiver caps
+   records at 65,536 including finish; the host must set operational limits.
 5. Validate the actual copied media type, dimensions and decoder/resource limits,
    independent of the guest's declared JPEG/PNG/MP4 kind. Never decode or preview
    directly from the guest-controlled source. Parser completion is byte
@@ -87,5 +95,5 @@ lock during copy/decode/import. Confirm no new or wider bookmark and no guest
 read of host staging. Compile on Apple tools and repeat the signed-phone
 file/Keychain/certificate and lifecycle checks before using real media.
 
-No outbox reader, producer, downloader, network service or import wiring exists
+No filesystem outbox reader, producer, downloader, network service or import wiring exists
 in this source slice. Source review alone cannot pass these gates.
