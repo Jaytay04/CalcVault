@@ -1,5 +1,26 @@
 # CalcVault test report
 
+## Independent TKPlus public source checks 2026-10-02
+
+Authorized destination: public `Jaytay04/CalcVault`, separate branch
+`research/tkplus-independent-source-20261002`, based on public main `18f9be8`.
+Only reviewed source, sanitized documentation and generated fixtures are added;
+private Git history, guest binaries, signing exports and personal media are not
+copied. The workflow has no secrets, package assembly or artifact upload.
+
+| Check | Result | Evidence and limits |
+|---|---|---|
+| Portable C11 fixture | PASS | Windows Clang18.1.8; unchanged copied core compiles with warnings as errors and `DNDEBUG`, then passes 16,502 explicit synthetic checks. No transport, encryption or OS isolation tested. |
+| Static reference integrity | PASS | Six tests validate sanitized inventory/accounting and reject an unpinned fixture, including optimized Python. No proprietary guest execution. |
+| Public macOS source workflow | PENDING | Xcode16.4 pin; C fixture, Foundation URL selection, ten guarded Objective-C modes and six reference tests. Actual public run result will be recorded after log review. |
+| Shipping iOS and physical features | NOT RUN | Source is isolated in `experiments/tkplus`, not wired into the phone IPA. No Save button, downloading, media-only transport or encrypted import implemented in this slice. No anonymity, actual TikTok ABI or signed-phone compatibility claim. |
+
+These public checks do not change host credentials, bookmarks, products,
+calculator/vault/browser source or the working private package. Host session
+revocation remains separate from transfer byte accounting; each C lease requires
+caller serialization. The proposed handoff is documented in
+`experiments/tkplus/TRANSPORT_DESIGN.md`, not implemented.
+
 Research startup diagnostics 20.2 local source gate (2026-09-28): 28 tests under `experiments/native-social-liveprocess-device` and 118 package-tool tests PASS. Exact preparation replay against LiveContainer `e370a92dfc03ce109ebce00ed4a7cfc64ad1c801` PASS, including validation of the actual `ret = appMain(argc, argv);` call (an initial generic-symbol check incorrectly matched its declaration and was corrected before CI). Guest observers record a fixed armed marker before main, then bounded delegate scene-support bits, scene/window/root-view geometry from existing views; no screen content, class names, identifiers, preferences or URLs. Maximum 16 events, two scenes, three windows, 2,048 characters per line, with inactive/background/deactivation/deadline stop. Host diagnostics now include scene settings and presentation view geometry. Legacy fixture staging safety tests reject device payloads, non-synthetic guests and hosts outside the dedicated simulator clone. Legacy window callback/visibility is an observation rather than an acceptance gate; entry, armed diagnostics and revocation/exit remain mandatory. Native build, simulator runtime, device signing/installation and actual guest behavior are NOT RUN at this checkpoint.
 
 ## Layout 20.1 phone result and read-only startup investigation (2026-09-28)

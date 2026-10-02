@@ -1,0 +1,40 @@
+name: Independent TKPlus source checks
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - research/tkplus-independent-source-20261002
+    paths:
+      - experiments/tkplus/Core/**
+      - experiments/tkplus/Guest/**
+      - experiments/tkplus/Tests/**
+      - docs/tkplus/tools/**
+      - docs/tkplus/research/**
+      - .github/workflows/tkplus-source-checks.yml
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-source-checks:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Select existing pinned Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+          test "$(xcodebuild -version | tr '\n' ' ')" = "Xcode 16.4 Build version 16F6 "
+      - name: Record source-check environment
+        run: |
+          xcrun --sdk macosx clang --version
+          python3 --version
+      - name: Run portable synthetic transfer checks
+        run: python3 -m unittest discover -s experiments/tkplus/Tests -p test_transfer.py -v
+      - name: Run original-media selection fixture
+        run: bash experiments/tkplus/Tests/test_media_selection.sh
+      - name: Run guarded profile-controls fixtures
+        run: bash experiments/tkplus/Tests/test_profile_controls.sh
+      - name: Run reference integrity checks
+        run: python3 -m unittest discover -s docs/tkplus/tools -p test_inventory.py -v

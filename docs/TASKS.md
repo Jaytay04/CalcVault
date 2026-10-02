@@ -1,5 +1,22 @@
 # CalcVault task ledger
 
+## Independent TKPlus public source checks 2026-10-02
+
+The owner requested the public `Jaytay04/CalcVault` repository for Actions.
+Created a separate test branch from public main `18f9be8`, copying only the
+reviewed independently authored source, synthetic fixtures and sanitized
+`docs/tkplus` reference package. No private Git ancestry, publisher binaries,
+signing material, personal media or unrelated worktree changes were imported.
+Shipping source, main and existing IPAs remain unchanged.
+
+Local portable compilation/execution passes 16,502 explicit checks; the six
+static-index validation tests pass. Added a branch-scoped macOS fixture workflow
+with the existing Xcode16.4 pin and read-only contents permission. Public CI is
+pending at this checkpoint. This is not an iOS build or a working downloader:
+transport, host validation/confirmation/encrypted import and actual guest
+compatibility remain unimplemented or unverified. See `TEST_REPORT.md` and
+`tkplus/INDEPENDENT_IMPLEMENTATION.md`.
+
 Research startup diagnostics 20.2 source gate (2026-09-28): Added opt-in, bounded guest UIKit observations after post-loader and before the actual guest entry call, plus host scene/presentation geometry. No guest layout mutation, swizzling, TweakLoader expansion, new entitlements or production changes. Added a separate legacy app-delegate synthetic simulator baseline using the existing target and identity; normal scene-aware visibility and lock/race tests remain strict. Local PASS: 28 adapter/fixture tests, 118 package-tool tests and exact pinned-source preparation replay. Native compilation, simulator evidence and physical black-feed diagnosis remain pending. This is a diagnostic candidate, not a demonstrated feed fix.
 
 Research layout 20.1 phone failure and investigation (2026-09-28): Owner screenshot confirms the 20.1 title, clipped For You text, black feed and loading indicator. Supplied report has equal host view/content/frame sizes (440 by 799.67), and content-window attachment becomes true; host-size consistency is not guest-window correctness. Explicit-lock report observes PID presence then absence with getpgid; signal-zero precheck remains EPERM, so the legacy unsettled label is unchanged. Read-only investigation found the framework route disables TweakLoader, whose upstream UIKit component includes legacy-window scene attachment/status-bar fixes; the passing synthetic guest explicitly uses a scene delegate, while the original/prepared TikTok metadata has no scene manifest. This is a concrete coverage/compatibility gap, not a proven cause: MusicallyCore contains a scene-configuration selector and runtime delegate behavior is not established. Next diagnostic should compare a legacy-window synthetic fixture with the scene-aware control and capture actual guest scene/window state. No code fix, new IPA, build, signing, data reset or additional upload occurred in this investigation.

@@ -31,6 +31,23 @@ Do not claim that the app, its data footprint, or website use is undetectable. A
 
 ## 2. Non-negotiable security and product rules
 
+### Approved independent TKPlus research exception
+
+On 2026-10-02 the owner explicitly approved a narrow exception to the native
+runtime-hook exclusion for an independently authored layer in the existing
+native TikTok guest. The first scope is selected-media downloads intended for
+the encrypted Vault and opt-in profile-view eligibility controls. This is not
+permission to clone all TTKillerPlus behavior or certify provider anonymity.
+See `docs/tkplus/INDEPENDENT_IMPLEMENTATION.md` for the current execution slice.
+
+The guest must not obtain Vault keys, repositories, arbitrary host filesystem
+access, account credentials or copied cookies. No licensing bypass, checkout,
+telemetry, destructive cleaner, region spoofing or anti-inspection hook is in
+scope. Private provider endpoints remain prohibited. Existing products,
+App IDs, bookmarks, signing-resource policy and lifecycle checks do not expand
+under this exception. Synthetic tests precede private assembly and phone use.
+The general exclusions below remain applicable outside this exact scope.
+
 The vault's confidentiality must come from cryptographic keys and authenticated encryption, not from a hidden view or an `isUnlocked` Boolean. A plain or salted SHA-256 hash of a short calculator PIN is not an adequate vault design. Use an independent high-entropy key, a password-hardening function for the actual vault passphrase, and a protected biometric convenience path. Libsodium documents Argon2id password derivation and authenticated streaming encryption; use those implementations rather than inventing replacements. [S08, S09]
 
 The browser session store is a **separate protection boundary**. A persistent `WKWebsiteDataStore` may keep website state on disk. Hiding or destroying a web view does not make that store part of the encrypted vault. The UI and documentation must distinguish persistent browser convenience from encrypted file storage. [S05, S06]
