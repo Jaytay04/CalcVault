@@ -1,5 +1,41 @@
 # CalcVault test report
 
+## Admission2 source validation (2026-10-02)
+
+Local device-source81/integration51/package-tools118 PASS (250 total); both
+workflow YAML parses, Bash syntax and diff checks PASS. Updated synthetic cases
+are ready for native execution: skip oversized lists without invoking methods,
+continue to metaclass and later class matches, treat zero/duplicate partial
+counts as lower bounds, withdraw ABI, clean up on deadline, and reject malformed
+skip counts/partial signature certainty in the23-token schema. Original
+4096-method/class/time/privacy/pin/no-invocation boundaries remain unchanged.
+Separate marker integration-23-highlights-admission2; prior candidate preserved.
+Independent reader/schema/fixture review found no blocking defect; an explicit
+methodsScanned=1 cap/metaclass assertion also verifies skipped entries are not
+counted. Apple-native fixture execution, build, private assembly and delivery
+remain pending at this checkpoint. No Highlights fix claimed.
+
+## Admission1 signed-phone diagnostic (2026-10-02)
+
+Owner supplied marker integration-23-highlights-admission1, PID27251. Both
+CVLP_ADMISSION samples show status9/reason7, classes42/methods362 and no matches.
+Source enum and scan branch verify MethodLimit/MethodCountLimit: one runtime
+declared-method list exceeded4096, so the scanner aborted at that list. The
+identity/count of that list and later classes are unknown. This is FAIL for
+complete metadata discovery, not proof that the three checks do not exist.
+All method/direct/early viewing overrides are off. The natural consumption gate
+last returns false after five observed calls, creation false after two; exact
+model/component/height counters remain zero. Samples2-4 have complete bounded
+trees with no exact target cell; this does not prove global UI absence.
+
+Independent synthetic controls are ready. File read/write and host-only Keychain
+are denied through post-loader, app-ID control exposed, signing exports absent,
+sentinel unchanged. getpgid presence/ESRCH absence are observed; signal-zero
+settlement remains unproved. Audio/Lock/calculator and X/Instagram/download
+acceptance are not supplied in this result. No new fixture run, build, deployment,
+Highlights fix or security certification is claimed. Investigating continuation
+within the existing read-only count/time/privacy limits.
+
 ## Admission private delivery (2026-10-01)
 
 Separate private prerelease delivery PASS: repository confirmed PRIVATE before

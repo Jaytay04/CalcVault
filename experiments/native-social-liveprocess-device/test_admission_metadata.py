@@ -98,7 +98,17 @@ class AdmissionMetadataFixtureSourceTests(unittest.TestCase):
             "admission_image_mismatch_is_incomplete",
             "admission_deadline_stops_scan",
             "admission_class_cap_stops_scan",
-            "admission_method_cap_stops_scan",
+            "admission_method_cap_continues_to_metaclass_and_withdraws_abi",
+            "admission_method_cap_schema_preserves_lower_bound_only",
+            "admission_method_cap_schema_has_exact_23_token_order",
+            "admission_schema_rejects_known_abi_or_complete_status_with_skip",
+            "admission_method_cap_before_later_match_is_lower_bound",
+            "admission_method_cap_zero_partial_is_not_no_match",
+            "admission_duplicate_partial_abi_unknown_after_skip",
+            "admission_deadline_after_skip_clears_names_and_releases_list",
+            "priorMatchThenCap",
+            "admission_reference_change_after_skip_clears_all_names",
+            "admission_method_cap_repeat_scan_cleanup",
             "admission_runtime_resolvers_not_called",
             "admission_original_methods_not_invoked",
         ):
@@ -127,6 +137,20 @@ class AdmissionMetadataFixtureSourceTests(unittest.TestCase):
             self.assert_source_contains(self.fixture, forbidden)
         self.assert_source_contains(self.fixture, "hiddenpayload")
         self.assert_source_contains(self.fixture, "(unichar)0x7f")
+        for marker in (
+            "knownABIWithIncompleteSkip",
+            "skipMaximumBelowLimit",
+            "skipsExceedObservedClasses",
+            "tooManySkippedLists",
+        ):
+            self.assert_source_contains(self.fixture, marker)
+        sanitizer_start = self.header.rfind("static BOOL CVLPAdmissionLineIsSanitized(NSString *line) {")
+        sanitizer_end = self.header.index("\nstatic NSString *CVLPAdmissionFormatLine(", sanitizer_start)
+        sanitizer = self.header[sanitizer_start:sanitizer_end]
+        self.assert_source_contains(sanitizer, "skippedLists")
+        self.assert_source_contains(sanitizer, "maxSkipped")
+        self.assert_source_contains(sanitizer, "tokenCount != 23")
+        self.assert_source_contains(sanitizer, "skippedLists > classes * 2")
 
     def test_production_helper_uses_only_bounded_reads_and_runtime_metadata(self):
         for marker in (
@@ -158,6 +182,22 @@ class AdmissionMetadataFixtureSourceTests(unittest.TestCase):
             "missing bounded class-count constant")
         self.assertTrue(re.search(r"CVLPAdmissionMaximumMethodsPerList\s*=\s*4096", self.header),
             "missing bounded method-list constant")
+        self.assert_source_contains(self.header, "skippedLists")
+        self.assert_source_contains(self.header, "maxSkipped")
+        scanner_start = self.header.rfind("static CVLPAdmissionStatus CVLPAdmissionScanProvidedClasses(")
+        scanner_end = self.header.index("\nstatic CVLPAdmissionStatus CVLPAdmissionAnalyzeImageWithExpectedDigest(", scanner_start)
+        scanner = self.header[scanner_start:scanner_end]
+        self.assert_source_contains(scanner, "CVLPAdmissionStatusMethodLimit")
+        self.assert_source_contains(scanner, "skippedLists")
+        method_list_start = self.header.rfind("static CVLPAdmissionStatus CVLPAdmissionScanMethodList(")
+        method_list_end = self.header.index("\nstatic CVLPAdmissionStatus CVLPAdmissionRecheckReferences(", method_list_start)
+        method_list = self.header[method_list_start:method_list_end]
+        self.assert_source_contains(method_list, "free(methods)")
+        self.assert_source_contains(method_list, "result->skippedLists")
+        self.assert_source_contains(method_list, "result->maxSkipped")
+        self.assert_source_contains(method_list, "return CVLPAdmissionStatusUnknown")
+        self.assert_source_contains(self.fixture, "class_addMethod(object_getClass(candidate)")
+        self.assert_source_contains(self.fixture, "index <= CVLPAdmissionMaximumMethodsPerList")
 
     def test_build_mode_is_default_off_and_mutually_exclusive(self):
         self.assert_source_contains(self.diagnostics, "#define CVLP_HIGHLIGHTS_ADMISSION_METADATA 0")

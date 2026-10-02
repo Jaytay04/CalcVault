@@ -77,7 +77,8 @@ class HighlightsAdapterTests(unittest.TestCase):
     def test_admission_metadata_is_independent_and_fail_closed(self):
         updated = adapter.transform(source(), admission_metadata=True)
         self.assertIn('#define CVLP_HIGHLIGHTS_ADMISSION_METADATA 1', updated)
-        self.assertIn('Build marker: integration-23-highlights-admission1.', updated)
+        self.assertIn('Build marker: integration-23-highlights-admission2.', updated)
+        self.assertNotIn('Build marker: integration-23-highlights-admission1.', updated)
         self.assertIn('#if CVLP_HIGHLIGHTS_ADMISSION_METADATA\n'
                       '    if (!CVLPGuestDiagnosticsLineIsSanitized(line) &&\n'
                       '        !CVLPHighlightsLineIsSanitized(line) &&\n'
@@ -197,7 +198,8 @@ class HighlightsAdapterTests(unittest.TestCase):
         self.assertIn('test "$ADMISSION" != true || test "$DIRECT" != true', workflow)
         self.assertIn('test "$ADMISSION" != true || test "$VIEWING" != true', workflow)
         self.assertIn('args+=(--admission-metadata)', workflow)
-        self.assertIn("'-highlights-admission1'", workflow)
+        self.assertNotIn("'-highlights-admission1'", workflow)
+        self.assertIn("'-highlights-admission2'", workflow)
         self.assertIn('highlights_admission_metadata:', entry)
         self.assertIn('test "$ADMISSION" != true', entry)
         self.assertIn('test "$EARLY" != true || test "$DIAGNOSTICS" = true', workflow)

@@ -78,6 +78,8 @@ typedef struct {
     int reason;
     uint32_t classesScanned;
     uint32_t methodsScanned;
+    uint32_t skippedLists;
+    uint32_t maxSkipped;
     uint32_t matchCounts[CVLPAdmissionSelectorCount];
     int32_t argumentCounts[CVLPAdmissionSelectorCount];
     char selectorNames[CVLPAdmissionSelectorCount][CVLPAdmissionSelectorNameCapacity];
@@ -477,23 +479,26 @@ static CVLPAdmissionStatus CVLPAdmissionScanMethodList(Class owner,
         CVLPAdmissionSetFirstReason(result, CVLPAdmissionScanReasonDeadline);
         return CVLPAdmissionStatusDeadline;
     }
-    if (count > CVLPAdmissionMaximumMethodsPerList || (count > 0 && methods == NULL)) {
-        free(methods);
-        if (count > CVLPAdmissionMaximumMethodsPerList) {
-            CVLPAdmissionSetFirstReason(result, CVLPAdmissionScanReasonMethodCountLimit);
-            return CVLPAdmissionStatusMethodLimit;
-        }
+    if (count > 0 && methods == NULL) {
         CVLPAdmissionSetFirstReason(result, CVLPAdmissionScanReasonInvalidRuntimeMetadata);
         return CVLPAdmissionStatusIncomplete;
     }
+    if (count > CVLPAdmissionMaximumMethodsPerList) {
+        free(methods);
+        const uint32_t maximumSkippedLists = CVLPAdmissionMaximumClassCount * 2U;
+        if (result->skippedLists < maximumSkippedLists) { result->skippedLists++; }
+        if (count > result->maxSkipped) { result->maxSkipped = count; }
+        return CVLPAdmissionDeadlineReached(callbacks, deadlineAt) ?
+            CVLPAdmissionStatusDeadline : CVLPAdmissionStatusUnknown;
+    }
     for (unsigned int index = 0; index < count; index++) {
-        if (result->methodsScanned < CVLPAdmissionMaximumMethodTotal()) { result->methodsScanned++; }
         if (!CVLPAdmissionRecordMethod(methods[index], owner, validated, callbacks,
                 deadlineAt, result, metadataIncomplete)) {
             free(methods);
             CVLPAdmissionSetFirstReason(result, CVLPAdmissionScanReasonDeadline);
             return CVLPAdmissionStatusDeadline;
         }
+        if (result->methodsScanned < CVLPAdmissionMaximumMethodTotal()) { result->methodsScanned++; }
     }
     free(methods);
     if (CVLPAdmissionDeadlineReached(callbacks, deadlineAt)) {
@@ -636,9 +641,20 @@ static CVLPAdmissionStatus CVLPAdmissionScanProvidedClasses(
             anyMatch = anyMatch || result->matchCounts[index] > 0;
             ambiguous = ambiguous || result->matchCounts[index] > 1;
         }
-        terminal = metadataIncomplete ? CVLPAdmissionStatusIncomplete :
-            (ambiguous ? CVLPAdmissionStatusAmbiguous : (anyMatch ? CVLPAdmissionStatusMatched :
-                CVLPAdmissionStatusNoMatch));
+        if (result->skippedLists > 0) {
+            terminal = CVLPAdmissionStatusMethodLimit;
+            result->reason = CVLPAdmissionScanReasonMethodCountLimit;
+        } else {
+            terminal = metadataIncomplete ? CVLPAdmissionStatusIncomplete :
+                (ambiguous ? CVLPAdmissionStatusAmbiguous : (anyMatch ? CVLPAdmissionStatusMatched :
+                    CVLPAdmissionStatusNoMatch));
+        }
+    }
+    if (result->skippedLists > 0) {
+        for (NSUInteger index = 0; index < CVLPAdmissionSelectorCount; index++) {
+            result->returnCodes[index] = '?';
+            result->argumentCounts[index] = -1;
+        }
     }
     BOOL deadlineExpired = terminal == CVLPAdmissionStatusDeadline ||
         CVLPAdmissionDeadlineReached(callbacks, deadlineAt);
@@ -656,13 +672,13 @@ static CVLPAdmissionStatus CVLPAdmissionScanProvidedClasses(
         }
         if (deadlineExpired) {
             terminal = CVLPAdmissionStatusDeadline;
-            CVLPAdmissionSetFirstReason(result, CVLPAdmissionScanReasonDeadline);
+            result->reason = CVLPAdmissionScanReasonDeadline;
         } else if (referenceStatus == CVLPAdmissionStatusSelectorChanged) {
             terminal = CVLPAdmissionStatusSelectorChanged;
-            CVLPAdmissionSetFirstReason(result, CVLPAdmissionScanReasonSelectorChanged);
+            result->reason = CVLPAdmissionScanReasonSelectorChanged;
         } else {
             terminal = referenceStatus;
-            CVLPAdmissionSetFirstReason(result, CVLPAdmissionScanReasonInvalidRuntimeMetadata);
+            result->reason = CVLPAdmissionScanReasonInvalidRuntimeMetadata;
         }
     }
     result->status = terminal;
@@ -803,7 +819,7 @@ static BOOL CVLPAdmissionLineIsSanitized(NSString *line) {
         (NSUInteger)length != line.length) { return NO; }
     char buffer[CVLPAdmissionMaximumLineLength + 1];
     memcpy(buffer, utf8, length + 1);
-    char *tokens[21] = {0};
+    char *tokens[23] = {0};
     size_t tokenCount = 0;
     char *cursor = buffer;
     while (*cursor != '\0') {
@@ -812,13 +828,15 @@ static BOOL CVLPAdmissionLineIsSanitized(NSString *line) {
         while (*cursor != '\0' && *cursor != ' ') { cursor++; }
         if (*cursor == ' ') { *cursor++ = '\0'; if (*cursor == '\0' || *cursor == ' ') { return NO; } }
     }
-    if (tokenCount != 21 || strcmp(tokens[0], "CVLP_ADMISSION") != 0) { return NO; }
-    static const char *globalKeys[] = {"seq", "status", "reason", "classes", "methods"};
-    char *values[21] = {0};
-    for (NSUInteger index = 0; index < 5; index++) {
+    if (tokenCount != 23 || strcmp(tokens[0], "CVLP_ADMISSION") != 0) { return NO; }
+    static const char *globalKeys[] = {
+        "seq", "status", "reason", "classes", "methods", "skippedLists", "maxSkipped"
+    };
+    char *values[23] = {0};
+    for (NSUInteger index = 0; index < 7; index++) {
         if (!CVLPAdmissionFieldValue(tokens[index + 1], globalKeys[index], &values[index])) { return NO; }
     }
-    uint64_t sequence = 0, classes = 0, methods = 0;
+    uint64_t sequence = 0, classes = 0, methods = 0, skippedLists = 0, maxSkipped = 0;
     int64_t status = 0, reason = 0;
     if (!CVLPAdmissionParseUnsigned(values[0], UINT32_MAX, &sequence) || sequence == 0 ||
         !CVLPAdmissionParseSigned(values[1], CVLPAdmissionStatusUnknown,
@@ -826,7 +844,18 @@ static BOOL CVLPAdmissionLineIsSanitized(NSString *line) {
         !CVLPAdmissionParseSigned(values[2], CVLPAdmissionScanReasonNone,
             CVLPAdmissionScanReasonInvalidInput, &reason) ||
         !CVLPAdmissionParseUnsigned(values[3], CVLPAdmissionMaximumClassCount, &classes) ||
-        !CVLPAdmissionParseUnsigned(values[4], CVLPAdmissionMaximumMethodTotal(), &methods)) { return NO; }
+        !CVLPAdmissionParseUnsigned(values[4], CVLPAdmissionMaximumMethodTotal(), &methods) ||
+        !CVLPAdmissionParseUnsigned(values[5], (uint64_t)CVLPAdmissionMaximumClassCount * 2,
+            &skippedLists) ||
+        !CVLPAdmissionParseUnsigned(values[6], UINT32_MAX, &maxSkipped)) { return NO; }
+    if ((skippedLists == 0 && maxSkipped != 0) ||
+        skippedLists > classes * 2 ||
+        (skippedLists > 0 && maxSkipped <= CVLPAdmissionMaximumMethodsPerList) ||
+        (skippedLists > 0 && (status == CVLPAdmissionStatusMatched ||
+            status == CVLPAdmissionStatusNoMatch || status == CVLPAdmissionStatusAmbiguous)) ||
+        (status == CVLPAdmissionStatusMethodLimit &&
+            (skippedLists == 0 || maxSkipped <= CVLPAdmissionMaximumMethodsPerList ||
+                reason != CVLPAdmissionScanReasonMethodCountLimit))) { return NO; }
 
     static const char *groupKeys[CVLPAdmissionSelectorCount][5] = {
         {"matches0", "selector0", "example0", "return0", "args0"},
@@ -837,7 +866,7 @@ static BOOL CVLPAdmissionLineIsSanitized(NSString *line) {
     for (NSUInteger group = 0; group < CVLPAdmissionSelectorCount; group++) {
         char *groupValues[5] = {0};
         for (NSUInteger field = 0; field < 5; field++) {
-            NSUInteger tokenIndex = 6 + (group * 5) + field;
+            NSUInteger tokenIndex = 8 + (group * 5) + field;
             if (!CVLPAdmissionFieldValue(tokens[tokenIndex], groupKeys[group][field], &groupValues[field])) {
                 return NO;
             }
@@ -856,6 +885,8 @@ static BOOL CVLPAdmissionLineIsSanitized(NSString *line) {
         if (matches[group] == 1 && status <= CVLPAdmissionStatusAmbiguous &&
             (groupValues[3][0] == '?' || args < 0)) { return NO; }
         if (matches[group] > 1 && status == CVLPAdmissionStatusAmbiguous &&
+            (groupValues[3][0] != '?' || args != -1)) { return NO; }
+        if (skippedLists > 0 &&
             (groupValues[3][0] != '?' || args != -1)) { return NO; }
     }
     BOOL anyMatch = matches[0] > 0 || matches[1] > 0 || matches[2] > 0;
@@ -889,12 +920,19 @@ static NSString *CVLPAdmissionFormatLine(const CVLPAdmissionMetadataResult *resu
             selector[index][0] = '\0'; owner[index][0] = '\0'; returns[index] = '?'; arguments[index] = -1;
         }
     }
+    if (result->skippedLists > 0 || result->status == CVLPAdmissionStatusMethodLimit) {
+        for (NSUInteger index = 0; index < CVLPAdmissionSelectorCount; index++) {
+            returns[index] = '?';
+            arguments[index] = -1;
+        }
+    }
     NSString *line = [NSString stringWithFormat:
-        @"CVLP_ADMISSION seq=%u status=%d reason=%d classes=%u methods=%u "
+        @"CVLP_ADMISSION seq=%u status=%d reason=%d classes=%u methods=%u skippedLists=%u maxSkipped=%u "
          "matches0=%u selector0=%s example0=%s return0=%c args0=%d "
          "matches1=%u selector1=%s example1=%s return1=%c args1=%d "
          "matches2=%u selector2=%s example2=%s return2=%c args2=%d",
         sequence, result->status, result->reason, result->classesScanned, result->methodsScanned,
+        result->skippedLists, result->maxSkipped,
         result->matchCounts[0], selector[0][0] != '\0' ? selector[0] : "unknown",
         owner[0][0] != '\0' ? owner[0] : "unknown", returns[0], arguments[0],
         result->matchCounts[1], selector[1][0] != '\0' ? selector[1] : "unknown",

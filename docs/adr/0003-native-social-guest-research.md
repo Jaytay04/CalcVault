@@ -6,6 +6,21 @@ Status: separate integration candidate authorized after owner acceptance of port
 
 ### Read-only admission metadata discovery (2026-10-01)
 
+Admission2 correction (2026-10-02): signed-phone admission1 discovery stopped
+at one declared-method list larger than4096. Preserve that per-list cap, the
+1.5-second hard deadline, exact pins, two attempts and read-only API scope. Free
+and skip an oversized list without inspecting any entries, then consider the
+same class's opposite list and later classes. Report only bounded numeric
+skippedLists/maxSkipped counts in addition to existing metadata. If any list was
+skipped, retain MethodLimit status and mark observed matches as lower bounds;
+never report completed absence, uniqueness or ABI certainty. Clear every
+return/argument signature after a skip. Names remain only from actually observed
+declared Methods; deadline or changed references still clear them. No targeted
+lookup, resolver, guest invocation, larger cap or forced feature is introduced.
+Use separate marker integration-23-highlights-admission2 and preserve admission1.
+Synthetic continuation/opposite-list/partial/cleanup tests and the existing
+native/build/private-assembly gates remain mandatory before delivery.
+
 The owner approved a separate diagnostic after the early consumption override
 ran but Highlights remained missing. Enable independent default-off
 `highlights_admission_metadata`, requiring the existing diagnostic input and

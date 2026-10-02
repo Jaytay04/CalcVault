@@ -86,7 +86,7 @@ def transform(probe, viewing_experiment=False, direct_viewing_experiment=False,
     if early_viewing_experiment:
         marker = 'integration-23-highlights-earlyviewing1'
     if admission_metadata:
-        marker = 'integration-23-highlights-admission1'
+        marker = 'integration-23-highlights-admission2'
     return once(probe, 'Build marker: integration-23.', f'Build marker: {marker}.')
 
 

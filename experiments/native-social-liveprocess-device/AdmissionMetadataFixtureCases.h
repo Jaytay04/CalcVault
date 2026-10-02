@@ -412,6 +412,12 @@ static void CVLPAdmissionFixtureMethodCapImplementation(id receiver, SEL selecto
     CVLPAdmissionFixtureMethodCapCalls++;
 }
 
+static int32_t CVLPAdmissionFixtureMethodCapClassImplementation(id receiver, SEL selector) {
+    (void)receiver; (void)selector;
+    CVLPAdmissionFixtureMethodCapCalls++;
+    return 19;
+}
+
 static Class CVLPAdmissionFixtureCreateMethodCapClass(void) {
     static Class fixtureClass;
     if (fixtureClass != Nil) { return fixtureClass; }
@@ -426,6 +432,12 @@ static Class CVLPAdmissionFixtureCreateMethodCapClass(void) {
             objc_disposeClassPair(candidate);
             return Nil;
         }
+    }
+    if (!class_addMethod(object_getClass(candidate),
+            @selector(cvlpAdmissionFixtureInstanceMethod),
+            (IMP)CVLPAdmissionFixtureMethodCapClassImplementation, "i@:")) {
+        objc_disposeClassPair(candidate);
+        return Nil;
     }
     objc_registerClassPair(candidate);
     fixtureClass = candidate;
@@ -559,12 +571,148 @@ static BOOL CVLPAdmissionRunDiscoveryCases(NSString **failure) {
 
     Class methodCap = CVLPAdmissionFixtureCreateMethodCapClass();
     if (!CVLPFixtureRequire(methodCap != Nil, @"admission_method_cap_fixture_creation", failure)) { return NO; }
+    CVLPAdmissionFixtureMethodCapCalls = 0;
     Class methodCapClasses[] = { methodCap };
     status = CVLPAdmissionScanProvidedClasses(&validated, methodCapClasses, 1,
         "/fixture/admission-image", &callbacks, &memory, &result);
     if (!CVLPFixtureRequire(status == CVLPAdmissionStatusMethodLimit &&
-        result.reason == CVLPAdmissionScanReasonMethodCountLimit && CVLPAdmissionFixtureMethodCapCalls == 0,
-        @"admission_method_cap_stops_scan", failure)) { return NO; }
+        result.reason == CVLPAdmissionScanReasonMethodCountLimit && result.classesScanned == 1 &&
+        result.skippedLists == 1 && result.maxSkipped == CVLPAdmissionMaximumMethodsPerList + 1 &&
+        result.methodsScanned == 1 &&
+        result.matchCounts[0] == 1 &&
+        strcmp(result.selectorNames[0], "cvlpAdmissionFixtureInstanceMethod") == 0 &&
+        result.returnCodes[0] == '?' && result.argumentCounts[0] == -1 &&
+        CVLPAdmissionFixtureMethodCapCalls == 0,
+        @"admission_method_cap_continues_to_metaclass_and_withdraws_abi", failure)) { return NO; }
+    NSString *methodCapLine = CVLPAdmissionFormatLine(&result, 3);
+    if (!CVLPFixtureRequire(methodCapLine != nil && CVLPAdmissionLineIsSanitized(methodCapLine) &&
+        [methodCapLine containsString:@"skippedLists=1"] &&
+        [methodCapLine containsString:@"maxSkipped=4097"] &&
+        [methodCapLine containsString:@"status=9"] &&
+        [methodCapLine containsString:@"matches0=1"] &&
+        [methodCapLine containsString:@"return0=?"] &&
+        [methodCapLine containsString:@"args0=-1"],
+        @"admission_method_cap_schema_preserves_lower_bound_only", failure)) { return NO; }
+    NSArray<NSString *> *methodCapTokens = [methodCapLine componentsSeparatedByString:@" "];
+    if (!CVLPFixtureRequire(methodCapTokens.count == 23 &&
+        [methodCapTokens[6] isEqualToString:@"skippedLists=1"] &&
+        [methodCapTokens[7] isEqualToString:@"maxSkipped=4097"],
+        @"admission_method_cap_schema_has_exact_23_token_order", failure)) { return NO; }
+    NSString *knownABIWithSkip = [methodCapLine
+        stringByReplacingOccurrencesOfString:@"return0=? args0=-1" withString:@"return0=i args0=2"];
+    NSString *completeStatusWithSkip = [methodCapLine
+        stringByReplacingOccurrencesOfString:@"status=9" withString:@"status=2"];
+    if (!CVLPFixtureRequire(!CVLPAdmissionLineIsSanitized(knownABIWithSkip) &&
+        !CVLPAdmissionLineIsSanitized(completeStatusWithSkip),
+        @"admission_schema_rejects_known_abi_or_complete_status_with_skip", failure)) { return NO; }
+    NSString *knownABIWithIncompleteSkip = [methodCapLine
+        stringByReplacingOccurrencesOfString:@"status=9 reason=7" withString:@"status=14 reason=9"];
+    knownABIWithIncompleteSkip = [knownABIWithIncompleteSkip
+        stringByReplacingOccurrencesOfString:@"return0=? args0=-1" withString:@"return0=i args0=2"];
+    if (!CVLPFixtureRequire(!CVLPAdmissionLineIsSanitized(knownABIWithIncompleteSkip),
+        @"admission_schema_rejects_known_abi_under_incomplete_skip", failure)) { return NO; }
+
+    // A skipped instance list must not prevent later classes from being scanned.
+    // The cap class's metaclass supplies one match; the later class supplies a
+    // second declaration. Overall status remains incomplete due to the skip.
+    Class methodCapThenMatch[] = { methodCap, CVLPAdmissionFixtureInstanceOwner.class };
+    status = CVLPAdmissionScanProvidedClasses(&validated, methodCapThenMatch, 2,
+        "/fixture/admission-image", &callbacks, &memory, &result);
+    if (!CVLPFixtureRequire(status == CVLPAdmissionStatusMethodLimit && result.classesScanned == 2 &&
+        result.skippedLists == 1 && result.maxSkipped == CVLPAdmissionMaximumMethodsPerList + 1 &&
+        result.matchCounts[0] == 2 && result.returnCodes[0] == '?' && result.argumentCounts[0] == -1 &&
+        CVLPAdmissionFixtureMethodCapCalls == 0,
+        @"admission_method_cap_before_later_match_is_lower_bound", failure)) { return NO; }
+
+    // With no observed match, a skipped list still cannot be reported as a
+    // complete absence. Change the pinned selector reference to a valid but
+    // absent selector and revalidate the synthetic image before scanning.
+    uintptr_t presentSelector = fixture.selectorReferences[0];
+    fixture.selectorReferences[0] = CVLPAdmissionFixtureSelectorAddress(
+        sel_registerName("cvlpAdmissionFixtureNeverDeclared"));
+    if (!CVLPFixtureRequire(CVLPAdmissionValidateImageWithExpectedDigest(fixture.base, &memory,
+        fixture.digest, &validated) == CVLPAdmissionStatusMatched,
+        @"admission_method_cap_zero_match_reference_valid", failure)) { return NO; }
+    status = CVLPAdmissionScanProvidedClasses(&validated, methodCapClasses, 1,
+        "/fixture/admission-image", &callbacks, &memory, &result);
+    if (!CVLPFixtureRequire(status == CVLPAdmissionStatusMethodLimit &&
+        result.reason == CVLPAdmissionScanReasonMethodCountLimit && result.matchCounts[0] == 0 &&
+        result.selectorNames[0][0] == '\0' && result.skippedLists == 1 && result.maxSkipped == 4097 &&
+        CVLPAdmissionFixtureMethodCapCalls == 0,
+        @"admission_method_cap_zero_partial_is_not_no_match", failure)) { return NO; }
+    fixture.selectorReferences[0] = presentSelector;
+    if (!CVLPFixtureRequire(CVLPAdmissionValidateImageWithExpectedDigest(fixture.base, &memory,
+        fixture.digest, &validated) == CVLPAdmissionStatusMatched,
+        @"admission_method_cap_reference_restored", failure)) { return NO; }
+
+    // A duplicate observed before an oversized list stays an ambiguous lower
+    // bound, and ABI fields are unknown for every reported selector.
+    Class duplicateThenCap[] = { CVLPAdmissionFixtureDuplicateA.class,
+        CVLPAdmissionFixtureDuplicateB.class, methodCap };
+    status = CVLPAdmissionScanProvidedClasses(&validated, duplicateThenCap, 3,
+        "/fixture/admission-image", &callbacks, &memory, &result);
+    if (!CVLPFixtureRequire(status == CVLPAdmissionStatusMethodLimit && result.skippedLists == 1 &&
+        result.maxSkipped == 4097 && result.classesScanned == 3 && result.matchCounts[0] == 1 &&
+        result.matchCounts[2] == 2 && result.returnCodes[0] == '?' && result.argumentCounts[0] == -1 &&
+        result.returnCodes[2] == '?' && result.argumentCounts[2] == -1 &&
+        CVLPAdmissionFixtureMethodCapCalls == 0,
+        @"admission_duplicate_partial_abi_unknown_after_skip", failure)) { return NO; }
+
+    // Observe a valid match first, then expire after the oversized list is
+    // skipped. This proves deadline cleanup clears already-discovered names.
+    clock = (CVLPAdmissionFixtureRuntimeContext){ .now = 40.0, .advancePerClock = 0.1 };
+    callbacks = CVLPAdmissionFixtureCallbacks(&clock);
+    callbacks.deadlineAt = 42.15;
+    Class priorMatchThenCap[] = { CVLPAdmissionFixtureInstanceOwner.class, methodCap };
+    status = CVLPAdmissionScanProvidedClasses(&validated, priorMatchThenCap, 2,
+        "/fixture/admission-image", &callbacks, &memory, &result);
+    if (!CVLPFixtureRequire(status == CVLPAdmissionStatusDeadline &&
+        result.reason == CVLPAdmissionScanReasonDeadline && result.classesScanned == 2 &&
+        result.matchCounts[0] == 1 && result.skippedLists == 1 &&
+        result.maxSkipped == 4097 && result.selectorNames[0][0] == '\0' &&
+        result.exampleOwners[0][0] == '\0' && result.selectorNames[1][0] == '\0' &&
+        result.exampleOwners[1][0] == '\0' && result.selectorNames[2][0] == '\0' &&
+        result.exampleOwners[2][0] == '\0' && result.returnCodes[0] == '?' &&
+        result.returnCodes[1] == '?' && result.returnCodes[2] == '?' &&
+        result.argumentCounts[0] == -1 && result.argumentCounts[1] == -1 &&
+        result.argumentCounts[2] == -1 &&
+        CVLPAdmissionFixtureMethodCapCalls == 0,
+        @"admission_deadline_after_skip_clears_names_and_releases_list", failure)) { return NO; }
+
+    // A pinned reference change after a skipped list also invalidates all
+    // names and ABI while retaining only the bounded skip observations.
+    memset(fixture.selectorReadCount, 0, sizeof(fixture.selectorReadCount));
+    fixture.mutateSelectorOnRead = YES;
+    fixture.mutateSelectorAtRead = 1;
+    clock = (CVLPAdmissionFixtureRuntimeContext){ .now = 45.0 };
+    callbacks = CVLPAdmissionFixtureCallbacks(&clock);
+    status = CVLPAdmissionScanProvidedClasses(&validated, methodCapClasses, 1,
+        "/fixture/admission-image", &callbacks, &memory, &result);
+    BOOL changedReferencesClearAll = YES;
+    for (NSUInteger index = 0; index < CVLPAdmissionSelectorCount; index++) {
+        changedReferencesClearAll = changedReferencesClearAll && result.selectorNames[index][0] == '\0' &&
+            result.exampleOwners[index][0] == '\0' && result.returnCodes[index] == '?' &&
+            result.argumentCounts[index] == -1;
+    }
+    if (!CVLPFixtureRequire(status == CVLPAdmissionStatusSelectorChanged &&
+        result.reason == CVLPAdmissionScanReasonSelectorChanged && result.skippedLists == 1 &&
+        result.maxSkipped == 4097 && changedReferencesClearAll && CVLPAdmissionFixtureMethodCapCalls == 0,
+        @"admission_reference_change_after_skip_clears_all_names", failure)) { return NO; }
+    fixture.mutateSelectorOnRead = NO;
+    fixture.selectorReferences[0] = presentSelector;
+    memset(fixture.selectorReadCount, 0, sizeof(fixture.selectorReadCount));
+    if (!CVLPFixtureRequire(CVLPAdmissionValidateImageWithExpectedDigest(fixture.base, &memory,
+        fixture.digest, &validated) == CVLPAdmissionStatusMatched,
+        @"admission_reference_after_skip_restored", failure)) { return NO; }
+
+    clock = (CVLPAdmissionFixtureRuntimeContext){ .now = 50.0 };
+    callbacks = CVLPAdmissionFixtureCallbacks(&clock);
+    status = CVLPAdmissionScanProvidedClasses(&validated, methodCapClasses, 1,
+        "/fixture/admission-image", &callbacks, &memory, &result);
+    if (!CVLPFixtureRequire(status == CVLPAdmissionStatusMethodLimit && result.skippedLists == 1 &&
+        result.maxSkipped == 4097 && result.matchCounts[0] == 1 &&
+        CVLPAdmissionFixtureMethodCapCalls == 0,
+        @"admission_method_cap_repeat_scan_cleanup", failure)) { return NO; }
 
     Class resolverClasses[] = { CVLPFixtureResolverTrap.class };
     status = CVLPAdmissionScanProvidedClasses(&validated, resolverClasses, 1,
@@ -619,6 +767,20 @@ static BOOL CVLPAdmissionRunDiscoveryCases(NSString **failure) {
     NSString *badClasses = [line stringByReplacingOccurrencesOfString:@"classes=1" withString:@"classes=100001"];
     NSString *badMatches = [line stringByReplacingOccurrencesOfString:@"matches0=1" withString:@"matches0=-1"];
     NSString *badArguments = [line stringByReplacingOccurrencesOfString:@"args0=2" withString:@"args0=99999"];
+    NSString *badSkippedLists = [line stringByReplacingOccurrencesOfString:
+        @"skippedLists=0" withString:@"skippedLists=-1"];
+    NSString *badMaxSkipped = [line stringByReplacingOccurrencesOfString:
+        @"maxSkipped=0" withString:@"maxSkipped=4097"];
+    NSString *inconsistentSkipCount = [line stringByReplacingOccurrencesOfString:
+        @"skippedLists=0" withString:@"skippedLists=1"];
+    NSString *inconsistentSkipMaximum = [line stringByReplacingOccurrencesOfString:
+        @"maxSkipped=0" withString:@"maxSkipped=1"];
+    NSString *skipMaximumBelowLimit = [methodCapLine stringByReplacingOccurrencesOfString:
+        @"maxSkipped=4097" withString:@"maxSkipped=4096"];
+    NSString *skipsExceedObservedClasses = [methodCapLine
+        stringByReplacingOccurrencesOfString:@"classes=1" withString:@"classes=0"];
+    NSString *tooManySkippedLists = [methodCapLine
+        stringByReplacingOccurrencesOfString:@"skippedLists=1" withString:@"skippedLists=3"];
     NSString *spoofedField = [line stringByAppendingString:@" profile=private"];
     NSString *spoofedPath = [line stringByAppendingString:@" path=/private/path"];
     NSString *badLength = [line stringByAppendingString:[@"x" stringByPaddingToLength:
@@ -632,7 +794,13 @@ static BOOL CVLPAdmissionRunDiscoveryCases(NSString **failure) {
         @"admission_line_schema_rejects_unbounded_names_and_line", failure)) { return NO; }
     if (!CVLPFixtureRequire(!CVLPAdmissionLineIsSanitized(badSequence) &&
         !CVLPAdmissionLineIsSanitized(badStatus) && !CVLPAdmissionLineIsSanitized(badClasses) &&
-        !CVLPAdmissionLineIsSanitized(badMatches) && !CVLPAdmissionLineIsSanitized(badArguments),
+        !CVLPAdmissionLineIsSanitized(badMatches) && !CVLPAdmissionLineIsSanitized(badArguments) &&
+        !CVLPAdmissionLineIsSanitized(badSkippedLists) && !CVLPAdmissionLineIsSanitized(badMaxSkipped) &&
+        !CVLPAdmissionLineIsSanitized(inconsistentSkipCount) &&
+        !CVLPAdmissionLineIsSanitized(inconsistentSkipMaximum) &&
+        !CVLPAdmissionLineIsSanitized(skipMaximumBelowLimit) &&
+        !CVLPAdmissionLineIsSanitized(skipsExceedObservedClasses) &&
+        !CVLPAdmissionLineIsSanitized(tooManySkippedLists),
         @"admission_line_schema_rejects_bad_numeric_fields", failure)) { return NO; }
     if (!CVLPFixtureRequire(!CVLPAdmissionLineIsSanitized(spoofedField) &&
         !CVLPAdmissionLineIsSanitized(spoofedText) && !CVLPAdmissionLineIsSanitized(spoofedPath),
