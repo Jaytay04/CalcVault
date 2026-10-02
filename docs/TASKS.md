@@ -11,8 +11,10 @@ Shipping source, main and existing IPAs remain unchanged.
 
 Local portable compilation/execution passes 16,502 explicit checks; the six
 static-index validation tests pass. Added a branch-scoped macOS fixture workflow
-with the existing Xcode16.4 pin and read-only contents permission. Public CI is
-pending at this checkpoint. This is not an iOS build or a working downloader:
+with the existing Xcode16.4 pin and read-only contents permission. Public
+[Actions run 37072656873](https://github.com/Jaytay04/CalcVault/actions/runs/37072656873)
+at `2c72f78` PASSED; logs independently reviewed: 16,502 C checks, media selection,
+all ten profile fixture modes and six reference tests. This is not an iOS build or a working downloader:
 transport, host validation/confirmation/encrypted import and actual guest
 compatibility remain unimplemented or unverified. See `TEST_REPORT.md` and
 `tkplus/INDEPENDENT_IMPLEMENTATION.md`.

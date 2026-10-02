@@ -12,7 +12,7 @@ copied. The workflow has no secrets, package assembly or artifact upload.
 |---|---|---|
 | Portable C11 fixture | PASS | Windows Clang18.1.8; unchanged copied core compiles with warnings as errors and `DNDEBUG`, then passes 16,502 explicit synthetic checks. No transport, encryption or OS isolation tested. |
 | Static reference integrity | PASS | Six tests validate sanitized inventory/accounting and reject an unpinned fixture, including optimized Python. No proprietary guest execution. |
-| Public macOS source workflow | PENDING | Xcode16.4 pin; C fixture, Foundation URL selection, ten guarded Objective-C modes and six reference tests. Actual public run result will be recorded after log review. |
+| Public macOS source workflow | PASS | [Run 37072656873](https://github.com/Jaytay04/CalcVault/actions/runs/37072656873), tested commit `2c72f78b8ebba08ae892363d0221717ba8d6a133`. Logs confirm 16,502 C checks, Foundation media fixture, ten profile fixture executables and six reference tests pass. No skipped Apple fixture or private guest execution. |
 | Shipping iOS and physical features | NOT RUN | Source is isolated in `experiments/tkplus`, not wired into the phone IPA. No Save button, downloading, media-only transport or encrypted import implemented in this slice. No anonymity, actual TikTok ABI or signed-phone compatibility claim. |
 
 These public checks do not change host credentials, bookmarks, products,
@@ -20,6 +20,14 @@ calculator/vault/browser source or the working private package. Host session
 revocation remains separate from transfer byte accounting; each C lease requires
 caller serialization. The proposed handoff is documented in
 `experiments/tkplus/TRANSPORT_DESIGN.md`, not implemented.
+
+Runner logs: macOS15.7.9 build24G830, image `macos-15-arm64`
+`20260907.0337.1`, Xcode16.4 build16F6 (exact version guard passed), Apple
+Clang17.0.0 `clang-1700.0.13.5`, target `arm64-apple-darwin24.6.0`, Python3.14.7.
+All job steps succeeded; job duration19s. These are macOS Foundation fixtures,
+not iOS SDK compilation, simulator integration, signing or physical-device proof.
+Public main remained `18f9be8`; the tested source commit descends directly from
+that public revision, not the private repository's history.
 
 Research startup diagnostics 20.2 local source gate (2026-09-28): 28 tests under `experiments/native-social-liveprocess-device` and 118 package-tool tests PASS. Exact preparation replay against LiveContainer `e370a92dfc03ce109ebce00ed4a7cfc64ad1c801` PASS, including validation of the actual `ret = appMain(argc, argv);` call (an initial generic-symbol check incorrectly matched its declaration and was corrected before CI). Guest observers record a fixed armed marker before main, then bounded delegate scene-support bits, scene/window/root-view geometry from existing views; no screen content, class names, identifiers, preferences or URLs. Maximum 16 events, two scenes, three windows, 2,048 characters per line, with inactive/background/deactivation/deadline stop. Host diagnostics now include scene settings and presentation view geometry. Legacy fixture staging safety tests reject device payloads, non-synthetic guests and hosts outside the dedicated simulator clone. Legacy window callback/visibility is an observation rather than an acceptance gate; entry, armed diagnostics and revocation/exit remain mandatory. Native build, simulator runtime, device signing/installation and actual guest behavior are NOT RUN at this checkpoint.
 

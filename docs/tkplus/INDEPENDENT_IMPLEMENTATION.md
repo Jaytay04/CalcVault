@@ -26,7 +26,7 @@ That package change has not been made in this slice.
 | Component | Implemented responsibility | Not established |
 |---|---|---|
 | Guest original-media selection | Bounded candidate lists, exact approved host matching, HTTPS-only URLs, no credentials/fragments, no thumbnail fallback or quality guessing. | CDN host policy, selected private-model adapters, downloader and real surface coverage. |
-| Guest profile eligibility controls | Explicit opt-in installation on two exact runtime selectors with method ownership, ABI and image checks. Default behavior forwards originals. | Apple compilation, actual TikTok47 class/ABI/image eligibility and provider anonymity. |
+| Guest profile eligibility controls | Explicit opt-in installation on two exact runtime selectors with method ownership, ABI and image checks. Default behavior forwards originals. Synthetic macOS Apple compilation and ten fixture modes pass. | iOS compilation, actual TikTok47 class/ABI/image eligibility and provider anonymity. |
 | Portable transfer lease | Bounded versioned records, host-issued opaque ID/generation, ordered chunks, exact completion size and irreversible revocation. | IPC transport, OS isolation, media decoding, protected staging, confirmation and encrypted commit. |
 
 These components are not wired into the current phone build. There is no new
@@ -85,6 +85,12 @@ checked on Windows without executing a proprietary guest. Foundation/Objective-C
 fixtures require macOS and Apple tools; source review or string checks must not
 be reported as an Apple build. Actual results are recorded in the project
 `docs/TEST_REPORT.md`, not inferred from this design.
+
+Public [Actions run 37072656873](https://github.com/Jaytay04/CalcVault/actions/runs/37072656873)
+at `2c72f78` passes 16,502 portable transfer checks, the Foundation media fixture,
+ten generated Objective-C profile modes and six static-reference tests with
+Xcode16.4. The logs were reviewed. No proprietary guest, phone build or actual
+download/import is exercised by this run.
 
 Integration still needs a fixed media-only guest-to-host transport, a trusted
 TikTok47 image/ABI manifest, an independently reviewed CDN policy, real content
