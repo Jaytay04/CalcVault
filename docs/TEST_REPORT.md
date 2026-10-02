@@ -1,5 +1,230 @@
 # CalcVault test report
 
+## TikTok47 private testing IPA production (2026-10-02)
+
+Final platform-neutral source checks: package tools143/integration69/device-source88
+PASS (300 methods total), including nine modern adapter tests and ten dedicated
+Build24 merger methods with synthetic fixtures only. Independent read-only review
+found no fail-open in the reviewed exact-digest adapter/profile/merger chain;
+input/output identities, payload preservation, opaque resource binding, reserved
+marker replay rejection, inventory/readback and no-overwrite are covered. YAML,
+Bash syntax and diff checks PASS. No private bytes were used by the reviewer.
+
+Synthetic host build checkpoint: reviewed source commit
+0e3a953e69133369d4907d04c0fff3a22e83145d is running in Actions 37004741094
+through the registered LiveProcess wrapper, integration_guest=true and
+tiktok47_host=true. Parent platform-neutral package143, host-only integration59
+and device-source88 checks PASS; workflow YAML/Bash syntax PASS. The Apple
+workflow compiles/runs the exact production profile with a Swift6 synthetic
+fixture before building. CI receives no real guest or bundled credential bytes.
+Build24 retains portrait, credential-boundary and browser/downloader behavior;
+its separate integration-native-24 guest directory does not copy old RX state.
+Native Apple build, final IPA and physical-device acceptance remain pending.
+
+Actual local guest assembly checkpoint: production adapter independently returns
+the earlier reviewed output SHA a4847252c4ec720f24a26d30082124d6b15c04d23d7bb4d8770ee6c5246c5623,
+size73392, entrypoint28616 and modified prefix2744. Original main payload bytes
+and non-PAGEZERO segment commands are preserved. Writer recomputes the approved
+plan and produces a separate private guest ZIP, SHA
+46765a53319290c209d834634ef3056661ea39e324d150c8cb56745fe567a808,
+967860792bytes,2672 included files/18 omitted obsolete signatures. Full member
+inventory/hash/CRC readback PASS; a separate newer47 merger-profile guest check
+also verifies all2672 records and build470044. Source whole-IPA hash unchanged.
+This is not yet a containing-app IPA or a native/signing test. The approved
+SessionCheck resource is copied as opaque bytes to ignored private output only;
+no decryption, import, passphrase attempt or key contents are recorded.
+
+Independent bounded dependency metadata review confirms guest-main nested
+Frameworks runpaths cover the bundled main/MusicallyCore/media edges. TTKPlus's
+CydiaSubstrate edge relies on inherited guest-main runpaths; the nested copy is
+preserved. Media ../../Frameworks fallback paths lack host-root copies, but the
+earlier nested path contains their targets. No alias, library substitution or
+duplicate root copy added. This static route is not proof of runtime dyld loading.
+
+Owner requests continuing until a new testing IPA exists. Current source work
+is limited to an exact pinned modern-main adapter, separate Build24 immutable
+guest profile and data directory, synthetic-only Apple host build, and a local
+private merger. The source is the previously inspected TTKillerPlus47 modified
+fallback, not a verified stock TikTok IPA. Existing RX-enabled artifacts and
+guest data remain preserved. No tweak licensing change or credential/key import
+is part of this compatibility slice.
+
+Baseline Windows checks: package134/134, integration52/52 and device-source88/88
+PASS. Repositories independently queried: CalcVault PUBLIC, Calculator PRIVATE.
+GitHub documents standard hosted runners on public repositories as free; no
+private runner or paid infrastructure is requested. CI inputs remain synthetic,
+never the actual47 payload or retained SessionCheck P12. Build24 Apple execution,
+actual guest assembly, IPA readback, SideStore signing and Highlights acceptance
+remain NOT RUN at this checkpoint.
+
+## Private bundled-resource retention policy (2026-10-02)
+
+Owner explicitly approved a narrowly scoped exception preserving the downloaded
+SessionCheck resource only in the private test IPA, never source/public builds.
+Implemented metadata-only registry pins for the exact whole IPA, original and
+relocated paths,1525-byte size and member digest. New policy schema2 additionally
+requires private_test_only=true and exactly one registered retained member.
+Schema1/default exclusion behavior remains unchanged; unrelated materials stay
+unopened and blocked unless explicitly excluded. No generic P12 allowlist exists.
+
+Planner verifies the retained member's bounded opaque bytes, without parsing,
+decrypting, importing or logging them. Writer and merger require an independent
+explicit private-resource acknowledgement; copy/readback and manifest checks
+reapply the fixed resource pins. Merger's host-material block remains intact,
+guest parsing defers only the exact path/size for an acknowledged pinned input,
+and subsequently requires the exact schema2 row/content digest. Resulting private
+synthetic IPA carries CVLPPrivatePackageScope.json and private_test_only report
+metadata. These markers do not enforce destination/repository privacy; actual
+inputs/outputs must stay ignored/private and cannot enter public CI.
+
+python -B -m unittest discover -s experiments/native-social-package-tools -p
+'test_*.py':134/134 PASS, including16 new synthetic-only test methods. Coverage:
+default material stays unopened; exact source/member/destination/size/digest and
+private scope; duplicate/unknown/renamed/case-changed retained targets; retention
+versus exclusion conflict; missing/non-Boolean acknowledgement; unrelated P12
+still unopened/blocked; opaque writer/readback preservation; forged ordinary
+resource/empty private manifest rejection; full synthetic private host merge and
+scope marker; host key rejection; actual substituted content rejection; CLI flag
+forwarding; unchanged guest build pin; reserved marker replay denial for ordinary
+and private candidates, including case aliases. The generated marker binds source
+and resource digests. Fixture bytes are deliberately non-key
+placeholders; no actual P12 or social executable is in source/fixtures.
+
+Independent read-only review identified the initial marker replay gap; parent
+reserved the marker path and added exact/case-variant and ordinary/private replay
+tests. Final independent audit confirms the correction,134 PASS and no further
+fail-open in the reviewed exact-resource flow. Parent reran the seven private
+modern structural probe methods PASS and diff check PASS. Source and preserved
+owner1 IPA SHA256 values rechecked unchanged.
+
+Actual downloaded47 source with the local ignored schema2 policy produces
+draft_review_required, private_test_only=true, one retained resource and no
+unresolved material row. Plan SHA256
+d5cdeae691ecf3297348031e4db8e05643a6b0f20db4e7d94beaa38faef7fc8a.
+Assembly/installation authorization remain false. No actual payload copied into output,
+guest/host IPA assembled, Apple build/signing, CI/upload or phone test occurred.
+Production modern main-command support, relocated dependencies and exact new
+host/profile/digest compatibility remain outstanding; existing439042 host gate
+still rejects470044. Previous RX artifact and downloaded source preserved.
+
+## TikTok47 bounded compatibility experiment and P12 investigation (2026-10-02)
+
+Owner approved further compatibility testing and investigation of the bundled
+P12. All work remained local/read-only with respect to payloads and credentials.
+Ignored scripts performed bounded parsing and an in-memory structural adapter
+experiment; no native code, PKCS12 import/decryption, signing or guest launch ran.
+The downloaded source and existing RX guest remain preserved.
+
+The main executable's modern subset passes: five segments, fifteen format-1
+imports, two chained pages using pointer format2, fifteen bind nodes, five rebase
+nodes, and an export trie with two nodes/one export. An isolated clone of
+prepare_main with only the two modern commands added to its private globals
+passes legacy structural checks. Production ALLOWED and build/digest pins remain
+unchanged; the production function still rejects unsupported_main_command.
+No transformed binary was saved. The transformation preserves all bytes after
+the command prefix, non-PAGEZERO segment geometry, fixup segment ordinals, and
+the TEXT base. Original PAGEZERO=(0,0x100000000); hosted PAGEZERO would be
+(0xffffc000,0x4000), ending at the same text base. Exact pointer-format2 targets
+therefore remain structurally consistent, not runtime-certified. Definitions:
+[Apple dyld chained-fixup header](https://github.com/apple-oss-distributions/dyld/blob/main/include/mach-o/fixup-chains.h).
+
+Independent read-only review reproduced the pass and identified missing explicit
+PAGEZERO assertions, untested format6 acceptance, and untracked serialized trie
+node overlap. Parent added source/hosted shape and segment-preservation checks,
+restricted this exact candidate probe to format2, and added node-span overlap
+rejection. Final private suite: seven test methods PASS, including37 mutated
+malformed-input rejections, a source-as-hosted rejection, baseline dry pass and
+unchanged production rejection. Existing synthetic package suite118/118 PASS.
+These are experimental/private checks, not a production adapter extension or an
+assembled package test. New output SHA, calculated only in RAM:
+a4847252c4ec720f24a26d30082124d6b15c04d23d7bb4d8770ee6c5246c5623.
+
+P12 metadata inspection supersedes the earlier unopened state below. The1525-byte
+resource is a PFX v3 container with one visible pkcs8ShroudedKeyBag and a second
+encrypted SafeContents section; encrypted section bag types/certificate identity
+remain unknown. Its visible encryption algorithm is SHA1/RC2-40-CBC and MacData
+algorithm SHA1. No password, certificate identity, key bytes or encrypted payload
+was emitted; no passphrase attempts, import/export or credential use occurred.
+Parent independently reproduced the structural metadata/equality checks.
+
+MusicallyCore contains the exact SessionCheck.bundle/private_key resource fragment,
+separate p12 type string, resource-loading and URLSession authentication-challenge
+selectors, and SecPKCS12Import/identity API imports. Main and TTKPlus show no
+matching P12/resource references in inspected sections; TTKPlus has generic
+Keychain/network/resource APIs but no SecPKCS12Import import. This supports a
+likely session/network identity purpose in MusicallyCore, NOT a proven call flow,
+vendor provenance, maliciousness, licensing purpose, Apple signing identity or
+owner credential. Apple's identity documentation explains the PKCS12/API role:
+[Apple identities](https://developer.apple.com/documentation/security/identities).
+Method-level resource-to-challenge flow and certificate contents remain UNVERIFIED.
+
+Do not silently remove this potentially functional resource or widen the generic
+material policy. Existing planner/assembler forbids .p12 output and does not have
+a reviewed bundled-resource exception. Explicit private-package disposition is
+the next owner decision; keep all material out of source/public CI and preserve
+host-only vault credentials. Also pending: production modern-command validation,
+relocated dependencies, exact new descriptor/merger pins, Apple build/signature
+checks and separate phone startup/Highlights/boundary acceptance. No new IPA,
+upload, installation, data migration or licensing change occurred.
+
+## TikTok47 modified fallback download and static inspection (2026-10-02)
+
+Owner explicitly approved downloading and statically inspecting the47.0
+TTKillerPlus fallback, not installing/importing it or replacing the existing RX
+guest. Publisher README links the HTTPS download; transfer completed with
+470033098bytes and input SHA256
+8e6744fd00d01cb44ae22301df992d439761b163f79b67de6e352df4ab9c3198.
+Package and summarized receipt remain ignored local build files; no payload or
+material contents were placed in source/public CI. Source:
+[publisher repository](https://github.com/iKarwan/TTKillerPlus).
+
+Actual bounded plist/Mach-O inspection confirms TikTok47.0.0/build470044,
+com.zhiliaoapp.musically, main executable TikTok. Strict inventory rejects
+archive_entry_limit: MusicallyCore is859550160bytes, above its512MiB cap.
+Explicit existing extended-review inventory PASS (review_required, not approval):
+3518ZIP entries,17frameworks,2dylibs,20declared code files, all inspected slices
+ARM64/iOS with cryptid0; no discovered guestextensions. No decryption attempted.
+The plist declares minimum iOS14.0, portrait only, and a SceneDelegate.
+
+Main is73392bytes, SHA256
+3daefde434d4c6bdd9e21ea44ad5fd3801a485a8e3c40bf7989421e97eaba40c.
+Current prepare_main attempted in memory only and rejected
+unsupported_main_command. Header review identifies LC_DYLD_CHAINED_FIXUPS and
+LC_DYLD_EXPORTS_TRIE, both outside the existing adapter ALLOWED set. This is a
+packaging incompatibility with our narrow adapter, not proof of impossible
+hosting. No modified binary or guest archive was saved; pins were not relaxed.
+
+Main weak-loads @rpath/TTKPlus.dylib, which links CydiaSubstrate.framework
+(bundle metadata identifies ellekit). This confirms a modified fallback, not a
+clean/vendor-attested base. The named SessionCheck.bundle/private_key.p12
+resource is1525bytes; member contents were NEVER opened, parsed or logged.
+Its name alone does not establish purpose or private-key presence. It remains
+undisposed; any future package policy must receive explicit review.
+
+Read-only plan_ipa with extended-review and no exclusion policy returns
+draft_review_required, plan SHA256
+d3d6e76cbdc302116e531820e9f8b765d6bf54b5786d8c68df786ccd0303c0c5:
+18obsolete-signature proposals,1main preparation,1root metadata preparation,
+17bundle metadata,19embedded code,1material and2633resource reviews. All
+checked @rpath framework targets, TTKPlus and bundled concurrency-library paths
+exist at the source root Frameworks location; this is NOT full dyld resolution,
+weak-system-library availability or relocated dependency proof.
+
+Independent read-only review confirms the inventory, adapter rejection and
+unresolved draft. Parent verifies TTFFmpeg and ffmpeg_dashdec rpaths also include
+@executable_path/../../Frameworks; source-target existence does not prove these
+resolve correctly after hosting. Existing merger439042 and host profile remain
+unchanged, so470044 cannot be imported as-is. No additional review writes.
+
+Regression command: python -m unittest discover -s
+experiments/native-social-package-tools -p 'test_*.py':118/118 PASS. Input hash
+rechecked unchanged; prior owner1 privateIPA SHA
+e32ed614467ace3009fb6446fc0283ce0ec8bb911e0caecdabb006ad663281d9 unchanged.
+Signature, entitlements, publisher provenance, resource semantics, full archive
+CRC, runtime/Highlights and device acceptance remain UNVERIFIED/NOT RUN.
+No guest code executed, Apple build, assembly, signing, upload, install,
+credential/session copying, licensing change or device data change occurred.
+
 ## Newer-base pivot and missing package input (2026-10-02)
 
 Owner approved a separate newer unmodified TikTok comparison inside CalcVault,

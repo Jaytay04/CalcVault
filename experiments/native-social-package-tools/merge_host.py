@@ -14,6 +14,7 @@ from pathlib import Path
 
 import assemble_guest
 import ipa_preflight as preflight
+import bundled_resource_policy as bundled
 
 CHUNK = 64 * 1024
 MAX_OUTPUT = 2 * 1024**3
@@ -24,6 +25,21 @@ GUEST_ROOT = 'Frameworks/NativeGuest.framework'
 HOST_ID = 'com.jaylintaylor.calcvault'
 GUEST_ID = 'com.zhiliaoapp.musically'
 GUEST_BUILD = '439042'
+TIKTOK47_PROFILE = {
+    'input_sha256': '8e6744fd00d01cb44ae22301df992d439761b163f79b67de6e352df4ab9c3198',
+    'original_main_bundle': {
+        'path': 'Payload/TikTok.app',
+        'identifier': 'com.zhiliaoapp.musically',
+        'version': '47.0.0',
+        'build': '470044',
+        'executable': 'TikTok',
+    },
+    'main_adaptation': {
+        'input_sha256': '3daefde434d4c6bdd9e21ea44ad5fd3801a485a8e3c40bf7989421e97eaba40c',
+        'output_sha256': 'a4847252c4ec720f24a26d30082124d6b15c04d23d7bb4d8770ee6c5246c5623',
+        'size': 73392,
+    },
+}
 SYNTHETIC_GUEST_ID = 'org.example.syntheticnativeguest.app'
 SYNTHETIC_RESOURCE_ID = 'org.example.cvlp.resources'
 HOST_EXECUTABLE = 'LiveContainer'
@@ -32,6 +48,7 @@ EXTENSION_ID = 'com.jaylintaylor.calcvault.LiveProcess'
 LEGACY_PAYLOAD = HOST_ROOT + '/Frameworks/SyntheticNativeGuestPayload.dylib'
 RESOURCE_BUNDLE = HOST_ROOT + '/SyntheticGuestResources.bundle'
 DESCRIPTOR = HOST_ROOT + '/CVLPFrameworkGuest.plist'
+PRIVATE_SCOPE = HOST_ROOT + '/CVLPPrivatePackageScope.json'
 HEX_DIGEST = re.compile(r'[0-9a-f]{64}\Z')
 OMISSIONS = {'exclude_extension', 'exclude_material', 'omit_obsolete_signature'}
 FILE_ACTIONS = {'prepare_main_executable', 'prepare_framework_metadata',
@@ -129,7 +146,7 @@ def recheck_input(path, stream, expected_digest, identity):
     stream.seek(0)
 
 
-def checked_archive(stream, archive_size, profile='strict'):
+def checked_archive(stream, archive_size, profile='strict', *, approved_resource_input_sha256=None):
     preflight.bound_central_directory(stream, archive_size)
     stream.seek(0)
     try:
@@ -141,7 +158,10 @@ def checked_archive(stream, archive_size, profile='strict'):
         total = sum(entry.file_size for entry in entries.values())
         need(total <= MAX_OUTPUT, 'archive_total_limit')
         all_names = [entry.filename for entry in archive.infolist()]
-        need(not any(name.lower().endswith(preflight.MATERIAL) for name in entries),
+        need(all(not name.lower().endswith(preflight.MATERIAL)
+                 or bundled.matches(approved_resource_input_sha256, bundled.REVIEWED_RESOURCE[1],
+                                    name, entry.file_size)
+                 for name, entry in entries.items()),
              'signing_material_forbidden')
         return archive, entries, all_names, total
     except Exception:
@@ -161,6 +181,8 @@ def under_bundle(name, bundle):
 
 def _host_layout(archive, entries, all_names):
     files = set(entries)
+    need(not any(preflight.key(name) == preflight.key(PRIVATE_SCOPE) for name in files),
+         'reserved_private_scope_marker')
     need(HOST_ROOT + '/Info.plist' in files, 'unexpected_host_root')
     app_roots = set()
     extension_roots = set()
@@ -256,13 +278,32 @@ def _manifest_json(archive, entries):
     return manifest
 
 
-def _validate_manifest(manifest, expected_guest_input_sha256):
+def _validate_manifest(manifest, expected_guest_input_sha256,
+                       acknowledge_private_bundled_resources=False, *,
+                       guest_profile='rx439'):
+    need(type(guest_profile) is str and guest_profile in ('rx439', 'newer47'),
+         'invalid_guest_profile')
+    if guest_profile == 'newer47':
+        need(expected_guest_input_sha256 == TIKTOK47_PROFILE['input_sha256'],
+             'invalid_guest_profile')
     expected_keys = {'schema', 'status', 'installation_authorized', 'runtime_manifest',
                      'input_sha256', 'plan_sha256', 'original_main_bundle',
                      'main_adaptation', 'files', 'omissions', 'unverified',
                      'layout_review_flags'}
+    private_scope = manifest.get('schema') == 2
+    if guest_profile == 'newer47':
+        need(type(manifest.get('schema')) is int and manifest['schema'] == 2 and
+             manifest.get('private_test_only') is True and
+             type(acknowledge_private_bundled_resources) is bool and
+             acknowledge_private_bundled_resources,
+             'private_resource_acknowledgement_required')
+    if private_scope:
+        expected_keys.add('private_test_only')
+        need(manifest.get('private_test_only') is True
+             and type(acknowledge_private_bundled_resources) is bool
+             and acknowledge_private_bundled_resources, 'private_resource_acknowledgement_required')
     need(set(manifest) == expected_keys, 'invalid_guest_manifest')
-    need(type(manifest['schema']) is int and manifest['schema'] == 1 and
+    need(type(manifest['schema']) is int and manifest['schema'] in (1, 2) and
          manifest['status'] == 'unsigned_guest_requires_host_integration' and
          manifest['installation_authorized'] is False and manifest['runtime_manifest'] is False,
          'invalid_guest_manifest')
@@ -273,13 +314,19 @@ def _validate_manifest(manifest, expected_guest_input_sha256):
     original = manifest['original_main_bundle']
     need(isinstance(original, dict) and set(original) == {
         'path', 'identifier', 'version', 'build', 'executable'}, 'invalid_guest_identity')
+    expected_original = (TIKTOK47_PROFILE['original_main_bundle']
+                         if guest_profile == 'newer47' else None)
     path = type_text(original.get('path'), 'invalid_guest_identity')
     preflight.checked_name(path)
     need(path.lower().endswith('.app') and original.get('identifier') == GUEST_ID and
-         original.get('build') == GUEST_BUILD and
+         original.get('build') == (expected_original['build'] if expected_original
+                                   else GUEST_BUILD) and
          type_text(original.get('version'), 'invalid_guest_identity') and
          type_text(original.get('executable'), 'invalid_guest_identity'),
          'unexpected_guest_identity')
+    if expected_original:
+        need(all(original.get(field) == value for field, value in expected_original.items()),
+             'unexpected_guest_identity')
 
     adaptation = manifest['main_adaptation']
     adaptation_keys = {'status', 'installation_authorized', 'input_sha256', 'output_sha256',
@@ -300,11 +347,18 @@ def _validate_manifest(manifest, expected_guest_input_sha256):
              'invalid_guest_adaptation')
     need(adaptation['size'] > 0 and adaptation['modified_prefix_bytes'] <= adaptation['size'],
          'invalid_guest_adaptation')
+    if guest_profile == 'newer47':
+        expected_adaptation = TIKTOK47_PROFILE['main_adaptation']
+        need(adaptation['input_sha256'] == expected_adaptation['input_sha256'] and
+             adaptation['output_sha256'] == expected_adaptation['output_sha256'] and
+             type(adaptation['size']) is int and
+             adaptation['size'] == expected_adaptation['size'],
+             'unexpected_guest_main_pins')
 
     files = manifest['files']
     need(isinstance(files, list) and 0 < len(files) <= preflight.MAX_ENTRIES,
          'invalid_guest_manifest')
-    expected_files, source_keys = {}, set()
+    expected_files, source_keys, retained_count = {}, set(), 0
     row_keys = {'source', 'path', 'size', 'sha256_before_signing', 'action'}
     for row in files:
         need(isinstance(row, dict) and set(row) == row_keys, 'invalid_guest_manifest')
@@ -312,9 +366,14 @@ def _validate_manifest(manifest, expected_guest_input_sha256):
         normalized_source = preflight.checked_name(source)
         need(source == normalized_source, 'invalid_guest_manifest')
         source = normalized_source
+        retained = row['action'] == bundled.ACTION
+        if retained:
+            need(private_scope, 'private_resource_scope_required')
+            bundled.verify_row(row, manifest['input_sha256'], copied=True)
+            retained_count += 1
         source_key = preflight.key(source)
         need(source_key not in source_keys and
-             not source.lower().endswith(preflight.MATERIAL), 'invalid_guest_manifest')
+             (not source.lower().endswith(preflight.MATERIAL) or retained), 'invalid_guest_manifest')
         source_keys.add(source_key)
         path = type_text(row['path'], 'invalid_guest_manifest')
         normalized = preflight.checked_name(path)
@@ -326,14 +385,15 @@ def _validate_manifest(manifest, expected_guest_input_sha256):
         need(not any(part.lower().endswith(('.app', '.appex')) for part in parts) and
              not any(preflight.key(part) in ('_codesignature', 'lcappinfo.plist', 'coderesources')
                      for part in parts) and
-             not normalized.lower().endswith(preflight.MATERIAL),
+             (not normalized.lower().endswith(preflight.MATERIAL) or retained),
              'forbidden_guest_member')
-        need(isinstance(row['action'], str) and row['action'] in FILE_ACTIONS,
+        need(isinstance(row['action'], str) and (row['action'] in FILE_ACTIONS or retained),
              'invalid_guest_manifest')
         need(type(row['size']) is int and 0 <= row['size'] <= preflight.MAX_REVIEW_ENTRY,
              'invalid_guest_manifest')
         digest_text(row['sha256_before_signing'], 'invalid_guest_manifest')
         expected_files[key] = row
+    need(retained_count == (1 if private_scope else 0), 'unapproved_bundled_resource')
     need(GUEST_ROOT + '/Info.plist' in {row['path'] for row in files} and
          GUEST_ROOT + '/NativeGuest' in {row['path'] for row in files},
          'incomplete_guest_framework')
@@ -343,6 +403,12 @@ def _validate_manifest(manifest, expected_guest_input_sha256):
          root_rows[GUEST_ROOT + '/NativeGuest']['sha256_before_signing'] == adaptation['output_sha256'] and
          root_rows[GUEST_ROOT + '/NativeGuest']['size'] == adaptation['size'],
          'invalid_guest_adaptation')
+    if guest_profile == 'newer47':
+        need(root_rows[GUEST_ROOT + '/NativeGuest']['source'] ==
+             expected_original['path'] + '/' + expected_original['executable'] and
+             root_rows[GUEST_ROOT + '/Info.plist']['source'] ==
+             expected_original['path'] + '/Info.plist',
+             'unexpected_guest_main_pins')
 
     omissions = manifest['omissions']
     need(isinstance(omissions, list) and len(omissions) <= preflight.MAX_ENTRIES,
@@ -367,10 +433,14 @@ def _validate_manifest(manifest, expected_guest_input_sha256):
     return files, expected_files
 
 
-def _verify_guest(archive, entries, all_names, expected_original_digest):
+def _verify_guest(archive, entries, all_names, expected_original_digest,
+                  acknowledge_private_bundled_resources=False, *,
+                  guest_profile='rx439'):
     need(all(not name.endswith('/') for name in all_names), 'invalid_guest_inventory')
     manifest = _manifest_json(archive, entries)
-    files, records = _validate_manifest(manifest, expected_original_digest)
+    files, records = _validate_manifest(manifest, expected_original_digest,
+                                        acknowledge_private_bundled_resources,
+                                        guest_profile=guest_profile)
     actual = {preflight.key(name): name for name in entries}
     need(len(actual) == len(entries) and set(actual) == set(records) | {preflight.key(MANIFEST)},
          'guest_inventory_mismatch')
@@ -395,11 +465,18 @@ def _verify_guest(archive, entries, all_names, expected_original_digest):
         need(count == row['size'] and digest.hexdigest() == row['sha256_before_signing'],
              'guest_member_digest_mismatch')
     info = plist_value(archive, entries, GUEST_ROOT + '/Info.plist')
+    expected_framework = (TIKTOK47_PROFILE['original_main_bundle']
+                          if guest_profile == 'newer47' else None)
     need(info.get('CFBundleIdentifier') == GUEST_ID and
-         info.get('CFBundleVersion') == GUEST_BUILD and
+         info.get('CFBundleVersion') == (expected_framework['build'] if expected_framework
+                                         else GUEST_BUILD) and
          info.get('CFBundleExecutable') == 'NativeGuest' and
          info.get('CFBundlePackageType') == 'FMWK', 'unexpected_guest_framework_metadata')
-    type_text(info.get('CFBundleShortVersionString'), 'unexpected_guest_framework_metadata')
+    short_version = type_text(info.get('CFBundleShortVersionString'),
+                              'unexpected_guest_framework_metadata')
+    if expected_framework:
+        need(short_version == expected_framework['version'],
+             'unexpected_guest_framework_metadata')
     return manifest, files, records, info
 
 
@@ -437,7 +514,7 @@ def _guest_descriptor(info):
     return plistlib.dumps(descriptor, fmt=plistlib.FMT_XML, sort_keys=True)
 
 
-def _build_entries(host_archive, guest_records, guest_info):
+def _build_entries(host_archive, guest_records, guest_info, private_test_only=False):
     output = []
     replaced_framework = {HOST_ROOT + '/' + GUEST_ROOT + '/NativeGuest',
                           HOST_ROOT + '/' + GUEST_ROOT + '/Info.plist'}
@@ -461,6 +538,14 @@ def _build_entries(host_archive, guest_records, guest_info):
         path = HOST_ROOT + '/' + row['path']
         output.append(('guest_file', path, None, (key, row), row['size']))
 
+    if private_test_only:
+        scope = json.dumps({'schema': 1, 'private_test_only': True,
+                            'purpose': 'bundled-resource-compatibility-test',
+                            'guest_input_sha256': bundled.REVIEWED_RESOURCE[0],
+                            'resource_path': bundled.REVIEWED_RESOURCE[2],
+                            'resource_sha256': bundled.REVIEWED_RESOURCE[4]},
+                           sort_keys=True).encode('ascii')
+        output.append(('generated', PRIVATE_SCOPE, None, scope, len(scope)))
     # Guest placeholder replacements are excluded above; validate every merged name
     # as one file/directory namespace before creating a temporary output.
     folded = {}
@@ -547,7 +632,8 @@ def verify_output(stream, expected):
 
 def merge_host(host_path, guest_path, output_path, *, expected_host_sha256,
                expected_guest_sha256, expected_guest_input_sha256,
-               acknowledge_unverified_runtime=False):
+               acknowledge_unverified_runtime=False,
+               acknowledge_private_bundled_resources=False):
     """Merge reviewed inputs into a new unsigned research IPA, never in place."""
     host_path, guest_path, output_path = Path(host_path), Path(guest_path), Path(output_path)
     host_stream = guest_stream = None
@@ -585,12 +671,17 @@ def merge_host(host_path, guest_path, output_path, *, expected_host_sha256,
             host_stream, host_identity[2])
         try:
             guest_archive, guest_entries, guest_names, _ = checked_archive(
-                guest_stream, guest_identity[2], 'extended-review')
+                guest_stream, guest_identity[2], 'extended-review',
+                approved_resource_input_sha256=(expected_guest_input_sha256
+                    if type(acknowledge_private_bundled_resources) is bool
+                    and acknowledge_private_bundled_resources else None))
             try:
                 _host_layout(host_archive, host_entries, host_names)
                 _manifest, guest_files, guest_records, guest_info = _verify_guest(
-                    guest_archive, guest_entries, guest_names, expected_guest_input_sha256)
-                output_plan = _build_entries(host_archive, guest_records, guest_info)
+                    guest_archive, guest_entries, guest_names, expected_guest_input_sha256,
+                    acknowledge_private_bundled_resources)
+                output_plan = _build_entries(host_archive, guest_records, guest_info,
+                                             _manifest.get('private_test_only', False))
                 descriptor = next((row for row in output_plan
                                    if row[0] == 'generated' and row[1] == DESCRIPTOR), None)
                 need(descriptor is not None, 'invalid_generated_descriptor')
@@ -615,6 +706,7 @@ def merge_host(host_path, guest_path, output_path, *, expected_host_sha256,
                         'runtime_verified': False, 'host_sha256': host_digest,
                         'guest_sha256': guest_digest,
                         'guest_input_sha256': expected_guest_input_sha256,
+                        'private_test_only': _manifest.get('private_test_only', False),
                         'output_sha256': output_digest, 'host_files': len(host_entries),
                         'guest_files': len(guest_files),
                         'output_files': len(expected_output),
@@ -666,13 +758,15 @@ def main(argv=None):
     parser.add_argument('--guest-sha256', required=True)
     parser.add_argument('--guest-input-sha256', required=True)
     parser.add_argument('--acknowledge-unverified-runtime', action='store_true')
+    parser.add_argument('--acknowledge-private-bundled-resources', action='store_true')
     args = parser.parse_args(argv)
     try:
         report = merge_host(args.host, args.guest, args.output,
                             expected_host_sha256=args.host_sha256,
                             expected_guest_sha256=args.guest_sha256,
                             expected_guest_input_sha256=args.guest_input_sha256,
-                            acknowledge_unverified_runtime=args.acknowledge_unverified_runtime)
+                            acknowledge_unverified_runtime=args.acknowledge_unverified_runtime,
+                            acknowledge_private_bundled_resources=args.acknowledge_private_bundled_resources)
     except preflight.InspectionError as error:
         print(json.dumps({'status': 'rejected', 'installation_authorized': False,
                           'runtime_verified': False, 'error': str(error)}))

@@ -11,12 +11,14 @@ import tempfile
 from pathlib import Path
 
 import ipa_preflight as preflight
+import modern_linkedit
 
 MAX_MAIN = 32 * 1024**2
 BASE = 0x100000000
 PAGE = 0x4000
 INSTALL_NAME = b'NativeGuest\0'
 ID_SIZE = (24 + len(INSTALL_NAME) + 7) & ~7
+MODERN_MAIN_SHA256 = '3daefde434d4c6bdd9e21ea44ad5fd3801a485a8e3c40bf7989421e97eaba40c'
 ALLOWED = {0x19, 0x80000022, 0x2, 0xb, 0xe, 0x1b, 0x32, 0x25,
            0x2a, 0x80000028, 0x2c, 0xc, 0x80000018, 0x8000001c,
            0x26, 0x29, 0x1d}
@@ -29,6 +31,13 @@ def prepare_main(data, *, expected_sha256):
     need(isinstance(expected_sha256, str) and re.fullmatch('[0-9a-f]{64}', expected_sha256),
          'invalid_main_digest')
     need(hashlib.sha256(data).hexdigest() == expected_sha256, 'main_digest_mismatch')
+    modern_before = None
+    modern_input = expected_sha256 == MODERN_MAIN_SHA256
+    if modern_input:
+        # This is intentionally gated by the exact immutable main-image digest.
+        # The validator accepts only the reviewed format-2 fixup/export subset.
+        modern_before = modern_linkedit.review(data, hosted=False, base=BASE,
+            command_padding=ID_SIZE, maximum_size=MAX_MAIN)
     header = list(struct.unpack_from('<8I', data))
     magic, cpu, subtype, kind, count, length, flags, reserved = header
     need(magic == 0xfeedfacf and cpu == 0x100000c and subtype == 0 and kind == 2 and
@@ -51,9 +60,10 @@ def prepare_main(data, *, expected_sha256):
             need(offset >= new_end, 'main_data_overlaps_new_commands')
 
     pos = 32
+    allowed_commands = ALLOWED | modern_linkedit.MODERN_COMMANDS if modern_input else ALLOWED
     for _ in range(count):
         cmd, size = struct.unpack_from('<II', data, pos)
-        need(cmd in ALLOWED, 'unsupported_main_command')
+        need(cmd in allowed_commands, 'unsupported_main_command')
         counts[cmd] = counts.get(cmd, 0) + 1
         command = data[pos:pos + size]
         if cmd == 0x19:
@@ -123,6 +133,11 @@ def prepare_main(data, *, expected_sha256):
             need(size == 24 and counts[cmd] == 1, 'invalid_encryption_command')
             off, amount = struct.unpack_from('<2I', command, 8)
             occupied(off, amount)
+        elif cmd in modern_linkedit.MODERN_COMMANDS:
+            need(modern_input and size == 16 and counts[cmd] == 1,
+                 'invalid_modern_linkedit_command')
+            off, amount = struct.unpack_from('<2I', command, 8)
+            occupied(off, amount)
         elif cmd == 0xe:
             need(size >= 16 and counts[cmd] == 1, 'invalid_main_dylinker')
             start = struct.unpack_from('<I', command, 8)[0]
@@ -154,12 +169,26 @@ def prepare_main(data, *, expected_sha256):
     output = bytes(output)
     need(output[new_end:] == data[new_end:] and len(output) == len(data), 'adapter_invariant_failed')
     preflight.macho_slice(io.BytesIO(output), 0, len(output), len(output))
+    if modern_input:
+        modern_after = modern_linkedit.review(output, hosted=True, base=BASE,
+            command_padding=0, maximum_size=MAX_MAIN)
+        need(modern_before.summary == modern_after.summary and
+             modern_before.non_pagezero_geometry == modern_after.non_pagezero_geometry and
+             modern_before.payload_ranges == modern_after.payload_ranges and
+             modern_before.payload_digests == modern_after.payload_digests,
+             'modern_linkedit_invariant_failed')
+        # The generic prefix invariant already proves this byte-for-byte; keep
+        # the explicit check adjacent to the scoped modern review as well.
+        need(output[new_end:] == data[new_end:], 'modern_linkedit_payload_changed')
+    unverified = ['signature_validity', 'runtime_loading', 'dependency_layout',
+                  'guest_isolation', 'native_features']
+    if modern_input:
+        unverified.append('modern_linkedit_runtime_compatibility')
     return output, {'status': 'prepared_requires_signing_and_review', 'installation_authorized': False,
                     'input_sha256': expected_sha256, 'output_sha256': hashlib.sha256(output).hexdigest(),
                     'size': len(output), 'entrypoint_offset': entrypoint, 'install_name': 'NativeGuest',
                     'modified_prefix_bytes': new_end, 'original_signature_invalidated': True,
-                    'unverified': ['signature_validity', 'runtime_loading', 'dependency_layout',
-                                   'guest_isolation', 'native_features']}
+                    'unverified': unverified}
 
 
 def prepare_file(source_path, output_path, *, expected_sha256):

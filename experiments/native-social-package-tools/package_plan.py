@@ -8,6 +8,7 @@ from collections import Counter
 from pathlib import Path
 
 import ipa_preflight as preflight
+import bundled_resource_policy as bundled
 
 DESTINATION = 'Frameworks/NativeGuest.framework'
 POLICY_LIMIT = 1024**2
@@ -43,9 +44,20 @@ def read_policy(path):
 def exclusions(policy, report):
     if policy is None:
         return set(), set()
-    preflight.require(isinstance(policy, dict) and set(policy) == {
-        'schema', 'input_sha256', 'excluded_extensions', 'excluded_materials'}, 'invalid_policy')
-    preflight.require(type(policy['schema']) is int and policy['schema'] == 1, 'invalid_policy')
+    fields = {'schema', 'input_sha256', 'excluded_extensions', 'excluded_materials'}
+    preflight.require(isinstance(policy, dict) and type(policy.get('schema')) is int
+                      and policy['schema'] in (1, 2), 'invalid_policy')
+    if policy['schema'] == 2:
+        fields |= {'private_test_only', 'retained_bundled_resources'}
+    preflight.require(set(policy) == fields, 'invalid_policy')
+    if policy['schema'] == 2:
+        preflight.require(policy['private_test_only'] is True, 'private_resource_scope_required')
+        values = policy['retained_bundled_resources']
+        preflight.require(isinstance(values, list) and len(values) == 1
+                          and values[0] == bundled.REVIEWED_RESOURCE[1]
+                          and values[0] in report['uninspected_material_names']
+                          and report['sha256'] == bundled.REVIEWED_RESOURCE[0],
+                          'unapproved_bundled_resource')
     preflight.require(policy['input_sha256'] == report['sha256'], 'policy_digest_mismatch')
     selected = []
     for field, known in (('excluded_extensions', report['extensions']),
@@ -87,6 +99,8 @@ def plan_fingerprint(plan):
 def _plan(source, profile, policy):
     report = preflight._inspect(source, profile)
     excluded_extensions, excluded_materials = exclusions(policy, report)
+    retained = (policy['retained_bundled_resources'] if policy and policy['schema'] == 2 else [])
+    preflight.require(not set(retained) & excluded_materials, 'conflicting_material_policy')
     root = report['main_bundle']['path']
     main = root + '/' + report['main_bundle']['executable']
     materials = set(report['uninspected_material_names'])
@@ -106,9 +120,14 @@ def _plan(source, profile, policy):
             extension = next((p for p in ancestors if p in excluded_extensions),
                              ancestors[-1] if ancestors else None)
             if extension is not None:
+                preflight.require(name not in retained, 'conflicting_material_policy')
                 action = 'exclude_extension' if extension in excluded_extensions else 'review_extension'
             elif name in materials:
-                action = 'exclude_material' if name in excluded_materials else 'review_material'
+                if name in retained:
+                    bundled.verify_member(archive, entry, report['sha256'])
+                    action, target = bundled.ACTION, bundled.REVIEWED_RESOURCE[2]
+                else:
+                    action = 'exclude_material' if name in excluded_materials else 'review_material'
             elif not name.startswith(root + '/'):
                 action = 'review_outside_payload'
             else:
@@ -158,6 +177,8 @@ def _plan(source, profile, policy):
                 'signing_and_guest_boundary_not_verified'}),
             'unverified': report['unverified'] + ['resource_semantics',
                 'non_macho_executable_resources', 'immutable_guest_framework_loading']}
+    if retained:
+        result['private_test_only'] = True
     result['plan_sha256'] = plan_fingerprint(result)
     return result
 

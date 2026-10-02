@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import ipa_preflight
+import modern_linkedit
 import prepare_executable as subject
 
 
@@ -38,6 +39,61 @@ def fixture(extra=b'', cryptid=0, platform=2, signature=True, entry=True):
     data = bytearray((header + body).ljust(17408, b'\0'))
     data[4096:4112] = b'SYNTHETIC-CODE!!!'
     data[16384:16640] = b'S' * 256  # Synthetic signature placeholder, never a valid signature.
+    return bytes(data)
+
+
+def _uleb(value):
+    output = bytearray()
+    while True:
+        byte = value & 0x7f
+        value >>= 7
+        output.append(byte | (0x80 if value else 0))
+        if not value:
+            return bytes(output)
+
+
+def modern_fixture(export_address=0x1100):
+    """Synthetic ARM64 image with one format-2 bind/rebase chain and trie export."""
+    section = struct.pack('<16s16s2Q8I', b'__text', b'__TEXT', subject.BASE + 4096,
+                          16, 4096, 2, 0, 0, 0x80000400, 0, 0, 0)
+    segments = [segment(b'__PAGEZERO', 0, subject.BASE, 0, 0, 0),
+                segment(b'__TEXT', subject.BASE, 0x4000, 0, 0x4000, 5, section),
+                segment(b'__DATA', subject.BASE + 0x4000, 0x4000, 0x4000, 0x4000, 3),
+                segment(b'__LINKEDIT', subject.BASE + 0x8000, 0x4000, 0x8000, 0x4000, 1)]
+
+    # starts_in_image is at 28; its segment-offset array ends at 48, where the
+    # sole __DATA starts_in_segment record begins. The record has one 16 KiB page.
+    starts, segment_info = 28, 48
+    info = struct.pack('<IHHQIH', 24, 0x4000, 2, 0x4000, 0, 1) + struct.pack('<H', 0)
+    imports, symbols = segment_info + len(info), segment_info + len(info) + 4
+    fixups = (struct.pack('<7I', 0, starts, imports, symbols, 1, 1, 0) +
+              struct.pack('<5I', 4, 0, 0, segment_info - starts, 0) +
+              info + struct.pack('<I', 1) + b'_synthetic_import\0')
+
+    edge = b'_synthetic_export\0'
+    root_prefix = b'\0\x01' + edge
+    child = len(root_prefix) + 1
+    terminal = _uleb(0) + _uleb(export_address)
+    trie = root_prefix + _uleb(child) + bytes([len(terminal)]) + terminal + b'\0'
+    fixup_offset, trie_offset = 0x8100, 0x8200
+    commands = segments + [
+        struct.pack('<6I', 0x32, 24, 2, 0, 0, 0),
+        struct.pack('<6I', 0xc, 48, 24, 0, 0x10000, 0x10000) +
+            b'libSystem.B.dylib\0'.ljust(24, b'\0'),
+        struct.pack('<4I', modern_linkedit.FIXUPS, 16, fixup_offset, len(fixups)),
+        struct.pack('<4I', modern_linkedit.EXPORTS, 16, trie_offset, len(trie)),
+        struct.pack('<2I2Q', 0x80000028, 24, 4096, 0),
+        struct.pack('<4I', 0x1d, 16, 0x9000, 256),
+    ]
+    body = b''.join(commands)
+    header = struct.pack('<8I', 0xfeedfacf, 0x100000c, 0, 2, len(commands), len(body), 0x200085, 0)
+    data = bytearray((header + body).ljust(0xc000, b'\0'))
+    data[4096:4112] = b'SYNTHETIC-CODE!!!'
+    data[0x4000:0x4008] = struct.pack('<Q', (1 << 63) | (2 << 51))
+    data[0x4008:0x4010] = struct.pack('<Q', subject.BASE + 0x1100)
+    data[fixup_offset:fixup_offset + len(fixups)] = fixups
+    data[trie_offset:trie_offset + len(trie)] = trie
+    data[0x9000:0x9100] = b'S' * 256
     return bytes(data)
 
 
@@ -107,6 +163,32 @@ class AdapterTests(unittest.TestCase):
     def test_unrecognized_and_chained_commands_rejected(self):
         for cmd in (0x80000034, 0x9999):
             self.reject(fixture(extra=struct.pack('<4I', cmd, 16, 0, 0)), 'unsupported_main_command')
+
+    def test_modern_commands_are_gated_by_the_exact_test_pin(self):
+        data = modern_fixture()
+        with self.assertRaisesRegex(ipa_preflight.InspectionError, '^unsupported_main_command$'):
+            self.adapt(data)
+        digest = hashlib.sha256(data).hexdigest()
+        with patch.object(subject, 'MODERN_MAIN_SHA256', digest):
+            output, report = subject.prepare_main(data, expected_sha256=digest)
+            before = modern_linkedit.review(data, hosted=False, base=subject.BASE,
+                command_padding=subject.ID_SIZE, maximum_size=subject.MAX_MAIN)
+            after = modern_linkedit.review(output, hosted=True, base=subject.BASE,
+                command_padding=0, maximum_size=subject.MAX_MAIN)
+        self.assertEqual(before.summary, after.summary)
+        self.assertEqual(before.non_pagezero_geometry, after.non_pagezero_geometry)
+        self.assertEqual(before.payload_ranges, after.payload_ranges)
+        self.assertEqual(before.payload_digests, after.payload_digests)
+        self.assertIn('modern_linkedit_runtime_compatibility', report['unverified'])
+        self.assertNotIn(modern_linkedit.FIXUPS, subject.ALLOWED)
+        self.assertNotIn(modern_linkedit.EXPORTS, subject.ALLOWED)
+        self.assertEqual(output[report['modified_prefix_bytes']:], data[report['modified_prefix_bytes']:])
+
+    def test_modern_pinned_digest_is_checked_before_parsing(self):
+        data = modern_fixture()
+        with patch.object(subject, 'MODERN_MAIN_SHA256', 'a' * 64):
+            with self.assertRaisesRegex(ipa_preflight.InspectionError, '^main_digest_mismatch$'):
+                subject.prepare_main(data, expected_sha256=subject.MODERN_MAIN_SHA256)
 
     def test_nonzero_padding_rejected(self):
         data = bytearray(fixture())

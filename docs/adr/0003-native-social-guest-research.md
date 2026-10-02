@@ -6,6 +6,37 @@ Status: separate integration candidate authorized after owner acceptance of port
 
 ### Approved newer-base comparison (2026-10-02)
 
+Owner subsequently approved a fixed bundled-resource retention exception for the
+private candidate. Schema2 policy/manifest and explicit writer/merger private
+acknowledgement preserve only the exact reviewed whole-input/member/destination/
+size/digest tuple; default material and host signing-export blocks stay intact.
+No key contents enter source/public CI. A private marker is metadata, not enforced
+repository privacy or runtime trust. Production modern-command support and the
+new guest/host profile are still pending; original RX state/build remain preserved.
+
+Subsequent compatibility/P12 investigation is approved locally. A private bounded
+in-memory modern-command adapter experiment passes for this exact executable,
+without changing production allowlists/pins or saving a transformed binary.
+P12 metadata confirms an encrypted key bag; MusicallyCore resource/identity-import
+and network-challenge references suggest session authentication, but exact flow
+and provenance are unverified. Preserve the input; do not silently strip it.
+The generic no-material-output policy remains unchanged. Any narrowly pinned
+private bundled-resource exception requires explicit owner disposition; no key
+contents may enter source, fixtures, logs or public CI. This is not authorization
+to import/use the identity, install/execute the fallback or port/bypass licensing.
+
+Subsequent owner-approved acquisition is static inspection ONLY of the
+publisher-linked TikTok47.0/TTKillerPlus2.2 fallback. The downloaded bytes report
+47.0.0/build470044 and remain private/ignored; this does not turn the modified
+package into a clean-base comparison or authorize code execution/integration.
+Extended bounded inventory succeeds, but the current narrow main adapter
+rejects chained-fixup/export-trie commands. A private-key-named resource is
+unopened and unresolved. Review any future adapter support, explicit component
+disposition and separate digest-bound host profile before assembly; never reuse
+43.9 code-address pins, silently remove resources, bypass licensing, or describe
+a tweak-disabled derivative as verified stock TikTok. See TEST_REPORT for exact
+static evidence and limits. Existing RX build and phone data remain untouched.
+
 Owner approved pivoting from further 43.9.0 Highlights experiments to validating
 a newer unmodified TikTok base inside CalcVault. Preserve the working RX-enabled
 guest, prior private candidates and all app data. This is a separate comparison,

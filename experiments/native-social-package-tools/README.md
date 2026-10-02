@@ -41,7 +41,7 @@ python experiments/native-social-package-tools/package_plan.py 'C:\path\candidat
 
 Every non-directory ZIP member receives exactly one action. Proposed destinations stay under `Frameworks/NativeGuest.framework`, retaining the nested library/resource hierarchy; the main executable and root plist require preparation rather than being copied as already usable framework code. Relocated filename collisions and file/directory conflicts reject the plan. This does not prove that the proposed framework layout works with SideStore or LiveProcess.
 
-Guest extension members and material-named files have no destination by default. Old `_CodeSignature` metadata is marked for omission from a future rebuilt copy, never removed from the original. Other resource candidates receive only a four-byte magic check; unclassified Mach-O/FAT candidates have no destination and remain blocked. That check is not a malware scan, script detector or proof that resources are inert. Known material members remain unopened. No hashes/content of individual key-named members are collected.
+Guest extension members and material-named files have no destination by default. Old `_CodeSignature` metadata is marked for omission from a future rebuilt copy, never removed from the original. Other resource candidates receive only a four-byte magic check; unclassified Mach-O/FAT candidates have no destination and remain blocked. That check is not a malware scan, script detector or proof that resources are inert. With no retention policy, known material members remain unopened and no individual material hashes/content are collected. The separate owner-reviewed exception below hashes only its exact approved opaque resource.
 
 An optional local `--policy proposal.json` can record **proposed** exact-path exclusions with this shape (illustrative values only):
 
@@ -58,6 +58,76 @@ JSON policies are capped at 1 MiB. Unknown/duplicate fields or targets, non-obje
 
 The planner never writes or extracts files, changes a binary, signs, uploads or executes code. Exit 0 means a draft was generated, **not** that its blockers are resolved: `status=draft_review_required`, `assembly_authorized=false`, `installation_authorized=false` always remain. The JSON policy is not a permission to execute a guest, nor can it authorize new extensions. Keep real plans/policies local. The separate executable adapter, research ZIP writer and host merger are described below; none is automatically applied by the planner. Signing and actual native guest compatibility remain separate gates.
 
+### Private bundled-resource exception
+
+The owner approved preserving the already bundled TikTok47 SessionCheck P12 only
+in a private compatibility candidate. `bundled_resource_policy.py` contains
+metadata pins, not key bytes: exact original IPA SHA256, original member path,
+fixed relocated path,1525-byte size and member SHA256. No caller-supplied digest
+can approve a different key. This is an opaque byte-copy policy, not key import,
+decryption, certificate validation or proof of vendor provenance. Its likely
+session/network purpose is a static inference recorded in `docs/TEST_REPORT.md`.
+
+Policy schema2 requires the existing four schema1 fields plus
+`private_test_only: true` and `retained_bundled_resources` containing exactly the
+one registered source path. Retention/exclusion conflicts reject. The default
+schema1 policy remains unchanged, including material members staying unopened.
+Schema2 verifies only the selected member's bounded size/digest; all other
+material still needs explicit exclusion or blocks assembly. Keep actual policies,
+payloads and outputs ignored/private; public CI uses synthetic placeholders only.
+
+Both writer and merger require `--acknowledge-private-bundled-resources` in
+addition to their existing layout/runtime acknowledgements. The writer validates
+the fixed row before copying, checks copied bytes, and rechecks the manifest and
+digest on output readback. Its schema2 manifest carries `private_test_only=true`.
+The merger checks the exact resource independently and rechecks its content,
+adds `CVLPPrivatePackageScope.json` to the containing app, and returns a private
+scope marker. Host signing-material rejection remains unchanged. The generated
+marker includes the source/resource digest binding; an existing reserved marker
+in the host input is rejected rather than copied into another candidate. The flag and
+marker do not make a filesystem directory or remote repository private; the
+operator must keep these outputs out of public builds/uploads.
+
+This resource exception by itself does not widen main load-command support,
+guest build recognition, host identity, entitlements or phone execution authority.
+The fixed Build20/439042 merger still rejects the actual470044 guest. The separate
+TikTok47 compatibility path described below owns newer-format validation and
+Build24 recognition. No key contents belong in source, fixtures, logs,
+screenshots or public CI.
+
+## Separate TikTok47 comparison path
+
+The owner-selected comparison is the inspected TikTok47/TTKillerPlus modified
+fallback, not an authenticated stock build. Its existing tweak and embedded
+libraries are preserved; compatibility testing does not remove licensing checks
+or transfer RX hooks into an unrelated version. Highlights availability is not
+established by package inspection or ZIP creation.
+
+The new adapter branch is limited to the exact reviewed main-image digest and
+the audited chained-fixup format2/export-trie subset. Other modern inputs remain
+rejected. It preserves the original payload bytes, non-PAGEZERO segment geometry,
+dependency strings and total main-image size; output requires fresh signing.
+The older adapter allowlist and Build20/RX merger defaults stay unchanged.
+
+Build24 is a separate immutable guest/profile contract. Public Apple CI builds
+only the synthetic containing app, with all old Highlights experiments disabled.
+The private merger accepts that exact host stage and the reviewed470044 guest
+package, regenerates selection metadata, retains the reviewed private resource
+under explicit acknowledgement, and verifies the complete output inventory,
+member hashes and CRCs. Native data uses integration-native-24 instead of the
+existing integration-native-23 directory; no old account/session data is copied.
+
+Keep the real input, prepared guest ZIP and merged IPA ignored and private.
+SideStore must freshly sign the final candidate, using the existing reviewed
+no-certificate-export build. A generated IPA is not a passed phone test,
+vendor-provenance check, security certification or guaranteed Highlights fix.
+
+The Build24 merger is `../native-social-integration/merge-tiktok47.py`. Supply
+independently verified host and guest ZIP hashes and both explicit private-resource
+and unverified-runtime acknowledgements. It rejects a mismatched host stage,
+guest version/main-image pin, resource binding, existing destination or replayed
+private marker. It never signs, installs, uploads or changes either input.
+
 ## Narrow executable preparation
 
 `prepare_executable.py` prepares a **separate** main-binary copy before signing. It does not operate on an IPA or change a signed installed app. Its pure `prepare_main(bytes, expected_sha256=...)` interface returns new bytes plus hashes and limitations; `prepare_file`/CLI writes a new destination without replacing any existing file. No native code is executed.
@@ -66,7 +136,7 @@ The planner never writes or extracts files, changes a binary, signs, uploads or 
 python experiments/native-social-package-tools/prepare_executable.py 'C:\private\OriginalMain' 'C:\private\NativeGuest' --input-sha256 '<main-binary SHA-256>'
 ```
 
-The digest is for the **main executable bytes**, not the whole IPA. The input must be a thin, little-endian ARM64 subtype-0 iOS `MH_EXECUTE`, at most 32 MiB, with the supported command set, conventional 4 GiB `__PAGEZERO`, file-backed `__TEXT`/`__text` entry point and an existing nonempty signature slot. FAT, ARM64e, encrypted code, chained fixups, unknown commands, duplicate dependencies, absent signature slots, malformed ranges and unsupported mappings fail visibly. This is intentionally narrower than the inventory tool.
+The digest is for the **main executable bytes**, not the whole IPA. The input must be a thin, little-endian ARM64 subtype-0 iOS `MH_EXECUTE`, at most 32 MiB, with the supported command set, conventional 4 GiB `__PAGEZERO`, file-backed `__TEXT`/`__text` entry point and an existing nonempty signature slot. FAT, ARM64e, encrypted code, unreviewed chained fixups, unknown commands, duplicate dependencies, absent signature slots, malformed ranges and unsupported mappings fail visibly. Only the exact TikTok47 main-image pin can enter the separate bounded modern-format branch above. This is intentionally narrower than the inventory tool.
 
 Preparation inserts a fixed `NativeGuest` dylib identity into verified zero command padding, changes the file type/PIE-related flags and reduces `__PAGEZERO` to one 16 KiB range immediately below the original text base. Section bytes, entry-point offset, dependency paths, link-edit offsets and total file size do not move. Original signing metadata becomes stale: the output **requires fresh signing** and is not a verified or launch-ready dylib. These structural rules use Apple's [Mach-O format definitions](https://github.com/apple-oss-distributions/xnu/blob/main/EXTERNAL_HEADERS/mach-o/loader.h) and the reviewed [pinned LiveContainer conversion](https://github.com/LiveContainer/LiveContainer/blob/e370a92dfc03ce109ebce00ed4a7cfc64ad1c801/LiveContainer/LCMachOUtils.m), without adopting optional tweak injection, JIT or signature-validation bypasses.
 
@@ -83,7 +153,7 @@ python experiments/native-social-package-tools/package_plan.py 'C:\private\candi
 python experiments/native-social-package-tools/assemble_guest.py 'C:\private\candidate.ipa' 'C:\private\guest.zip' --profile extended-review --policy 'C:\private\proposal.json' --plan-sha256 '<reviewed plan_sha256>' --acknowledge-unverified-layout
 ```
 
-There are no default extension/material exclusions: undisposed members, outside-root files and unclassified Mach-O candidates reject assembly. Exclusions cannot conceal encrypted extension code from preflight. Material-named members are not opened. The writer applies the narrow main adapter, changes only the root plist's executable/package-type fields, preserves included embedded code/resources byte-for-byte, and omits obsolete signature metadata. Embedded signatures are not verified and the main signature is invalidated; fresh containing-app signing remains mandatory. No architectures or debugging libraries are silently stripped.
+There are no default extension/material exclusions: undisposed members, outside-root files and unclassified Mach-O candidates reject assembly. Exclusions cannot conceal encrypted extension code from preflight. Material-named members are not opened except the explicitly acknowledged, fixed schema2 resource above. The writer applies the narrow main adapter, changes only the root plist's executable/package-type fields, preserves included embedded code/resources byte-for-byte, and omits obsolete signature metadata. Embedded signatures are not verified and the main signature is invalidated; fresh containing-app signing remains mandatory. No architectures or debugging libraries are silently stripped.
 
 Included members are streamed in 64 KiB chunks to a new ZIP_STORED archive, capped at 2 GiB; the main is bounded at 32 MiB, the root plist at 1 MiB, and the manifest at 16 MiB. `GuestPackage.json` records each included file's pre-signing hash, omissions, adaptation evidence and unverified flags. It is explicitly **not a runtime manifest**. Every included output member is reopened and checked for inventory, size, CRC and SHA-256, then the source hash is checked again before no-replace publication. This is not a snapshot against hostile concurrent input mutation; do not modify the source during assembly.
 
