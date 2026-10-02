@@ -1,5 +1,43 @@
 # CalcVault test report
 
+## Owner1 private delivery (2026-10-02)
+
+Verified IPA and portable basename-only checksum published as a separate private
+prerelease. Destination visibility confirmed PRIVATE immediately before and
+after upload; release not draft, both assets uploaded, and server-reported
+SHA256 values/sizes exactly match local files. Private URL/receipt stay in the
+ignored build folder, not source. Previous IPAs remain preserved. Source,
+independent review, seven-mode Apple-native gate, immutable assembly and private
+delivery complete for this read-only candidate. Signed-phone re-sign/install,
+both CVLP_ADMISSION_OWNER lines on the affected profile and Highlights,
+playback/Lock/calculator/X/Instagram/download regression acceptance pending.
+The diagnostic is not a Highlights fix, callable ABI or security certification.
+
+## Owner1 Apple gate and immutable assembly (2026-10-02)
+
+Actions36991386456 at673223bbd02533fd4bb8cb86f7628b0cf3a7338f PASS on
+Xcode26.6/17F113. All seven fresh persisted native results match the exact
+nine-token configuration/completion schema. admissionCases=1 and ownerCases=1
+throughout; replayTerminal=1 only in mode4; mode6 has admission=1/owner=1 and
+all viewing overrides off. Source checks device88/integration52 pass in CI;
+local device88/integration52/package118 rerun PASS (258 total). Simulator and
+device host/Kit/guest builds, strict ad-hoc signature and dependency checks,
+packaged ZIP validation and locked-root smoke PASS. Screenshot shows the
+expected protected-Keychain-unavailable fail-closed state, with existing
+credentials not replaced; it is not a signed-phone authentication result.
+No private guest or account ran in CI.
+
+Downloaded host SHA53a80e4f8123b9e3eb91ce44dc5f82a0c555550c0128c9ea3f90f0e9f15d9382
+matches CI. Fresh no-overwrite private assembly and independent full-member
+comparison PASS:122 retained host files,2424 guest files plus the descriptor
+unchanged; RX unchanged, identity/portrait/file-sharing restrictions preserved,
+compiled integration-23-highlights-owner1/CVLP_ADMISSION_OWNER markers present,
+full ZIP readback and input hash preservation verified. Output SHA
+e32ed614467ace3009fb6446fc0283ce0ec8bb911e0caecdabb006ad663281d9,
+702843061bytes. Private delivery and owner SideStore.cv1 re-sign/install,
+runtime owner metadata, Highlights/playback/Lock/calculator/browser/download
+acceptance remain pending. No Highlights fix or callable ABI is claimed.
+
 ## Owner1 first Apple compilation failure (2026-10-02)
 
 Actions36990125178 at cc598b7 FAILED compiling the first synthetic Highlights
