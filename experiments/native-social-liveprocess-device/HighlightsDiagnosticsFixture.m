@@ -21,6 +21,7 @@ static NSMutableArray<NSString *> *CVLPFixtureDiagnosticLines;
 static NSUInteger CVLPFixtureDisplacedCalls;
 static NSUInteger CVLPFixtureResolverCalls;
 static BOOL CVLPAdmissionFixtureCompleted = NO;
+static BOOL CVLPAdmissionOwnerFixtureCompleted = NO;
 
 typedef struct {
     CFTimeInterval now;
@@ -464,6 +465,7 @@ static BOOL CVLPHighlightsDirectRunFixture(NSString **failure) {
 
 #if defined(CVLP_HIGHLIGHTS_TESTING)
 #import "AdmissionMetadataFixtureCases.h"
+#import "AdmissionOwnerFixtureCases.h"
 #endif
 
 BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
@@ -859,6 +861,9 @@ BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
     if (!CVLPAdmissionRunFixtureCases(failure)) { return NO; }
     CVLPAdmissionFixtureCompleted = YES;
     fprintf(stderr, "CV_ADMISSION_METADATA_FIXTURE_PASS\n");
+    if (!CVLPAdmissionOwnerRunFixtureCases(failure)) { return NO; }
+    CVLPAdmissionOwnerFixtureCompleted = YES;
+    fprintf(stderr, "CV_ADMISSION_OWNER_FIXTURE_PASS\n");
 #endif
     [CVLPFixtureDiagnosticLines removeAllObjects];
     CVLPHighlightsState.directLast = -1;
@@ -956,6 +961,44 @@ BOOL CVLPHighlightsRunFixtureSelfTest(NSString **failure) {
         [directLine containsString:@"directMode=1 directStatus=1 directCalls=2 directLast=0 directOverrideCalls=2"],
         @"direct_emitted_line_retains_original_false_distinct_from_delivery", failure)) { return NO; }
 #endif
+#if CVLP_HIGHLIGHTS_ADMISSION_OWNER_METADATA
+    Method untouchedMethods[] = {
+        class_getClassMethod(CVLPFixtureFeatureOwner.class, @selector(enableStoryHighlightConsumption)),
+        class_getClassMethod(CVLPFixtureFeatureOwner.class, @selector(enableStoryHighlightCreation)),
+        class_getInstanceMethod(TTKProfileBizDataStoryHighlightInfoModel.class, @selector(storyHighlightInfo)),
+        class_getInstanceMethod(TTKProfileStoryHighlightComponent.class, @selector(componentMount)),
+        class_getInstanceMethod(TTKProfileStoryHighlightCollectionComponent.class, @selector(updateUI)),
+        class_getInstanceMethod(TTKProfileStoryHighlightCollectionComponent.class, @selector(viewHeight)),
+    };
+    IMP untouchedImplementations[CVLPHighlightsTargetCount];
+    for (NSUInteger index = 0; index < CVLPHighlightsTargetCount; index++) {
+        if (!CVLPFixtureRequire(untouchedMethods[index] != NULL,
+            @"owner_start_fixture_method_present", failure)) { return NO; }
+        untouchedImplementations[index] = method_getImplementation(untouchedMethods[index]);
+    }
+    NSUInteger callsBeforeOwnerStart = CVLPFixtureConsumptionCalls + CVLPFixtureCreationCalls +
+        CVLPFixtureGetterCalls + CVLPFixtureMountCalls + CVLPFixtureUpdateCalls + CVLPFixtureHeightCalls;
+    CVLPHighlightsObserver *ownerStartObserver = [CVLPHighlightsObserver new];
+    ownerStartObserver->_startedAt = CACurrentMediaTime();
+    [ownerStartObserver startOnMainQueue];
+    BOOL untouched = CVLPHighlightsState.directStatus == CVLPHighlightsDirectDisabled &&
+        CVLPHighlightsState.lastConsumption == -1 && CVLPHighlightsState.lastCreation == -1 &&
+        CVLPHighlightsState.lastModelPresence == -1 && CVLPHighlightsState.lastMount == -1 &&
+        CVLPHighlightsState.lastUpdate == -1 && CVLPHighlightsState.lastHeight == -1.0 &&
+        CVLPHighlightsState.directLast == -1;
+    for (NSUInteger index = 0; index < CVLPHighlightsTargetCount; index++) {
+        untouched = untouched &&
+            method_getImplementation(untouchedMethods[index]) == untouchedImplementations[index] &&
+            ownerStartObserver->_installStatuses[index] == CVLPHighlightsInstallUnknown &&
+            CVLPHighlightsState.counts[index] == 0;
+    }
+    untouched = untouched && callsBeforeOwnerStart == CVLPFixtureConsumptionCalls +
+        CVLPFixtureCreationCalls + CVLPFixtureGetterCalls + CVLPFixtureMountCalls +
+        CVLPFixtureUpdateCalls + CVLPFixtureHeightCalls;
+    [ownerStartObserver stopWithReason:CVLPHighlightsStopDeadline];
+    if (!CVLPFixtureRequire(untouched, @"owner_start_never_installs_or_invokes_highlights_methods",
+        failure)) { return NO; }
+#endif
 #if CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT
     if (!CVLPEarlyLoaderRunFixture(failure)) { return NO; }
 #endif
@@ -991,10 +1034,11 @@ int main(void) {
 #if CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT
         replayTerminal = CVLPEarlyLoaderReplayTerminalCompleted;
 #endif
-        NSString *result = [NSString stringWithFormat:@"CV_HIGHLIGHTS_FIXTURE_PASS viewing=%d direct=%d early=%d admission=%d admissionCases=%d replayTerminal=%d\n",
+        NSString *result = [NSString stringWithFormat:@"CV_HIGHLIGHTS_FIXTURE_PASS viewing=%d direct=%d early=%d admission=%d owner=%d admissionCases=%d ownerCases=%d replayTerminal=%d\n",
             CVLPHighlightsViewingExperimentMode, CVLPHighlightsDirectViewingExperimentMode,
             CVLPHighlightsEarlyViewingExperimentMode, CVLP_HIGHLIGHTS_ADMISSION_METADATA,
-            CVLPAdmissionFixtureCompleted, replayTerminal];
+            CVLP_HIGHLIGHTS_ADMISSION_OWNER_METADATA, CVLPAdmissionFixtureCompleted,
+            CVLPAdmissionOwnerFixtureCompleted, replayTerminal];
         if (![result writeToFile:resultPath atomically:YES encoding:NSUTF8StringEncoding error:NULL]) {
             fprintf(stderr, "CV_HIGHLIGHTS_FIXTURE_FAIL result_write\n");
             return 1;

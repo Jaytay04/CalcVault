@@ -11,6 +11,7 @@ PIN = 'e370a92dfc03ce109ebce00ed4a7cfc64ad1c801'
 PROBE = 'LiveContainer/CVLPProbe.m'
 HEADER = 'LiveContainer/CVLPHighlightsDiagnostics.h'
 ADMISSION_HEADER = 'LiveContainer/CVLPAdmissionMetadata.h'
+ADMISSION_OWNER_HEADER = 'LiveContainer/CVLPAdmissionOwnerMetadata.h'
 
 
 def once(text, old, new):
@@ -24,11 +25,12 @@ def diagnostic_header_contents():
     return {
         HEADER: (header_root / 'CVLPHighlightsDiagnostics.h').read_text(encoding='utf-8'),
         ADMISSION_HEADER: (header_root / 'CVLPAdmissionMetadata.h').read_text(encoding='utf-8'),
+        ADMISSION_OWNER_HEADER: (header_root / 'CVLPAdmissionOwnerMetadata.h').read_text(encoding='utf-8'),
     }
 
 
 def install_diagnostic_headers(root, headers):
-    expected = {HEADER, ADMISSION_HEADER}
+    expected = {HEADER, ADMISSION_HEADER, ADMISSION_OWNER_HEADER}
     if set(headers) != expected:
         raise ValueError('highlights_header_set_mismatch')
     destinations = [root / relative_path for relative_path in expected]
@@ -41,12 +43,15 @@ def install_diagnostic_headers(root, headers):
 
 
 def transform(probe, viewing_experiment=False, direct_viewing_experiment=False,
-              early_viewing_experiment=False, admission_metadata=False):
+              early_viewing_experiment=False, admission_metadata=False,
+              owner_metadata=False):
     if sum((viewing_experiment, direct_viewing_experiment, early_viewing_experiment,
-            admission_metadata)) > 1:
+            admission_metadata, owner_metadata)) > 1:
         raise ValueError('highlights_experiments_mutually_exclusive')
     if ('CVLPHighlightsDiagnostics' in probe or 'CVLPAdmissionMetadata' in probe or
-            'CVLP_HIGHLIGHTS_ADMISSION_METADATA' in probe):
+            'CVLPAdmissionOwnerMetadata' in probe or
+            'CVLP_HIGHLIGHTS_ADMISSION_METADATA' in probe or
+            'CVLP_HIGHLIGHTS_ADMISSION_OWNER_METADATA' in probe):
         raise ValueError('highlights_already_applied')
     configuration = '#define CVLP_HIGHLIGHTS_VIEWING_EXPERIMENT 1\n' if viewing_experiment else ''
     if direct_viewing_experiment:
@@ -55,6 +60,9 @@ def transform(probe, viewing_experiment=False, direct_viewing_experiment=False,
         configuration = '#define CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT 1\n'
     if admission_metadata:
         configuration = '#define CVLP_HIGHLIGHTS_ADMISSION_METADATA 1\n'
+    if owner_metadata:
+        configuration = ('#define CVLP_HIGHLIGHTS_ADMISSION_METADATA 1\n'
+                         '#define CVLP_HIGHLIGHTS_ADMISSION_OWNER_METADATA 1\n')
     probe = once(probe, '#import "CVLPGuestDiagnostics.h"',
                  '#import "CVLPGuestDiagnostics.h"\n' + configuration + '#import "CVLPHighlightsDiagnostics.h"')
     probe = once(probe, '    [CVLPGuestGeometryDiagnostics start];',
@@ -66,7 +74,18 @@ def transform(probe, viewing_experiment=False, direct_viewing_experiment=False,
                      '+ (void)finishEarlyHighlightsViewingLoad {\n'
                      '    [CVLPHighlightsDiagnostics finishEarlyViewingLoad];\n}\n\n'
                      '+ (void)startGuestGeometryObservations {')
-    if admission_metadata:
+    if owner_metadata:
+        probe = once(probe, 'if (!CVLPGuestDiagnosticsLineIsSanitized(line)) { return; }',
+                     '#if CVLP_HIGHLIGHTS_ADMISSION_OWNER_METADATA\n'
+                     '    if (!CVLPGuestDiagnosticsLineIsSanitized(line) &&\n'
+                     '        !CVLPHighlightsLineIsSanitized(line) &&\n'
+                     '        !CVLPAdmissionLineIsSanitized(line) &&\n'
+                     '        !CVLPAdmissionOwnerLineIsSanitized(line)) { return; }\n'
+                     '#else\n'
+                     '    if (!CVLPGuestDiagnosticsLineIsSanitized(line) &&\n'
+                     '        !CVLPHighlightsLineIsSanitized(line)) { return; }\n'
+                     '#endif')
+    elif admission_metadata:
         probe = once(probe, 'if (!CVLPGuestDiagnosticsLineIsSanitized(line)) { return; }',
                      '#if CVLP_HIGHLIGHTS_ADMISSION_METADATA\n'
                      '    if (!CVLPGuestDiagnosticsLineIsSanitized(line) &&\n'
@@ -87,6 +106,8 @@ def transform(probe, viewing_experiment=False, direct_viewing_experiment=False,
         marker = 'integration-23-highlights-earlyviewing1'
     if admission_metadata:
         marker = 'integration-23-highlights-admission2'
+    if owner_metadata:
+        marker = 'integration-23-highlights-owner1'
     return once(probe, 'Build marker: integration-23.', f'Build marker: {marker}.')
 
 
@@ -117,15 +138,18 @@ def main():
                         help='Explicit pre-initializer pinned native consumption-pointer experiment')
     parser.add_argument('--admission-metadata', action='store_true',
                         help='Explicit read-only restored-selector metadata discovery; requires diagnostics')
+    parser.add_argument('--admission-owner-metadata', action='store_true',
+                        help='Explicit read-only owner metadata discovery; requires diagnostics')
     args = parser.parse_args()
     root = args.source.resolve(strict=True)
     if subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip() != PIN:
         raise SystemExit('upstream_revision_mismatch')
-    if (root / HEADER).exists() or (root / ADMISSION_HEADER).exists():
+    if any((root / path).exists() for path in
+           (HEADER, ADMISSION_HEADER, ADMISSION_OWNER_HEADER)):
         raise SystemExit('highlights_already_present')
     updated = transform((root / PROBE).read_text(encoding='utf-8'), args.viewing_experiment,
                         args.direct_viewing_experiment, args.early_viewing_experiment,
-                        args.admission_metadata)
+                        args.admission_metadata, args.admission_owner_metadata)
     if args.early_viewing_experiment:
         bootstrap_path = root / 'LiveContainer/LCBootstrap.m'
         probe_header_path = root / 'LiveContainer/CVLPProbe.h'

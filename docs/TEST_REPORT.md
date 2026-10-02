@@ -1,5 +1,76 @@
 # CalcVault test report
 
+## Owner1 metadata diagnostic implementation (2026-10-02)
+
+Local source/package tests: device88 + integration52 + package118 =258 PASS.
+Bash syntax and diff checks PASS. Independent read-only review found no remaining
+static blocker after startup observers were disabled; its minor missing last-value
+sentinel coverage was added to the native startup assertion. An earlier local
+package run failed one input-preservation assertion: the test recreated a
+synthetic ZIP after snapshotting it, allowing timestamp differences before the
+merger ran. Snapshot now follows final fixture preparation; all118 package
+checks pass without relaxing byte-for-byte input preservation. Native tests have
+not yet run at this checkpoint.
+
+Owner approved read-only fixed-implementation owner/signature discovery. New
+default-off workflow selection is mutually exclusive with every viewing and
+admission-only candidate; it retains exact existing validation and image guards.
+Production compares actual declared Method IMPs with the pinned function using
+public image-bound enumeration; it never invokes or wraps that function. Owner
+startup compiles out all six preexisting Highlights method observers; their
+unknown statuses/zero counters are unobserved, not absence evidence. The output
+is a 15-token content-free schema with mandatory callable=0 even for one match.
+
+Root review corrected stronger terminal failures being masked by prior skipped
+lists, stale-name acceptance, and synthetic fixture contamination by an added
+duplicate IMP. The native fixture now exercises synthetic image-bound enumeration,
+inherited/metaclass/shared-IMP cases, oversized-list continuation, pins/reference
+changes, deadline cleanup, privacy and zero invocation/mutation counters. A
+mode6 startup case checks six Method IMPs and invocation counters remain unchanged.
+Seven native modes require fresh exact result files with both fixture completion
+bits; console output alone cannot satisfy the gate. Source checks run locally;
+Apple compilation/runtime, immutable IPA assembly, private delivery and signed
+phone acceptance are pending. No Highlights fix or full callable ABI is claimed.
+
+## Admission2 signed-phone discovery and static correlation (2026-10-02)
+
+Supplied report: integration-23-highlights-admission2, PID27555. Both attempts
+reach56324 classes,748914/748949 methods; skippedLists=1/maxSkipped=12131.
+Status12/reason6 maps to ImageMismatch/ClassImageMismatch: one globally
+name-resolved runtime Class fails the image guard. The report does not expose
+the rejected class or path, so its exact cause is unknown. Continued scanning
+past the original oversized-list blocker is observed; full discovery is NOT
+established.
+
+The fixed restored references match declared Methods named context(599),
+pageContext(176), bizScene(41). These are partial counts; all ABI fields remain
+unknown. AnimaXPlayer/AWEPluginBaseViewModel/GBLPlayerComponentContext are first
+example declarations, not callable-owner/IMP provenance or execution evidence.
+Rechecked pinned188-byte body SHA:
+f249f7766c407af9e7480b3c20f9d185da34c99b234119a0454a805c2ddf1c50.
+Bounded47-instruction offline disassembly, without guest execution, correlates
+the three inputs to context->pageContext->bizScene; the existing scalar check
+accepts0x526d/0x526e and ANDs with consumption. Actual execution/profile values
+and caller ownership remain unproved; incoming x20 prevents assuming ordinary
+Objective-C/C ABI. No new hook or result forcing is authorized by these names.
+
+Apple's [runtime source](https://github.com/apple-oss-distributions/objc4/blob/main/runtime/objc-runtime-new.mm)
+enumerates names from an image's class list, while global name registration
+retains an existing mapping on duplicate names. A duplicate-name round trip is
+a plausible mismatch mechanism, not established on this phone. Do not discard
+the image guard or certify absence/uniqueness. Any image-bound discovery or
+actual implementation-provenance diagnostic needs independent design review.
+
+All viewing overrides are off. Natural consumption last=false(c0=8), creation
+last=false(c1=2), exact model/component/height counters zero. Complete supplied
+samples2-6 show no exact target cell in the bounded sampled subtrees, not a
+global absence claim. Boundary controls READY; host file/write/host-only
+Keychain denied through post-loader; app-ID control exposed, signing exports
+absent, sentinel unchanged. getpgid presence/ESRCH absence observed; signal-zero
+settlement unproved. No explicit Highlights/playback/Lock/calculator or browser/
+download narration supplied, so those acceptance checks are not upgraded.
+Admission source tests8/8 PASS. Evidence-only update; no new IPA/build/deployment.
+
 ## Admission2 private delivery verification (2026-10-02)
 
 Separate prerelease upload complete; repository confirmed PRIVATE before and

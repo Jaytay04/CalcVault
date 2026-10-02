@@ -131,11 +131,12 @@ class EarlyLoaderFixtureTests(unittest.TestCase):
         self.assertIn("CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT", self.highlights_fixture)
         self.assertIn("CVLP_HIGHLIGHTS_ADMISSION_METADATA", self.highlights_fixture)
         self.assertIn(
-            'CV_HIGHLIGHTS_FIXTURE_PASS viewing=%d direct=%d early=%d admission=%d admissionCases=%d replayTerminal=%d\\n',
+            'CV_HIGHLIGHTS_FIXTURE_PASS viewing=%d direct=%d early=%d admission=%d owner=%d admissionCases=%d ownerCases=%d replayTerminal=%d\\n',
             self.highlights_fixture,
         )
         self.assertIn("replayTerminal = CVLPEarlyLoaderReplayTerminalCompleted;", self.highlights_fixture)
-        self.assertIn("CVLPAdmissionFixtureCompleted, replayTerminal];", self.highlights_fixture)
+        self.assertIn("CVLPAdmissionOwnerFixtureCompleted, replayTerminal];", self.highlights_fixture)
+        self.assertIn("CVLP_HIGHLIGHTS_ADMISSION_OWNER_METADATA, CVLPAdmissionFixtureCompleted,", self.highlights_fixture)
         self.assertIn("CVLPAdmissionFixtureCompleted = YES;", self.highlights_fixture)
         self.assertIn("CVLPHighlightsEarlyViewingExperimentMode", self.highlights_fixture)
         self.assertIn("CVLPEarlyLoaderRunFixture(failure)", self.highlights_fixture)

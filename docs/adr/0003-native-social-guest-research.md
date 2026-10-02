@@ -4,6 +4,47 @@ Status: separate integration candidate authorized after owner acceptance of port
 
 ## Integration candidate 23: private immutable TikTok guest
 
+### Read-only pinned-implementation owner discovery (2026-10-02)
+
+Owner approved this separate metadata-only candidate after admission2 stopped
+at a class-image mismatch. Use independent default-off
+`highlights_admission_owner_metadata`, requiring Highlights diagnostics and
+excluding admission-only selection and all viewing overrides. Internal owner
+build enables the existing admission validation plus owner metadata; marker
+`integration-23-highlights-owner1`. No existing candidate is replaced.
+
+Validate the same exact guest image, restored references, fixed implementation
+address and code fingerprint before discovery. Use Apple's public
+[objc_enumerateClasses](https://github.com/apple-oss-distributions/objc4/blob/main/runtime/runtime.h)
+with that validated Mach header to enumerate actual image-bound Class objects,
+not an image-name/global-name-lookup round trip. Retain the exact per-Class
+image guard; a mismatch terminates discovery, not a reason to scan other images.
+Compare only declared instance/metaclass Method implementation pointers from
+`method_getImplementation` with the fixed validated address. No target function
+invocation, resolver, private runtime structures or pointer-auth stripping.
+In owner mode, compile out all six existing Highlights method observers before
+discovery; their statuses/counters remain unknown/unobserved, not feature-absence
+evidence. This prevents observer replacement from hiding a matching IMP or
+wrapping the unknown implementation. Other diagnostic modes are unchanged.
+
+Keep 100000 classes, 4096 methods per declared list, 1.5 seconds per whole
+attempt and the existing maximum of two attempts. Free and skip oversized lists
+without inspecting entries; report numeric skip/coverage counters. Incomplete
+or ambiguous discovery cannot certify unique ownership or ABI; deadline or
+reference change clears identifiers too. Emit bounded actual code identifiers,
+instance/metaclass kind, scalar return-kind and argument count only. Never
+emit pointers, paths, type strings, objects, arguments, results or content.
+`callable=0` is mandatory even for one Method match: the pinned body uses
+incoming x20, so Method metadata does not prove an ordinary callable ABI.
+
+Synthetic fixtures must cover declared/inherited/metaclass/duplicate ownership,
+limits, pins/reference changes/deadlines, privacy and zero guest invocations;
+run them in every native mode, including a new owner-only mode. Preserve all
+guest/RX bytes, vault/auth/lifecycle safeguards, portrait, identity/data directory,
+browser and download paths. Apple execution, immutable assembly/readback and
+private delivery precede phone acceptance. This does not authorize a hook or
+feature/result forcing and does not claim Highlights are fixed.
+
 ### Read-only admission metadata discovery (2026-10-01)
 
 Admission2 correction (2026-10-02): signed-phone admission1 discovery stopped

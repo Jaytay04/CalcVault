@@ -38,7 +38,7 @@ class AdmissionMetadataFixtureSourceTests(unittest.TestCase):
             self.host_fixture.index("CVLPAdmissionRunFixtureCases(failure)"),
             self.host_fixture.index('NSString *result = [NSString stringWithFormat:'),
         )
-        self.assert_source_contains(self.host_fixture, "admission=%d admissionCases=%d replayTerminal=%d\\n")
+        self.assert_source_contains(self.host_fixture, "admission=%d owner=%d admissionCases=%d ownerCases=%d replayTerminal=%d\\n")
         self.assert_source_contains(self.host_fixture, "static BOOL CVLPAdmissionFixtureCompleted = NO;")
         cases = self.host_fixture.index("if (!CVLPAdmissionRunFixtureCases(failure)) { return NO; }")
         completion = self.host_fixture.index("CVLPAdmissionFixtureCompleted = YES;")

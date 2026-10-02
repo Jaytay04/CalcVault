@@ -20,7 +20,11 @@ on:
         type: boolean
         default: false
       highlights_admission_metadata:
-        description: 'Read-only restored-selector metadata discovery; requires diagnostics and excludes viewing overrides'
+        description: 'Read-only restored-selector metadata discovery; requires diagnostics and excludes owner and viewing experiments'
+        type: boolean
+        default: false
+      highlights_admission_owner_metadata:
+        description: 'Read-only owner metadata discovery; requires diagnostics and excludes all other experiments'
         type: boolean
         default: false
   workflow_call:
@@ -40,6 +44,9 @@ on:
       highlights_admission_metadata:
         type: boolean
         default: false
+      highlights_admission_owner_metadata:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -57,6 +64,7 @@ jobs:
           DIRECT: ${{ inputs.highlights_direct_viewing_experiment }}
           EARLY: ${{ inputs.highlights_early_viewing_experiment }}
           ADMISSION: ${{ inputs.highlights_admission_metadata }}
+          OWNER: ${{ inputs.highlights_admission_owner_metadata }}
           DIAGNOSTICS: ${{ inputs.highlights_diagnostics }}
         run: |
           test "$VIEWING" != true || test "$DIAGNOSTICS" = true
@@ -69,6 +77,11 @@ jobs:
           test "$ADMISSION" != true || test "$VIEWING" != true
           test "$ADMISSION" != true || test "$DIRECT" != true
           test "$ADMISSION" != true || test "$EARLY" != true
+          test "$OWNER" != true || test "$DIAGNOSTICS" = true
+          test "$OWNER" != true || test "$ADMISSION" != true
+          test "$OWNER" != true || test "$VIEWING" != true
+          test "$OWNER" != true || test "$DIRECT" != true
+          test "$OWNER" != true || test "$EARLY" != true
 
       - name: Select pinned toolchain and prepare synthetic upstream
         shell: bash
@@ -95,12 +108,14 @@ jobs:
           DIRECT: ${{ inputs.highlights_direct_viewing_experiment }}
           EARLY: ${{ inputs.highlights_early_viewing_experiment }}
           ADMISSION: ${{ inputs.highlights_admission_metadata }}
+          OWNER: ${{ inputs.highlights_admission_owner_metadata }}
         run: |
           args=()
           if [[ "$VIEWING" == true ]]; then args+=(--viewing-experiment); fi
           if [[ "$DIRECT" == true ]]; then args+=(--direct-viewing-experiment); fi
           if [[ "$EARLY" == true ]]; then args+=(--early-viewing-experiment); fi
           if [[ "$ADMISSION" == true ]]; then args+=(--admission-metadata); fi
+          if [[ "$OWNER" == true ]]; then args+=(--admission-owner-metadata); fi
           python3 experiments/native-social-integration/prepare-highlights.py "$CV_INTEGRATION_UPSTREAM" "${args[@]}"
 
       - name: Test synthetic integration adapter
@@ -118,7 +133,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: calcvault-integration-host-23${{ inputs.highlights_admission_metadata && '-highlights-admission2' || inputs.highlights_early_viewing_experiment && '-highlights-earlyviewing1' || inputs.highlights_direct_viewing_experiment && '-highlights-directviewing1' || inputs.highlights_viewing_experiment && '-highlights-viewing1' || inputs.highlights_diagnostics && '-highlights2' || '' }}
+          name: calcvault-integration-host-23${{ inputs.highlights_admission_owner_metadata && '-highlights-owner1' || inputs.highlights_admission_metadata && '-highlights-admission2' || inputs.highlights_early_viewing_experiment && '-highlights-earlyviewing1' || inputs.highlights_direct_viewing_experiment && '-highlights-directviewing1' || inputs.highlights_viewing_experiment && '-highlights-viewing1' || inputs.highlights_diagnostics && '-highlights2' || '' }}
           path: |
             ${{ runner.temp }}/cv-integration/output/CalcVault-integration-host-23.ipa
             ${{ runner.temp }}/cv-integration/output/CalcVault-integration-host-23.ipa.sha256
@@ -129,7 +144,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: calcvault-integration-host-23${{ inputs.highlights_admission_metadata && '-highlights-admission2' || inputs.highlights_early_viewing_experiment && '-highlights-earlyviewing1' || inputs.highlights_direct_viewing_experiment && '-highlights-directviewing1' || inputs.highlights_viewing_experiment && '-highlights-viewing1' || inputs.highlights_diagnostics && '-highlights2' || '' }}-evidence
+          name: calcvault-integration-host-23${{ inputs.highlights_admission_owner_metadata && '-highlights-owner1' || inputs.highlights_admission_metadata && '-highlights-admission2' || inputs.highlights_early_viewing_experiment && '-highlights-earlyviewing1' || inputs.highlights_direct_viewing_experiment && '-highlights-directviewing1' || inputs.highlights_viewing_experiment && '-highlights-viewing1' || inputs.highlights_diagnostics && '-highlights2' || '' }}-evidence
           path: |
             ${{ runner.temp }}/integration-xcode-version.log
             ${{ runner.temp }}/cv-integration/logs/

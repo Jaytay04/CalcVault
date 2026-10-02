@@ -100,7 +100,35 @@ class HighlightsAdapterTests(unittest.TestCase):
                     adapter.transform(source(), admission_metadata=True,
                                       **{option: True})
 
-    def test_diagnostic_adapter_installs_both_headers_and_rejects_partial_reapply(self):
+    def test_owner_metadata_is_independent_and_uses_its_own_sanitizer(self):
+        updated = adapter.transform(source(), owner_metadata=True)
+        self.assertIn('#define CVLP_HIGHLIGHTS_ADMISSION_METADATA 1\n'
+                      '#define CVLP_HIGHLIGHTS_ADMISSION_OWNER_METADATA 1\n'
+                      '#import "CVLPHighlightsDiagnostics.h"', updated)
+        self.assertIn('Build marker: integration-23-highlights-owner1.', updated)
+        self.assertNotIn('Build marker: integration-23-highlights-admission2.', updated)
+        self.assertIn('#if CVLP_HIGHLIGHTS_ADMISSION_OWNER_METADATA\n'
+                      '    if (!CVLPGuestDiagnosticsLineIsSanitized(line) &&\n'
+                      '        !CVLPHighlightsLineIsSanitized(line) &&\n'
+                      '        !CVLPAdmissionLineIsSanitized(line) &&\n'
+                      '        !CVLPAdmissionOwnerLineIsSanitized(line)) { return; }\n'
+                      '#else\n'
+                      '    if (!CVLPGuestDiagnosticsLineIsSanitized(line) &&\n'
+                      '        !CVLPHighlightsLineIsSanitized(line)) { return; }\n'
+                      '#endif', updated)
+        self.assertNotIn('#define CVLP_HIGHLIGHTS_VIEWING_EXPERIMENT', updated)
+        self.assertNotIn('#define CVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT', updated)
+        self.assertNotIn('#define CVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT', updated)
+        with self.assertRaises(ValueError):
+            adapter.transform(updated, owner_metadata=True)
+        for option in ('viewing_experiment', 'direct_viewing_experiment',
+                       'early_viewing_experiment', 'admission_metadata'):
+            with self.subTest(option=option):
+                with self.assertRaisesRegex(ValueError, 'mutually_exclusive'):
+                    adapter.transform(source(), owner_metadata=True,
+                                      **{option: True})
+
+    def test_diagnostic_adapter_installs_all_headers_and_rejects_partial_reapply(self):
         from tempfile import TemporaryDirectory
 
         with TemporaryDirectory() as temporary:
@@ -108,23 +136,30 @@ class HighlightsAdapterTests(unittest.TestCase):
             contents = {
                 adapter.HEADER: 'highlights header',
                 adapter.ADMISSION_HEADER: 'admission header',
+                adapter.ADMISSION_OWNER_HEADER: 'owner admission header',
             }
             adapter.install_diagnostic_headers(root, contents)
             self.assertEqual((root / adapter.HEADER).read_text(), 'highlights header')
             self.assertEqual((root / adapter.ADMISSION_HEADER).read_text(), 'admission header')
+            self.assertEqual((root / adapter.ADMISSION_OWNER_HEADER).read_text(), 'owner admission header')
             with self.assertRaisesRegex(ValueError, 'already_present'):
                 adapter.install_diagnostic_headers(root, contents)
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / adapter.ADMISSION_HEADER).parent.mkdir(parents=True)
-            (root / adapter.ADMISSION_HEADER).write_text('preexisting admission header')
+            (root / adapter.ADMISSION_OWNER_HEADER).parent.mkdir(parents=True)
+            (root / adapter.ADMISSION_OWNER_HEADER).write_text('preexisting owner admission header')
             with self.assertRaisesRegex(ValueError, 'already_present'):
                 adapter.install_diagnostic_headers(root, contents)
 
-    def test_adapter_sources_both_headers_for_every_diagnostic_build(self):
+    def test_adapter_sources_all_headers_for_every_diagnostic_build(self):
         headers = adapter.diagnostic_header_contents()
-        self.assertEqual(set(headers), {adapter.HEADER, adapter.ADMISSION_HEADER})
+        self.assertEqual(set(headers), {adapter.HEADER, adapter.ADMISSION_HEADER,
+                                        adapter.ADMISSION_OWNER_HEADER})
         self.assertIn('CVLPAdmissionLineIsSanitized', headers[adapter.ADMISSION_HEADER])
+        owner_header = headers[adapter.ADMISSION_OWNER_HEADER]
+        self.assertIn('#define CVLP_HIGHLIGHTS_ADMISSION_OWNER_METADATA 0', owner_header)
+        self.assertIn('CVLPAdmissionOwnerMetadataLineForAnchor', owner_header)
+        self.assertIn('CVLPAdmissionOwnerLineIsSanitized', owner_header)
         import inspect
         main_source = inspect.getsource(adapter.main)
         self.assertIn('headers = diagnostic_header_contents()', main_source)
@@ -164,9 +199,10 @@ class HighlightsAdapterTests(unittest.TestCase):
         self.assertIn('test ! -e "$fixture_result"', script)
         self.assertIn('SIMCTL_CHILD_CV_HIGHLIGHTS_RESULT_NAME="$fixture_result_name"', script)
         self.assertIn('for fixture_result_attempt in {1..30}; do', script)
-        self.assertIn('CV_HIGHLIGHTS_FIXTURE_PASS viewing=$viewing_mode direct=$((direct_mode || early_mode)) early=$early_mode admission=$admission_mode admissionCases=1 replayTerminal=$early_replay_only', script)
+        self.assertIn('CV_HIGHLIGHTS_FIXTURE_PASS viewing=$viewing_mode direct=$((direct_mode || early_mode)) early=$early_mode admission=$admission_mode owner=$owner_mode admissionCases=1 ownerCases=1 replayTerminal=$early_replay_only', script)
         self.assertIn('cp "$fixture_result" "$evidence/highlights-fixture$fixture_suffix-result.log"', script)
-        self.assertIn('for fixture_mode in 0 1 2 3 4 5; do', script)
+        self.assertIn('for fixture_mode in 0 1 2 3 4 5 6; do', script)
+        self.assertIn('owner_mode=0', script)
         self.assertIn('early_replay_only=0', script)
         self.assertIn('if [[ "$fixture_mode" == 4 ]]; then early_mode=1; early_replay_only=1; fixture_suffix="-earlyreplay"; fi', script)
         self.assertIn('SIMCTL_CHILD_CV_HIGHLIGHTS_EARLY_REPLAY_ONLY="$early_replay_only"', script)
@@ -175,11 +211,14 @@ class HighlightsAdapterTests(unittest.TestCase):
         self.assertIn('-DCVLP_HIGHLIGHTS_DIRECT_VIEWING_EXPERIMENT="$direct_mode"', script)
         self.assertIn('-DCVLP_HIGHLIGHTS_EARLY_VIEWING_EXPERIMENT="$early_mode"', script)
         self.assertIn('-DCVLP_HIGHLIGHTS_ADMISSION_METADATA="$admission_mode"', script)
+        self.assertIn('-DCVLP_HIGHLIGHTS_ADMISSION_OWNER_METADATA="$owner_mode"', script)
+        self.assertIn('if [[ "$fixture_mode" == 6 ]]; then admission_mode=1; owner_mode=1; fixture_suffix="-owner"; fi', script)
         self.assertNotIn("grep -Fq 'CV_ADMISSION_METADATA_FIXTURE_PASS'", script)
         self.assertIn('ditto "$device_host" "$output/Payload/LiveContainer.app"', script)
         self.assertNotIn('ditto "$fixture_app"', script)
         workflow = (root.parents[1] / '.github/workflows/native-social-integration.yml').read_text()
-        self.assertEqual(workflow.count('default: false'), 10)
+        self.assertEqual(workflow.count('default: false'), 12)
+        self.assertEqual(workflow.count('highlights_admission_owner_metadata:'), 2)
         self.assertIn('if: inputs.highlights_diagnostics', workflow)
         entry = (root.parents[1] / '.github/workflows/native-social-liveprocess-device.yml').read_text()
         self.assertIn('highlights_diagnostics: ${{ inputs.highlights_diagnostics }}', entry)
@@ -192,14 +231,26 @@ class HighlightsAdapterTests(unittest.TestCase):
         self.assertIn('test "$DIRECT" != true || test "$VIEWING" != true', workflow)
         self.assertIn('highlights_early_viewing_experiment: ${{ inputs.highlights_early_viewing_experiment }}', entry)
         self.assertIn('highlights_admission_metadata: ${{ inputs.highlights_admission_metadata }}', entry)
+        self.assertIn('highlights_admission_owner_metadata: ${{ inputs.highlights_admission_owner_metadata }}', entry)
+        self.assertIn('OWNER: ${{ inputs.highlights_admission_owner_metadata }}', entry)
+        self.assertIn('test "$OWNER" != true', entry)
         self.assertIn('ADMISSION: ${{ inputs.highlights_admission_metadata }}', workflow)
         self.assertIn('test "$ADMISSION" != true || test "$DIAGNOSTICS" = true', workflow)
         self.assertIn('test "$ADMISSION" != true || test "$EARLY" != true', workflow)
         self.assertIn('test "$ADMISSION" != true || test "$DIRECT" != true', workflow)
         self.assertIn('test "$ADMISSION" != true || test "$VIEWING" != true', workflow)
         self.assertIn('args+=(--admission-metadata)', workflow)
+        self.assertIn('args+=(--admission-owner-metadata)', workflow)
+        self.assertIn('OWNER: ${{ inputs.highlights_admission_owner_metadata }}', workflow)
+        self.assertIn('test "$OWNER" != true || test "$DIAGNOSTICS" = true', workflow)
+        self.assertIn('test "$OWNER" != true || test "$ADMISSION" != true', workflow)
+        self.assertIn('test "$OWNER" != true || test "$EARLY" != true', workflow)
+        self.assertIn('test "$OWNER" != true || test "$DIRECT" != true', workflow)
+        self.assertIn('test "$OWNER" != true || test "$VIEWING" != true', workflow)
         self.assertNotIn("'-highlights-admission1'", workflow)
         self.assertIn("'-highlights-admission2'", workflow)
+        self.assertIn("'-highlights-owner1'", workflow)
+        self.assertEqual(workflow.count("'-highlights-owner1'"), 2)
         self.assertIn('highlights_admission_metadata:', entry)
         self.assertIn('test "$ADMISSION" != true', entry)
         self.assertIn('test "$EARLY" != true || test "$DIAGNOSTICS" = true', workflow)

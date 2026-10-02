@@ -190,9 +190,11 @@ class MergeHostTests(unittest.TestCase):
 
     def test_success_replaces_only_reviewed_placeholder_and_preserves_host_bytes(self):
         original_host = self.host.read_bytes()
-        original_guest = self.guest.read_bytes()
         host = {name: data for name, data in self.host_entries()}
         guest, _ = self.write_guest()
+        # Snapshot the final input, not the earlier setup ZIP: recreating it can
+        # legitimately change ZIP timestamps before the merger runs.
+        original_guest = self.guest.read_bytes()
         report = self.request()
         self.assertEqual(self.host.read_bytes(), original_host)
         self.assertEqual(self.guest.read_bytes(), original_guest)

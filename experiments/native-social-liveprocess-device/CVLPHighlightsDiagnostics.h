@@ -41,6 +41,18 @@
 #define CVLP_HIGHLIGHTS_ADMISSION_METADATA 0
 #endif
 
+#ifndef CVLP_HIGHLIGHTS_ADMISSION_OWNER_METADATA
+#define CVLP_HIGHLIGHTS_ADMISSION_OWNER_METADATA 0
+#endif
+
+#if CVLP_HIGHLIGHTS_ADMISSION_OWNER_METADATA != 0 && CVLP_HIGHLIGHTS_ADMISSION_OWNER_METADATA != 1
+#error CVLP_HIGHLIGHTS_ADMISSION_OWNER_METADATA must be 0 or 1
+#endif
+
+#if CVLP_HIGHLIGHTS_ADMISSION_OWNER_METADATA && !CVLP_HIGHLIGHTS_ADMISSION_METADATA
+#error Admission owner metadata requires pinned admission image validation
+#endif
+
 #if CVLP_HIGHLIGHTS_ADMISSION_METADATA != 0 && CVLP_HIGHLIGHTS_ADMISSION_METADATA != 1
 #error CVLP_HIGHLIGHTS_ADMISSION_METADATA must be 0 or 1
 #endif
@@ -1116,6 +1128,7 @@ void CVLPHighlightsEarlyTestReadState(int *status, uint16_t *matches,
 #if CVLP_HIGHLIGHTS_ADMISSION_METADATA || defined(CVLP_HIGHLIGHTS_TESTING)
 NS_ASSUME_NONNULL_END
 #import "CVLPAdmissionMetadata.h"
+#import "CVLPAdmissionOwnerMetadata.h"
 NS_ASSUME_NONNULL_BEGIN
 #endif
 
@@ -1815,6 +1828,7 @@ static BOOL CVLPHighlightsLineIsSanitized(NSString *line) {
     os_unfair_lock_unlock(&CVLPHighlightsStateLock);
     CVLPHighlightsStoreLastTree(self, CVLPHighlightsEmptyTree());
 
+#if !CVLP_HIGHLIGHTS_ADMISSION_OWNER_METADATA
     Class modelClass = objc_lookUpClass("TTKProfileBizDataStoryHighlightInfoModel");
     Class componentClass = objc_lookUpClass("TTKProfileStoryHighlightComponent");
     Class collectionClass = objc_lookUpClass("TTKProfileStoryHighlightCollectionComponent");
@@ -1849,6 +1863,14 @@ static BOOL CVLPHighlightsLineIsSanitized(NSString *line) {
         collectionClass, sel_registerName("updateUI"), "v", CVLPHighlightsUpdateTarget);
     self->_installStatuses[CVLPHighlightsHeightTarget] = CVLPHighlightsInstallInstance(
         collectionClass, sel_registerName("viewHeight"), "d", CVLPHighlightsHeightTarget);
+#else
+    // Owner discovery must see untouched Method metadata. Do not install any
+    // Highlights observers before proving the unknown implementation's owner.
+    // Unknown statuses and zero counters mean unobserved, not feature absence.
+    for (NSUInteger index = 0; index < CVLPHighlightsTargetCount; index++) {
+        self->_installStatuses[index] = CVLPHighlightsInstallUnknown;
+    }
+#endif
 
     __weak CVLPHighlightsObserver *weakSelf = self;
     NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
@@ -1893,10 +1915,17 @@ static BOOL CVLPHighlightsLineIsSanitized(NSString *line) {
     // at most twice, and never invoke or change the admission prerequisites.
     if ((sampleNumber == 1 || sampleNumber == 4) && self->_admissionAttempts < 2) {
         self->_admissionAttempts++;
+#if CVLP_HIGHLIGHTS_ADMISSION_OWNER_METADATA
+        NSString *admissionLine = CVLPAdmissionOwnerMetadataLineForAnchor(
+            objc_lookUpClass("TTKProfileBizDataStoryHighlightInfoModel"), (uint32_t)self->_admissionAttempts);
+        BOOL admissionLineIsSanitized = admissionLine != nil && CVLPAdmissionOwnerLineIsSanitized(admissionLine);
+#else
         NSString *admissionLine = CVLPAdmissionMetadataLineForAnchor(
             objc_lookUpClass("TTKProfileBizDataStoryHighlightInfoModel"), (uint32_t)self->_admissionAttempts);
+        BOOL admissionLineIsSanitized = admissionLine != nil && CVLPAdmissionLineIsSanitized(admissionLine);
+#endif
         if (!self->_stopped && CACurrentMediaTime() - self->_startedAt < CVLPHighlightsDeadline &&
-            admissionLine != nil && CVLPAdmissionLineIsSanitized(admissionLine)) {
+            admissionLineIsSanitized) {
             [CVLPProbe recordGuestDiagnostic:admissionLine];
         }
     }

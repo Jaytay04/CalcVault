@@ -28,7 +28,11 @@ on:
         type: boolean
         default: false
       highlights_admission_metadata:
-        description: 'Read-only restored-selector metadata discovery (requires integration_guest and diagnostics)'
+        description: 'Read-only restored-selector metadata discovery (requires integration_guest and diagnostics; excludes owner and viewing experiments)'
+        type: boolean
+        default: false
+      highlights_admission_owner_metadata:
+        description: 'Read-only owner metadata discovery (requires integration_guest and diagnostics)'
         type: boolean
         default: false
 
@@ -48,8 +52,9 @@ jobs:
           DIRECT: ${{ inputs.highlights_direct_viewing_experiment }}
           EARLY: ${{ inputs.highlights_early_viewing_experiment }}
           ADMISSION: ${{ inputs.highlights_admission_metadata }}
+          OWNER: ${{ inputs.highlights_admission_owner_metadata }}
           DIAGNOSTICS: ${{ inputs.highlights_diagnostics }}
-        run: test "$VIEWING" != true && test "$DIAGNOSTICS" != true && test "$DIRECT" != true && test "$EARLY" != true && test "$ADMISSION" != true
+        run: test "$VIEWING" != true && test "$DIAGNOSTICS" != true && test "$DIRECT" != true && test "$EARLY" != true && test "$ADMISSION" != true && test "$OWNER" != true
       - name: Test synthetic packaging rules
         run: python3 -m unittest discover -s experiments/native-social-liveprocess-device -p 'test_*.py' -v
       - name: Select pinned toolchain and source
@@ -540,3 +545,4 @@ jobs:
       highlights_direct_viewing_experiment: ${{ inputs.highlights_direct_viewing_experiment }}
       highlights_early_viewing_experiment: ${{ inputs.highlights_early_viewing_experiment }}
       highlights_admission_metadata: ${{ inputs.highlights_admission_metadata }}
+      highlights_admission_owner_metadata: ${{ inputs.highlights_admission_owner_metadata }}
