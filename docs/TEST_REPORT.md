@@ -2,6 +2,34 @@
 
 ## TikTok47 private testing IPA production (2026-10-02)
 
+Actual final IPA: `build/tiktok47-inspection-20261002/CalcVault-native-TikTok47-integration-24.ipa`,
+996792270 bytes, SHA79821f30ed106ed6c463691ae4aaaf87ea07955260d53182b948ec8f29d87ec0.
+Actions37004741094 completed successfully at host source0e3a953e69133369d4907d04c0fff3a22e83145d;
+evidence confirms Xcode26.6/17F113, exact Swift6 profile fixture, synthetic adapter
+tests and simulator/device builds/signature/layout checks. Downloaded host SHA
+28c9916141665dd31db8661d8da78d200a240a113b3206a6c8c1e700976cb0b3 matches CI.
+Dedicated local merger at packaging source4bcdaa1 completes with no overwrite.
+Independent verifier then checks all original copied guest bytes against source,
+all guest-manifest rows, all retained host bytes, final inventory, CRCs, prepared
+main pin, exact Build24/470044 selection metadata, portrait, restrictive host
+metadata and the single approved opaque resource binding. PASS:2672 guest files,
+111 retained host files,2786 output files. Read-only final Mach-O inventory PASS:
+33 code files,24 frameworks, one LiveProcess extension, all thin ARM64/iOS and
+no encrypted slice. Original input and existing owner1 artifact hashes unchanged.
+
+Simulator screenshot/log shows the expected fail-closed `Configuration unavailable`
+root under ad-hoc signing when protected Keychain access is unavailable. It does
+not demonstrate calculator, guest, biometric or signed-phone acceptance. Final
+IPA external signatures are intentionally stale/omitted; SideStore.cv1 must freshly
+re-sign it. Phone install/native launch/Highlights and browser/download regression
+are NOT RUN. Approved bundled P12 was copied/hashed only, never decrypted/imported.
+IPA/checksum/receipt remain ignored and local; no private artifact upload.
+
+Publication boundary: the additional packaging source public push was denied by
+auto-review because exact hashes bind to the private artifact. Commit4bcdaa1 remains
+local pending explicit metadata-publication approval. No alternate publication or
+rejected-action workaround attempted. This does not block local IPA production.
+
 Final platform-neutral source checks: package tools143/integration69/device-source88
 PASS (300 methods total), including nine modern adapter tests and ten dedicated
 Build24 merger methods with synthetic fixtures only. Independent read-only review
