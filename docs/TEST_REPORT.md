@@ -11,8 +11,27 @@ actual payload bytes, header/body truncation, trailing bytes, budgets, input
 overlap, sink failure, cancellation, revocation and reentrant parsing.
 Apple sanitizer and iPhoneOS object scripts pass Bash syntax checks. On Windows
 they exit 77 explicitly because Apple tools are absent; these are NOT RUN, not
-passing skips. Public CI is pending.
+passing skips. Independent read-only source review found no concrete parser
+defect; an independent tester reproduced both C counts and six reference tests.
+A NULL/nonzero-size feed is not separately asserted in the fixture; no
+concurrency, filesystem transport or decoder coverage is claimed.
+
+Public [run 37075550448](https://github.com/Jaytay04/CalcVault/actions/runs/37075550448)
+at `ba8cd749e8d11b22ba4e00ceba989735d62ab209`: PASS, all raw logs reviewed,
+job duration 28s. macOS15.7.9 build24G830, image `macos-15-arm64`
+`20260907.0337.1`, exact Xcode16.4 build16F6 guard, Apple Clang17.0.0
+`clang-1700.0.13.5`, Python3.14.7. Both C fixtures pass unchanged counts normally
+and under macOS ASan/UBSan with recovery disabled. Four independent units compile
+with warnings as errors for `arm64-apple-ios18.0`, iPhoneOS SDK18.5; each object's
+arm64 architecture, `platform IOS` and `minos 18.0` are verified. Media selection,
+ten generated profile modes and six reference tests pass.
+
+Initial [run 37075446054](https://github.com/Jaytay04/CalcVault/actions/runs/37075446054)
+at `abb80f5` failed because the script placed the filename after lipo's variadic
+`-verify_arch` arguments. C/sanitizer steps passed; later fixtures were skipped.
+Corrected the invocation without removing a gate and reran the complete workflow.
 No transport, media decode, encrypted import, app linking, signing or IPA build.
+Main remains `18f9be8`; only this existing research branch was updated.
 
 ## Independent TKPlus public source checks 2026-10-02
 

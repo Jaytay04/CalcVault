@@ -26,7 +26,7 @@ That package change has not been made in this slice.
 | Component | Implemented responsibility | Not established |
 |---|---|---|
 | Guest original-media selection | Bounded candidate lists, exact approved host matching, HTTPS-only URLs, no credentials/fragments, no thumbnail fallback or quality guessing. | CDN host policy, selected private-model adapters, downloader and real surface coverage. |
-| Guest profile eligibility controls | Explicit opt-in installation on two exact runtime selectors with method ownership, ABI and image checks. Default behavior forwards originals. Synthetic macOS Apple compilation and ten fixture modes pass. | iOS compilation, actual TikTok47 class/ABI/image eligibility and provider anonymity. |
+| Guest profile eligibility controls | Explicit opt-in installation on two exact runtime selectors with method ownership, ABI and image checks. Default behavior forwards originals. Synthetic macOS Apple compilation, ten fixture modes and standalone iPhoneOS object compilation pass. | App linking, actual TikTok47 class/ABI/image eligibility and provider anonymity. |
 | Portable transfer lease | Bounded versioned records, host-issued opaque ID/generation, ordered chunks, exact completion size and irreversible revocation. | IPC transport, OS isolation, media decoding, protected staging, confirmation and encrypted commit. |
 | Incremental stream receiver | Fixed one-frame buffer; fragmented/coalesced input; encoded-byte and record budgets; validated tentative output; finish plus explicit host-observed EOF; fail-closed sink failure, overlap and reentrancy. | Filesystem outbox, actual media validation, protected staging and session-authorized import. |
 
@@ -96,6 +96,14 @@ at `2c72f78` passes 16,502 portable transfer checks, the Foundation media fixtur
 ten generated Objective-C profile modes and six static-reference tests with
 Xcode16.4. The logs were reviewed. No proprietary guest, phone build or actual
 download/import is exercised by this run.
+
+Follow-up [run 37075550448](https://github.com/Jaytay04/CalcVault/actions/runs/37075550448)
+at `ba8cd74` passes 67,745 incremental receiver checks and 16,502 transfer checks
+normally and under macOS ASan/UBSan, plus the media/profile/reference regressions.
+All four independent units also compile to verified arm64 iPhoneOS objects
+using SDK18.5 with minimum iOS18.0. This is source compilation, not app linking
+or real TikTok runtime coverage. An initial script argument-order error was
+corrected before the successful full run; no validation gate was removed.
 
 Integration still needs a fixed media-only guest-to-host transport, a trusted
 TikTok47 image/ABI manifest, an independently reviewed CDN policy, real content

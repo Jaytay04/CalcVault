@@ -8,7 +8,12 @@ fail-closed overlap/reentrancy handling. Cancellation and revocation stop furthe
 output, including after finish but before EOF. It is not a filesystem outbox or
 an import authorization gate. Added macOS sanitizer fixtures and standalone
 arm64 iPhoneOS object compilation to the approved public source-check branch.
-Apple CI results are pending; shipping code, main and private IPAs are unchanged.
+Public [run 37075550448](https://github.com/Jaytay04/CalcVault/actions/runs/37075550448)
+at `ba8cd74` PASSED: 67,745 receiver and 16,502 transfer checks normally and under
+ASan/UBSan, four verified arm64 iPhoneOS source objects, media selection, ten
+profile modes and six reference tests. Full logs reviewed. A first-run lipo
+argument-order error was corrected and the complete workflow rerun; no gate
+was removed. Shipping code, main and private IPAs are unchanged.
 Protected host staging, actual media validation, confirmation and revocable
 encrypted import remain the next integration work.
 
