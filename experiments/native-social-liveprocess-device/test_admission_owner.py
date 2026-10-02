@@ -62,6 +62,10 @@ class AdmissionOwnerFixtureSourceTests(unittest.TestCase):
         self.assert_contains(self.fixture, "CVLPAdmissionFixtureMethodCalls == 0")
         self.assert_contains(self.fixture, "CVLPAdmissionFixtureMethodCapCalls == 0")
         self.assert_contains(self.fixture, "fixture.CASCalls == 0")
+        self.assert_contains(self.fixture, "Class __unsafe_unretained *tooManyClasses")
+        self.assert_contains(self.fixture, "(Class __unsafe_unretained *)calloc(")
+        self.assert_contains(self.fixture, "unichar delValue = 0x7f")
+        self.assert_absent(self.fixture, "\\u007f")
 
     def test_fixture_uses_metadata_only_and_never_calls_or_replaces_imps(self):
         self.assert_contains(self.fixture, "method_getImplementation(method)")

@@ -1,5 +1,16 @@
 # CalcVault test report
 
+## Owner1 first Apple compilation failure (2026-10-02)
+
+Actions36990125178 at cc598b7 FAILED compiling the first synthetic Highlights
+fixture, before its execution. Exact errors: implicit conversion of void* to
+unsafe-unretained Class* is disallowed with ARC, and a universal character name
+refers to a control character. Both originate in new test-fixture code, not a
+guest behavior change. Evidence downloaded to an ignored build folder. Preserve
+the class-cap allocation/assertions and control-character sanitizer test with
+explicit pointer cast and runtime NSString character construction. No completed
+IPA, native runtime pass, assembly or signed-phone result from this run.
+
 ## Owner1 metadata diagnostic implementation (2026-10-02)
 
 Local source/package tests: device88 + integration52 + package118 =258 PASS.

@@ -323,7 +323,8 @@ static BOOL CVLPAdmissionOwnerRunFixtureCases(NSString **failure) {
     if (!CVLPAdmissionOwnerFixturePrepare(&fixture, &memory, &validated, instanceSelector, failure)) {
         return NO;
     }
-    Class *tooManyClasses = calloc((size_t)CVLPAdmissionMaximumClassCount + 1, sizeof(Class));
+    Class __unsafe_unretained *tooManyClasses = (Class __unsafe_unretained *)calloc(
+        (size_t)CVLPAdmissionMaximumClassCount + 1, sizeof(Class));
     if (!CVLPFixtureRequire(tooManyClasses != NULL,
         @"admission_owner_class_cap_fixture_allocation", failure)) { return NO; }
     tooManyClasses[0] = CVLPAdmissionFixtureInstanceOwner.class;
@@ -570,7 +571,9 @@ static BOOL CVLPAdmissionOwnerRunFixtureCases(NSString **failure) {
     NSString *badCallable = [safeLine stringByReplacingOccurrencesOfString:@"callable=0"
         withString:@"callable=1"];
     NSString *badNUL = [safeLine stringByAppendingString:nul];
-    NSString *badControl = [safeLine stringByAppendingString:@"\u007f"];
+    unichar delValue = 0x7f;
+    NSString *del = [NSString stringWithCharacters:&delValue length:1];
+    NSString *badControl = [safeLine stringByAppendingString:del];
     if (!CVLPFixtureRequire(!CVLPAdmissionOwnerLineIsSanitized(badSelector) &&
         !CVLPAdmissionOwnerLineIsSanitized(badPath) && !CVLPAdmissionOwnerLineIsSanitized(badURL) &&
         !CVLPAdmissionOwnerLineIsSanitized(badQuery) && !CVLPAdmissionOwnerLineIsSanitized(badNumber) &&
