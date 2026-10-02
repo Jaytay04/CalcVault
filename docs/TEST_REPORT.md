@@ -1,5 +1,54 @@
 # CalcVault test report
 
+## Newer-base pivot and missing package input (2026-10-02)
+
+Owner approved a separate newer unmodified TikTok comparison inside CalcVault,
+preserving the existing RX-enabled build and app data. First prove Highlights on
+the same profile in the new base, then review extras. This is not a guarantee
+that version age caused the failure. The inspected App Store listing reports
+47.0.0; checked local inputs are old BHT36.4/pinned RX43.9 and their derived
+CalcVault candidates, with no newer package in checked Downloads/project inputs.
+Named fork's latest release asset metadata lists a tweak dylib and two debs,
+not a clean new IPA; inspected public RX channel advertises43.9.0. Source links
+and reviewed scope are in ADR0003. No credentials or proprietary payload bytes
+were acquired, no new package was preflighted/assembled, no CI or install ran.
+Existing version/digest/loader/image pins and production code remain unchanged.
+Existing local integration52 and package118 regression checks rerun PASS (170
+total); diff check PASS. These checks exercise synthetic existing contracts,
+not compatibility with an absent new IPA.
+Independent read-only review, verified by parent against profile/merger source,
+confirms exact Build23/four-key schema1/TikTok439042 and old input digest gates.
+Generic preflight/planning exists, but a new digest-bound descriptor/profile and
+package policy must await the actual new input. Dedicated comparison guest
+storage preserves prior RX state without copying sessions; manual owner sign-in
+may be needed. The narrow executable hosting transform is distinct from added
+RX/feature tweaks and still requires review.
+Owner-selected new IPA/source context required; new runtime/Highlights gates
+NOT RUN. Independently rehashed preserved portrait1 input
+6e6067eca211d3822763a47d874d08f49b2653a9cc7eccd03f59c2524ec1ab57 and owner1
+e32ed614467ace3009fb6446fc0283ce0ec8bb911e0caecdabb006ad663281d9 unchanged.
+
+## Owner1 signed-phone metadata result (2026-10-02)
+
+Supplied marker integration-23-highlights-owner1, PID27699. Both metadata attempts
+reach91210 image-bound classes and1293422/1293514 inspected methods. One
+12131-entry declared list is skipped, with matches=0 and all owner/ABI metadata
+unknown/callable=0. Source verifies status9/reason7 is MethodLimit/MethodCountLimit
+at finalization after continued scanning, not the earlier image mismatch or a
+proven target absence. The skipped list remains a coverage gap. The six older
+method observers are intentionally disabled in this candidate: statuses0,
+counts0 and last values-1 are unobserved, not evidence of missing Highlights.
+Supplied bounded trees report r=0, but do not certify global absence.
+
+Synthetic positive controls READY; host file read/write and host-only Keychain
+DENIED at pre-bookmark/post-bookmark/post-loader; app-ID control EXPOSED,
+signing exports ABSENT and host sentinel UNCHANGED. No guest-entry/button stage
+appears in this supplied report. getpgid presence then ESRCH absence observed;
+signal-zero prechecks EPERM remain unsettled. No fresh explicit playback/Lock/
+calculator/browser/download acceptance or owner1 visual Highlights outcome
+supplied. Owner approved newer-base comparison rather than more old-base
+overrides. No Highlights success, callable ABI or security certification inferred.
+
 ## Owner1 private delivery (2026-10-02)
 
 Verified IPA and portable basename-only checksum published as a separate private

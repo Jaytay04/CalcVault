@@ -4,6 +4,51 @@ Status: separate integration candidate authorized after owner acceptance of port
 
 ## Integration candidate 23: private immutable TikTok guest
 
+### Approved newer-base comparison (2026-10-02)
+
+Owner approved pivoting from further 43.9.0 Highlights experiments to validating
+a newer unmodified TikTok base inside CalcVault. Preserve the working RX-enabled
+guest, prior private candidates and all app data. This is a separate comparison,
+not permission to remove RX from the existing build or to port/bypass licensing.
+First establish native Highlights on the same affected profile without added
+tweaks; only then review the requested RX features and package compatibility.
+The App Store's inspected listing reports47.0.0, matching the owner's previously
+reported official version; a newer base is not a guarantee of Highlights.
+
+No newer IPA exists in the checked project inputs or Downloads inventory.
+The named BHTikTokPlusPlus latest GitHub release provides tweak binaries, not a
+clean newer TikTok IPA; the inspected public RX channel advertises the already
+used43.9.0 package. Obtain an owner-selected newer IPA and its source context
+before creating a new package policy. Request a package/path only, not Apple
+credentials, signing exports, device pairing data or social session material.
+
+Use existing read-only preflight first: freeze input digest, bounded ZIP/plist/
+Mach-O inventory, architecture/platform/encryption and dependency review.
+Encrypted or unsupported executable input fails visibly; do not decrypt or
+silently skip it. Integrity hashes do not certify publisher provenance.
+Current439042 descriptor, fixed executable adapters, merger digest/build pins
+and old Highlights image/code pins remain unchanged pending actual input review.
+Do not generalize an allowlist or reuse an old image address for a new version.
+Any approved new path needs synthetic rejection/pin tests, Apple builds, strict
+signature/dependency/readback checks, immutable private assembly and separate
+owner-operated phone acceptance. No private payload or account goes into CI.
+
+Reuse the existing single containing app and reviewed LiveProcess product;
+retain credential checks, host-only Keychain boundary, lifecycle revocation,
+portrait layout, X/Instagram browsers and downloaders. Do not copy guest/account
+state, broaden bookmarks, reset data or add products/App IDs without review.
+Plan a dedicated comparison guest-data directory so the existing RX state is
+left untouched; any sign-in is manually performed by the owner, never copied.
+Packaging still needs the reviewed narrow main-executable transformation for
+hosting a native app; "unmodified base" means no added RX/feature tweaks, not
+that every byte of a hosted executable can remain identical to its source IPA.
+New-base startup/media/Highlights, Lock/background/PID observations and synthetic
+file/Keychain controls must pass on the owner's phone before adding extras.
+
+Sources inspected: [TikTok App Store listing](https://apps.apple.com/us/app/tiktok/id835599320),
+[BHTikTokPlusPlus releases](https://github.com/raulsaeed/BHTikTokPlusPlus/releases),
+[public RX channel](https://t.me/s/BHTikTokPlusPlus).
+
 ### Read-only pinned-implementation owner discovery (2026-10-02)
 
 Owner approved this separate metadata-only candidate after admission2 stopped
