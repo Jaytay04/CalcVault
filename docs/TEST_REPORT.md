@@ -1,5 +1,35 @@
 # CalcVault test report
 
+## Admission2 private delivery verification (2026-10-02)
+
+Separate prerelease upload complete; repository confirmed PRIVATE before and
+after upload, release not draft. Server-reported IPA SHA256/size match
+87482cb5f2b117c82a3343c19f3e71e91f299da92f2a6a2ad66958279bf6cb53/702861797;
+portable checksum asset SHA256/size match
+6305592c1c8fb8aa1370c00cedf40fd4c8da70818ec3cb49cae609789c13eb5a/131.
+Receipt/location remain ignored/private; previous IPA/releases preserved.
+Source/review/native/assembly/delivery complete. Signed-phone install,
+metadata/Highlights and playback/Lock/calculator/browser/download acceptance
+remain NOT RUN for this candidate. Read-only discovery, not a claimed fix.
+
+## Admission2 native gate and immutable assembly (2026-10-02)
+
+Actions36982713161 atb702c83 PASS on Xcode26.6/17F113 (build step13m22s).
+All six fresh native result files match exact mode fields: admissionCases=1
+throughout, replayTerminal=1 only for mode4, and admission-only mode5 has every
+viewing override off. Simulator/device guest, host and Kit compile and ZIP
+checks PASS. Root starts; screenshot shows protected-Keychain configuration
+unavailable with existing credentials not replaced, an expected fail-closed
+synthetic signature result, not a device authentication test.
+
+Downloaded host SHA4079f51df348f14f37a4454c074eba5cc8b0f237f008011107137127e85e3576
+matches CI. Private no-overwrite assembly and independent full-member readback
+verify122 retained host files,2424 guest files plus unchanged descriptor,
+unchanged RX, identity/portrait/file-sharing restrictions, compiled marker and
+input preservation. Output SHA87482cb5f2b117c82a3343c19f3e71e91f299da92f2a6a2ad66958279bf6cb53,
+702861797bytes. Private delivery pending. Phone install, runtime metadata,
+Highlights and regression acceptance remain NOT RUN for this candidate.
+
 ## Admission2 source validation (2026-10-02)
 
 Local device-source81/integration51/package-tools118 PASS (250 total); both
