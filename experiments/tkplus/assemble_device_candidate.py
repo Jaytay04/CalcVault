@@ -102,6 +102,7 @@ def verify_addon(data):
     commands = load_commands(data)
     identities, platforms = [], []
     allowed = {b'/System/Library/Frameworks/Foundation.framework/Foundation',
+               b'/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation',
                b'/System/Library/Frameworks/UIKit.framework/UIKit',
                b'/System/Library/Frameworks/QuartzCore.framework/QuartzCore',
                b'/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics',

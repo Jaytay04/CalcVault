@@ -192,6 +192,11 @@ class MachOLoadCommandTests(unittest.TestCase):
 class AddonValidationTests(unittest.TestCase):
     def test_accepts_only_synthetic_arm64_ios18_module_with_expected_identity_and_system_dependency(self):
         candidate.verify_addon(valid_addon())
+        candidate.verify_addon(mach_o([
+            dylib_command(0xD, candidate.NEW_LOAD),
+            dylib_command(0xC, b"/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"),
+            platform_command(),
+        ]))
 
     def test_rejects_bad_header_size_install_name_dependency_platform_and_encryption(self):
         valid = valid_addon()
