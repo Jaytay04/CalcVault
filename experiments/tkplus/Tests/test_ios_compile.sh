@@ -31,7 +31,7 @@ for unit in TKPMediaSelection TKPProfileControls; do
 done
 
 for unit in TKPTransfer TKPStreamReader TKPMediaSelection TKPProfileControls; do
-  xcrun lipo -verify_arch arm64 "$build_dir/$unit.o"
+  xcrun lipo "$build_dir/$unit.o" -verify_arch arm64
   build_info="$(xcrun vtool -show-build "$build_dir/$unit.o")"
   printf '%s\n' "$build_info"
   printf '%s\n' "$build_info" | grep -Eq '^[[:space:]]*platform IOS$'
