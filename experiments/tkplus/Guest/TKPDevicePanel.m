@@ -320,7 +320,7 @@ static UIWindow *TKPFindForegroundGuestWindow(UIWindowScene **sceneOut,
                          message:message
                   preferredStyle:UIAlertControllerStyleActionSheet];
 
-    __weak typeof(self) weakSelf = self;
+    __weak __typeof__(self) weakSelf = self;
     __weak UIAlertController *weakSheet = sheet;
     [sheet addAction:[UIAlertAction actionWithTitle:@"Enable local suppression"
                                               style:UIAlertActionStyleDefault
