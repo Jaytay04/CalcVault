@@ -6,6 +6,8 @@ import Foundation
 public enum NativeGuestIntegrationProfile: Sendable, Equatable {
     case synthetic
     case tikTok
+    case synthetic24
+    case tikTok47
 
     public static var current: Self? {
         guard let host = Bundle.main.infoDictionary,
@@ -19,7 +21,8 @@ public enum NativeGuestIntegrationProfile: Sendable, Equatable {
     }
 
     public static func resolve(host: [String: Any], descriptor: [String: Any]) -> Self? {
-        guard host["CFBundleVersion"] as? String == "23",
+        guard let hostBuild = host["CFBundleVersion"] as? String,
+              hostBuild == "23" || hostBuild == "24",
               Set(descriptor.keys) == ["schema", "bundleIdentifier", "bundleVersion", "executable"],
               let schema = descriptor["schema"] as? NSNumber,
               CFGetTypeID(schema) == CFNumberGetTypeID(),
@@ -31,9 +34,13 @@ public enum NativeGuestIntegrationProfile: Sendable, Equatable {
                 descriptor["bundleIdentifier"] as? String,
                 descriptor["bundleVersion"] as? String) {
         case ("synthetic", "synthetic-integration-23", "org.example.syntheticnativeguest.app", "1"):
-            return .synthetic
+            return hostBuild == "23" ? .synthetic : nil
         case ("tiktok", "private-tiktok-integration-23", "com.zhiliaoapp.musically", "439042"):
-            return .tikTok
+            return hostBuild == "23" ? .tikTok : nil
+        case ("synthetic", "synthetic-integration-24", "org.example.syntheticnativeguest.app", "1"):
+            return hostBuild == "24" ? .synthetic24 : nil
+        case ("tiktok47", "private-tiktok47-integration-24", "com.zhiliaoapp.musically", "470044"):
+            return hostBuild == "24" ? .tikTok47 : nil
         default:
             return nil
         }
@@ -43,6 +50,12 @@ public enum NativeGuestIntegrationProfile: Sendable, Equatable {
         switch self {
         case .synthetic: "Build 23 synthetic integration test"
         case .tikTok: "Build 23 native TikTok integration test"
+        case .synthetic24: "Build 24 synthetic integration test"
+        case .tikTok47: "Build 24 native TikTok 47.0.0 integration test"
         }
+    }
+
+    public var representsTikTokGuest: Bool {
+        self == .tikTok || self == .tikTok47
     }
 }

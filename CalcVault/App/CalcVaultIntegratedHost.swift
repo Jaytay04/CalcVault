@@ -144,11 +144,11 @@ struct NativeGuestIntegrationSection: View {
     var body: some View {
         Section("Native integration test") {
             Text(profile?.title ?? "Native package identity unavailable")
-            Text(profile == .tikTok
+            Text(profile?.representsTikTokGuest == true
                  ? "Private native TikTok candidate. Browser services and downloaders remain separate. Guest data is not vault-encrypted."
                  : "Synthetic guest only. Native TikTok is not included in this isolation-test build.")
             Text("Face ID may be requested to verify protected credential metadata before launch. No credential values are shared with the guest.")
-            Button(profile == .tikTok ? "Open native TikTok" : "Open isolated test guest", action: start)
+            Button(profile?.representsTikTokGuest == true ? "Open native TikTok" : "Open isolated test guest", action: start)
                 .disabled(profile == nil || (model.state != .idle && model.state != .blocked))
             Text(status)
             Button("Refresh native report") { report = model.summary }

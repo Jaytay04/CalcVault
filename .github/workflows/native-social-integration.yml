@@ -3,6 +3,10 @@ name: CalcVault native integration 23 (synthetic host for private candidate, man
 on:
   workflow_dispatch:
     inputs:
+      tiktok47_host:
+        description: 'Build the Build 24 CalcVault host with the synthetic guest profile only'
+        type: boolean
+        default: false
       highlights_diagnostics:
         description: 'Enable bounded, content-free Highlights observations (synthetic CI only)'
         type: boolean
@@ -29,6 +33,10 @@ on:
         default: false
   workflow_call:
     inputs:
+      tiktok47_host:
+        description: 'Build the Build 24 CalcVault host with the synthetic guest profile only'
+        type: boolean
+        default: false
       highlights_diagnostics:
         type: boolean
         default: false
@@ -60,6 +68,7 @@ jobs:
 
       - name: Validate explicit experiment scope
         env:
+          TIKTOK47_HOST: ${{ inputs.tiktok47_host }}
           VIEWING: ${{ inputs.highlights_viewing_experiment }}
           DIRECT: ${{ inputs.highlights_direct_viewing_experiment }}
           EARLY: ${{ inputs.highlights_early_viewing_experiment }}
@@ -82,8 +91,18 @@ jobs:
           test "$OWNER" != true || test "$VIEWING" != true
           test "$OWNER" != true || test "$DIRECT" != true
           test "$OWNER" != true || test "$EARLY" != true
+          if [[ "$TIKTOK47_HOST" == true ]]; then
+            test "$DIAGNOSTICS" = false
+            test "$VIEWING" = false
+            test "$DIRECT" = false
+            test "$EARLY" = false
+            test "$ADMISSION" = false
+            test "$OWNER" = false
+          fi
 
       - name: Select pinned toolchain and prepare synthetic upstream
+        env:
+          TIKTOK47_HOST: ${{ inputs.tiktok47_host }}
         shell: bash
         run: |
           set -euo pipefail
@@ -98,7 +117,11 @@ jobs:
           test "$(git -C "$source" rev-parse HEAD)" = e370a92dfc03ce109ebce00ed4a7cfc64ad1c801
           python3 experiments/native-social-liveprocess-device/prepare-upstream.py "$source"
           python3 experiments/native-social-liveprocess-device/prepare-framework-guest.py "$source"
-          python3 experiments/native-social-integration/prepare-integration.py "$source"
+          if [[ "$TIKTOK47_HOST" == true ]]; then
+            python3 experiments/native-social-integration/prepare-tiktok47-integration.py "$source"
+          else
+            python3 experiments/native-social-integration/prepare-integration.py "$source"
+          fi
           echo "CV_INTEGRATION_UPSTREAM=$source" >> "$GITHUB_ENV"
 
       - name: Prepare opt-in Highlights diagnostic adapter
@@ -120,12 +143,17 @@ jobs:
 
       - name: Test synthetic integration adapter
         run: |
+          xcrun swiftc -swift-version 6 CalcVault/App/NativeGuestIntegrationProfile.swift \
+            experiments/native-social-integration/test_native_profile.swift \
+            -o "$RUNNER_TEMP/native-guest-profile-tests"
+          "$RUNNER_TEMP/native-guest-profile-tests"
           python3 -m unittest discover -s experiments/native-social-integration -p 'test_*.py' -v
           python3 -m unittest discover -s experiments/native-social-liveprocess-device -p 'test_*.py' -v
 
-      - name: Build, stage, sign, and verify Build 23 fixtures
+      - name: Build, stage, sign, and verify the selected synthetic integration host
         shell: bash
         env:
+          CV_INTEGRATION_BUILD: ${{ inputs.tiktok47_host && '24' || '23' }}
           CV_HIGHLIGHTS_DIAGNOSTICS: ${{ inputs.highlights_diagnostics && '1' || '0' }}
         run: bash experiments/native-social-integration/build.sh "$CV_INTEGRATION_UPSTREAM" "$RUNNER_TEMP/cv-integration"
 
@@ -133,10 +161,10 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: calcvault-integration-host-23${{ inputs.highlights_admission_owner_metadata && '-highlights-owner1' || inputs.highlights_admission_metadata && '-highlights-admission2' || inputs.highlights_early_viewing_experiment && '-highlights-earlyviewing1' || inputs.highlights_direct_viewing_experiment && '-highlights-directviewing1' || inputs.highlights_viewing_experiment && '-highlights-viewing1' || inputs.highlights_diagnostics && '-highlights2' || '' }}
+          name: calcvault-integration-host-${{ inputs.tiktok47_host && '24-synthetic' || '23' }}${{ inputs.highlights_admission_owner_metadata && '-highlights-owner1' || inputs.highlights_admission_metadata && '-highlights-admission2' || inputs.highlights_early_viewing_experiment && '-highlights-earlyviewing1' || inputs.highlights_direct_viewing_experiment && '-highlights-directviewing1' || inputs.highlights_viewing_experiment && '-highlights-viewing1' || inputs.highlights_diagnostics && '-highlights2' || '' }}
           path: |
-            ${{ runner.temp }}/cv-integration/output/CalcVault-integration-host-23.ipa
-            ${{ runner.temp }}/cv-integration/output/CalcVault-integration-host-23.ipa.sha256
+            ${{ runner.temp }}/cv-integration/output/CalcVault-integration-host-${{ inputs.tiktok47_host && '24' || '23' }}.ipa
+            ${{ runner.temp }}/cv-integration/output/CalcVault-integration-host-${{ inputs.tiktok47_host && '24' || '23' }}.ipa.sha256
           if-no-files-found: error
           retention-days: 7
 
@@ -144,7 +172,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: calcvault-integration-host-23${{ inputs.highlights_admission_owner_metadata && '-highlights-owner1' || inputs.highlights_admission_metadata && '-highlights-admission2' || inputs.highlights_early_viewing_experiment && '-highlights-earlyviewing1' || inputs.highlights_direct_viewing_experiment && '-highlights-directviewing1' || inputs.highlights_viewing_experiment && '-highlights-viewing1' || inputs.highlights_diagnostics && '-highlights2' || '' }}-evidence
+          name: calcvault-integration-host-${{ inputs.tiktok47_host && '24-synthetic' || '23' }}${{ inputs.highlights_admission_owner_metadata && '-highlights-owner1' || inputs.highlights_admission_metadata && '-highlights-admission2' || inputs.highlights_early_viewing_experiment && '-highlights-earlyviewing1' || inputs.highlights_direct_viewing_experiment && '-highlights-directviewing1' || inputs.highlights_viewing_experiment && '-highlights-viewing1' || inputs.highlights_diagnostics && '-highlights2' || '' }}-evidence
           path: |
             ${{ runner.temp }}/integration-xcode-version.log
             ${{ runner.temp }}/cv-integration/logs/

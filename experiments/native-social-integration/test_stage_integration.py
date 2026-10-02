@@ -23,7 +23,9 @@ class IntegrationStageTests(unittest.TestCase):
             'CFBundleIdentifier': 'com.jaylintaylor.calcvault',
             'UIFileSharingEnabled': True, 'LSSupportsOpeningDocumentsInPlace': True,
             'UIBackgroundModes': ['audio'], 'NSAppTransportSecurity': {'NSAllowsArbitraryLoads': True}})
-        self.write(self.host / 'CVLPFrameworkGuest.plist', {'bundleIdentifier': 'org.example.syntheticnativeguest.app'})
+        self.write(self.host / 'CVLPFrameworkGuest.plist', {
+            'schema': 1, 'bundleIdentifier': 'org.example.syntheticnativeguest.app',
+            'bundleVersion': '1', 'executable': 'NativeGuest'})
         self.write(self.kit / 'Info.plist', {'CFBundleIdentifier': 'com.jaylintaylor.calcvault.kit'})
         (self.kit / 'CalcVaultKit').write_bytes(b'synthetic fixture, not executable code')
 
@@ -45,8 +47,48 @@ class IntegrationStageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'kit_already_embedded'):
             stage.stage(self.host, self.kit)
 
+    def test_build24_synthetic_host_is_opt_in_and_keeps_build23_default(self):
+        stage.stage(self.host, self.kit, build=24, profile='synthetic')
+        info = plistlib.loads((self.host / 'Info.plist').read_bytes())
+        self.assertEqual(info['CFBundleVersion'], '24')
+        self.assertEqual(info['CVNativeIntegrationStage'], 'synthetic-integration-24')
+        self.assertEqual(info['CVNativeGuestKind'], 'synthetic')
+
+    def test_build24_tiktok47_requires_the_exact_guest_contract(self):
+        self.write(self.host / 'CVLPFrameworkGuest.plist', {
+            'schema': 1, 'bundleIdentifier': 'com.zhiliaoapp.musically',
+            'bundleVersion': '470044', 'executable': 'NativeGuest'})
+        stage.stage(self.host, self.kit, build=24, profile='tiktok47')
+        info = plistlib.loads((self.host / 'Info.plist').read_bytes())
+        self.assertEqual(info['CFBundleVersion'], '24')
+        self.assertEqual(info['CVNativeIntegrationStage'], 'private-tiktok47-integration-24')
+        self.assertEqual(info['CVNativeGuestKind'], 'tiktok47')
+
+    def test_build24_rejects_cross_profile_and_unapproved_builds(self):
+        with self.assertRaisesRegex(ValueError, 'guest_profile_mismatch'):
+            stage.stage(self.host, self.kit, build=24, profile='tiktok47')
+        with self.assertRaisesRegex(ValueError, 'unsupported_integration_build'):
+            stage.stage(self.host, self.kit, build=25)
+        with self.assertRaisesRegex(ValueError, 'unsupported_integration_build'):
+            stage.stage(self.host, self.kit, build=True)
+
+    def test_build24_rejects_noninteger_schema_and_extra_contract_fields(self):
+        for schema in (True, 1.5):
+            self.write(self.host / 'CVLPFrameworkGuest.plist', {
+                'schema': schema, 'bundleIdentifier': 'org.example.syntheticnativeguest.app',
+                'bundleVersion': '1', 'executable': 'NativeGuest'})
+            with self.assertRaisesRegex(ValueError, 'guest_profile_mismatch'):
+                stage.stage(self.host, self.kit, build=24, profile='synthetic')
+        self.write(self.host / 'CVLPFrameworkGuest.plist', {
+            'schema': 1, 'bundleIdentifier': 'org.example.syntheticnativeguest.app',
+            'bundleVersion': '1', 'executable': 'NativeGuest', 'extra': 'rejected'})
+        with self.assertRaisesRegex(ValueError, 'guest_profile_mismatch'):
+            stage.stage(self.host, self.kit, build=24, profile='synthetic')
+
     def test_rejects_real_guest_before_embedding(self):
-        self.write(self.host / 'CVLPFrameworkGuest.plist', {'bundleIdentifier': 'unapproved.guest'})
+        self.write(self.host / 'CVLPFrameworkGuest.plist', {
+            'schema': 1, 'bundleIdentifier': 'unapproved.guest',
+            'bundleVersion': '1', 'executable': 'NativeGuest'})
         with self.assertRaisesRegex(ValueError, 'synthetic_guest_required'):
             stage.stage(self.host, self.kit)
         self.assertFalse((self.host / 'Frameworks/CalcVaultKit.framework').exists())

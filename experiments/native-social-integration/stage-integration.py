@@ -5,7 +5,11 @@ import plistlib
 import shutil
 
 
-def stage(host, kit):
+def stage(host, kit, build=23, profile='synthetic'):
+    if type(build) is not int or build not in (23, 24):
+        raise ValueError('unsupported_integration_build')
+    if profile not in ('synthetic', 'tiktok47') or (build == 23 and profile != 'synthetic'):
+        raise ValueError('unsupported_integration_profile')
     if Path(host).is_symlink() or Path(kit).is_symlink():
         raise ValueError('symlink_input')
     host, kit = Path(host).resolve(strict=True), Path(kit).resolve(strict=True)
@@ -21,17 +25,35 @@ def stage(host, kit):
         raise ValueError('unexpected_kit_identity')
     if sorted(p.name for p in (host / 'PlugIns').iterdir()) != ['LiveProcess.appex']:
         raise ValueError('unexpected_extension_inventory')
-    contract = plistlib.loads((host / 'CVLPFrameworkGuest.plist').read_bytes())
-    if contract.get('bundleIdentifier') != 'org.example.syntheticnativeguest.app':
+    contract_path = host / 'CVLPFrameworkGuest.plist'
+    if contract_path.is_symlink() or not contract_path.is_file():
+        raise ValueError('invalid_guest_contract_file')
+    contract = plistlib.loads(contract_path.read_bytes())
+    expected = {
+        (23, 'synthetic'): ('org.example.syntheticnativeguest.app', '1'),
+        (24, 'synthetic'): ('org.example.syntheticnativeguest.app', '1'),
+        (24, 'tiktok47'): ('com.zhiliaoapp.musically', '470044'),
+    }[(build, profile)]
+    if (not isinstance(contract, dict) or
+            set(contract) != {'schema', 'bundleIdentifier', 'bundleVersion', 'executable'} or
+            type(contract.get('schema')) is not int):
+        raise ValueError('guest_profile_mismatch')
+    if profile == 'synthetic' and contract.get('bundleIdentifier') != expected[0]:
         raise ValueError('synthetic_guest_required')
+    if (contract.get('bundleIdentifier'), contract.get('bundleVersion'),
+            contract.get('executable'), contract.get('schema')) != (*expected, 'NativeGuest', 1):
+        raise ValueError('guest_profile_mismatch')
     target = host / 'Frameworks/CalcVaultKit.framework'
     if target.exists():
         raise ValueError('kit_already_embedded')
     shutil.copytree(kit, target)
-    info['CFBundleVersion'] = '23'
+    info['CFBundleVersion'] = str(build)
     info['CFBundleDisplayName'] = 'Calculator'
-    info['CVNativeIntegrationStage'] = 'synthetic-integration-23'
-    info['CVNativeGuestKind'] = 'synthetic'
+    info['CVNativeIntegrationStage'] = (
+        'private-tiktok47-integration-24' if profile == 'tiktok47'
+        else f'synthetic-integration-{build}'
+    )
+    info['CVNativeGuestKind'] = 'tiktok47' if profile == 'tiktok47' else 'synthetic'
     # The containing app is CalcVault, not the generic upstream file manager.
     # Do not expose its Documents directory or inherit broad network/background
     # exceptions. Guest extension metadata is intentionally untouched here.
@@ -41,12 +63,14 @@ def stage(host, kit):
     info.pop('UIBackgroundModes', None)
     info['NSFaceIDUsageDescription'] = 'Face ID verifies access to biometric-protected CalcVault key material.'
     (host / 'Info.plist').write_bytes(plistlib.dumps(info))
-    print('Integration 23 synthetic host staged; nested code and host require fresh signing')
+    print(f'Integration {build} {profile} host staged; nested code and host require fresh signing')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('host', type=Path)
     parser.add_argument('kit', type=Path)
+    parser.add_argument('--build', type=int, choices=(23, 24), default=23)
+    parser.add_argument('--profile', choices=('synthetic', 'tiktok47'), default='synthetic')
     args = parser.parse_args()
-    stage(args.host, args.kit)
+    stage(args.host, args.kit, build=args.build, profile=args.profile)

@@ -8,7 +8,11 @@ on:
         type: boolean
         default: false
       integration_guest:
-        description: 'Build the Build 22 CalcVaultKit integration with synthetic guest only'
+        description: 'Build the CalcVaultKit integration with synthetic guest only'
+        type: boolean
+        default: false
+      tiktok47_host:
+        description: 'Build Build 24 synthetic host compatibility candidate (requires integration_guest)'
         type: boolean
         default: false
       highlights_diagnostics:
@@ -46,15 +50,16 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
-      - name: Reject Highlights options outside integration
+      - name: Reject integration-only options outside integration
         env:
+          TIKTOK47_HOST: ${{ inputs.tiktok47_host }}
           VIEWING: ${{ inputs.highlights_viewing_experiment }}
           DIRECT: ${{ inputs.highlights_direct_viewing_experiment }}
           EARLY: ${{ inputs.highlights_early_viewing_experiment }}
           ADMISSION: ${{ inputs.highlights_admission_metadata }}
           OWNER: ${{ inputs.highlights_admission_owner_metadata }}
           DIAGNOSTICS: ${{ inputs.highlights_diagnostics }}
-        run: test "$VIEWING" != true && test "$DIAGNOSTICS" != true && test "$DIRECT" != true && test "$EARLY" != true && test "$ADMISSION" != true && test "$OWNER" != true
+        run: test "$TIKTOK47_HOST" != true && test "$VIEWING" != true && test "$DIAGNOSTICS" != true && test "$DIRECT" != true && test "$EARLY" != true && test "$ADMISSION" != true && test "$OWNER" != true
       - name: Test synthetic packaging rules
         run: python3 -m unittest discover -s experiments/native-social-liveprocess-device -p 'test_*.py' -v
       - name: Select pinned toolchain and source
@@ -540,6 +545,7 @@ jobs:
       contents: read
     uses: ./.github/workflows/native-social-integration.yml
     with:
+      tiktok47_host: ${{ inputs.tiktok47_host }}
       highlights_diagnostics: ${{ inputs.highlights_diagnostics }}
       highlights_viewing_experiment: ${{ inputs.highlights_viewing_experiment }}
       highlights_direct_viewing_experiment: ${{ inputs.highlights_direct_viewing_experiment }}

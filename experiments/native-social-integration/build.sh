@@ -10,6 +10,15 @@ kit_project="$repo_root/experiments/native-social-integration"
 logs="$work/logs"
 evidence="$work/evidence"
 output="$work/output"
+integration_build="${CV_INTEGRATION_BUILD:-23}"
+case "$integration_build" in
+    23|24) ;;
+    *) echo 'CV_INTEGRATION_BUILD must be exactly 23 or 24' >&2; exit 2 ;;
+esac
+if [[ "$integration_build" == 24 && "${CV_HIGHLIGHTS_DIAGNOSTICS:-0}" != 0 ]]; then
+    echo 'Build 24 is synthetic-only and does not accept Highlights diagnostics' >&2
+    exit 2
+fi
 mkdir -p "$logs" "$evidence" "$output"
 
 (cd "$device_project" && xcodegen generate)
@@ -241,13 +250,14 @@ PY
     codesign -d --entitlements - --xml "$extension" 2>/dev/null > "$evidence/extension-entitlements-$sdk.plist"
     codesign -d --entitlements - --xml "$host" 2>/dev/null > "$evidence/host-entitlements-$sdk.plist"
     python3 - "$host" "$evidence/extension-entitlements-$sdk.plist" \
-        "$evidence/host-entitlements-$sdk.plist" "$entitlements" <<'PY'
+        "$evidence/host-entitlements-$sdk.plist" "$entitlements" "$integration_build" <<'PY'
 import plistlib, sys
 from pathlib import Path
 host = Path(sys.argv[1])
 info = plistlib.loads((host / 'Info.plist').read_bytes())
-assert info.get('CFBundleVersion') == '23'
-assert info.get('CVNativeIntegrationStage') == 'synthetic-integration-23'
+build = sys.argv[5]
+assert info.get('CFBundleVersion') == build
+assert info.get('CVNativeIntegrationStage') == f'synthetic-integration-{build}'
 assert info.get('CVNativeGuestKind') == 'synthetic'
 assert info.get('CVLPFrameworkGuestMode') == 1
 assert info.get('CFBundleIdentifier') == 'com.jaylintaylor.calcvault'
@@ -280,7 +290,8 @@ stage_and_package() {
     python3 "$device_project/package-fixture.py" "${package_args[@]}" > "$logs/package-fixture-$sdk.log"
     python3 "$device_project/package-framework-fixture.py" "$host" "$guest" "$payload" \
         > "$logs/package-framework-$sdk.log"
-    python3 "$kit_project/stage-integration.py" "$host" "$kit" > "$logs/stage-integration-$sdk.log"
+    python3 "$kit_project/stage-integration.py" "$host" "$kit" \
+        --build "$integration_build" --profile synthetic > "$logs/stage-integration-$sdk.log"
     verify_and_sign "$sdk" "$host" "$entitlements"
 }
 
@@ -317,11 +328,11 @@ xcrun simctl io "$simulator" screenshot "$evidence/simulator-locked-root.png"
 
 mkdir -p "$output/Payload"
 ditto "$device_host" "$output/Payload/LiveContainer.app"
-(cd "$output" && zip -qry CalcVault-integration-host-23.ipa Payload)
-shasum -a 256 "$output/CalcVault-integration-host-23.ipa" \
-    > "$output/CalcVault-integration-host-23.ipa.sha256"
-unzip -t "$output/CalcVault-integration-host-23.ipa" > "$evidence/ipa-zip-check.txt"
-printf '%s\n' 'Build 23 synthetic integration-host artifact created.' \
+artifact="CalcVault-integration-host-$integration_build.ipa"
+(cd "$output" && zip -qry "$artifact" Payload)
+shasum -a 256 "$output/$artifact" > "$output/$artifact.sha256"
+unzip -t "$output/$artifact" > "$evidence/ipa-zip-check.txt"
+printf '%s\n' "Build $integration_build synthetic integration-host artifact created." \
     'Simulator evidence covers only the locked CalcVault root; no guest launch was attempted.' \
     'Physical-device signing, install, native guest launch and isolation remain NOT RUN.' \
     > "$evidence/result.txt"
