@@ -17,22 +17,26 @@ destructive cleaner code is copied or recreated.
 
 This is independently authored source informed by documented behavior, not a
 claim of a legally certified clean-room process or recovered original source.
-The preserved publisher IPAs remain unchanged. A future candidate must exclude
-the original TTKillerPlus add-on as a whole rather than patch its license gate.
-That package change has not been made in this slice.
+The preserved publisher IPAs remain unchanged. The first private testing overlay
+excludes the original TTKillerPlus add-on as a whole rather than patching its
+license gate: its dylib, resource bundle and exclusively used nested Substrate
+dependency are omitted. The containing app's separate framework copy remains.
 
 ## Current source slice
 
 | Component | Implemented responsibility | Not established |
 |---|---|---|
 | Guest original-media selection | Bounded candidate lists, exact approved host matching, HTTPS-only URLs, no credentials/fragments, no thumbnail fallback or quality guessing. | CDN host policy, selected private-model adapters, downloader and real surface coverage. |
-| Guest profile eligibility controls | Explicit opt-in installation on two exact runtime selectors with method ownership, ABI and image checks. Default behavior forwards originals. Synthetic macOS Apple compilation, ten fixture modes and standalone iPhoneOS object compilation pass. | App linking, actual TikTok47 class/ABI/image eligibility and provider anonymity. |
+| Guest profile eligibility controls | Explicit opt-in installation on two exact runtime selectors with method ownership, ABI and image checks. Default behavior forwards originals. Synthetic macOS Apple compilation, ten fixture modes and standalone iPhoneOS object compilation pass. | Actual TikTok47 class/ABI/image eligibility and provider anonymity. |
+| Independent device panel | Non-key, outside-touch-passthrough TK+ window; user-initiated enable/disable; fixed module-relative canonical image guard; bounded startup discovery and inactive-state hiding. | Phone interaction and multi-scene reactivation. This uses the established app-main guest process, not an ordinary App Store extension compatibility claim. |
 | Portable transfer lease | Bounded versioned records, host-issued opaque ID/generation, ordered chunks, exact completion size and irreversible revocation. | IPC transport, OS isolation, media decoding, protected staging, confirmation and encrypted commit. |
 | Incremental stream receiver | Fixed one-frame buffer; fragmented/coalesced input; encoded-byte and record budgets; validated tentative output; finish plus explicit host-observed EOF; fail-closed sink failure, overlap and reentrancy. | Filesystem outbox, actual media validation, protected staging and session-authorized import. |
 
-These components are not wired into the current phone build. There is no new
-IPA, visible Settings toggle or Save button yet. Do not describe source-level
-controls as working native downloads or anonymous profile viewing.
+The first device candidate wires only the independent TK+ panel and local
+profile eligibility controls into the existing Build24 TikTok47 host. There is
+no native Save button or guest-to-Vault download wiring yet. New panel execution
+and actual target eligibility require the owner's phone test; neither source
+tests nor package verification establish anonymous profile viewing.
 
 ## Media delivery contract
 
@@ -112,3 +116,14 @@ public source and preserve existing guest data and working artifacts. Signing,
 startup, Highlights, downloads, portrait layout, lock/background/audio cessation,
 host-file/Keychain controls and X/Instagram browser regressions need a fresh
 owner-operated phone test. No success on those gates is claimed here.
+
+The first device slice links in public [run 37079294023](https://github.com/Jaytay04/CalcVault/actions/runs/37079294023)
+at `3ac57ee`, with SDK18.5 and minimum iOS18.0; parallel source regressions pass
+in [run 37079294010](https://github.com/Jaytay04/CalcVault/actions/runs/37079294010).
+Only independent source and synthetic fixtures enter CI. Local private assembly
+produces a private testing IPA with complete member hash/CRC readback and
+preserved host/data identity. Private-package fingerprint and size are recorded
+only in its private receipt and ledger. This
+is a testing derivative requiring SideStore re-signing, not a host rebuild or
+a phone-tested feature-complete release. The floating TK+ panel and exact target
+eligibility remain owner-test gates; native media delivery is still unwired.

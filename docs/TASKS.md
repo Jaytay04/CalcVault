@@ -1,5 +1,19 @@
 # CalcVault task ledger
 
+## Independent TKPlus device slice 2026-10-02
+
+Public source commit `3ac57ee0484dab4a863a0a60d1cbeb96efafaef8` adds the
+independently authored TK+ panel, explicit opt-in local profile eligibility
+controls, synthetic package tests and a source-only ARM64 device-module build.
+[Module run 37079294023](https://github.com/Jaytay04/CalcVault/actions/runs/37079294023)
+and [regression run 37079294010](https://github.com/Jaytay04/CalcVault/actions/runs/37079294010)
+PASS. No proprietary package or key resource entered CI or public Git.
+Local private overlay assembly produced a separate testing IPA with complete
+retained-member hash/CRC readback and whole original add-on exclusion. The
+working host/data identity remains unchanged. Installation, TK+ interaction,
+actual target eligibility, playback/Highlights and lock/browser regressions
+remain owner phone-test gates. Native-to-Vault media delivery is not connected.
+
 ## Independent TKPlus stream receiver 2026-10-02
 
 Added an isolated incremental receiver with one fixed frame buffer, encoded-byte

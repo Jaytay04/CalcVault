@@ -7,7 +7,8 @@ paid-feature patches, telemetry, cleaners or Vault credentials.
 
 Read the [implementation record](../../docs/tkplus/INDEPENDENT_IMPLEMENTATION.md)
 for the approved boundaries and integration gaps. Existing CalcVault source,
-native guest packaging and original private IPAs are not modified by this module.
+native host source and original private IPAs remain unchanged. The local-only
+adapter produces a separate testing derivative from the pinned working candidate.
 The [media-only outbox design](TRANSPORT_DESIGN.md) records the proposed handoff
 and its mandatory host-side validation; no filesystem transport is implemented yet.
 
@@ -17,6 +18,10 @@ and its mandatory host-side validation; no filesystem transport is implemented y
   exact approved-host policy. It performs no network or filesystem operations.
 - `Guest/TKPProfileControls.h/.m`: explicit runtime/ABI/image-checked eligibility
   hooks, off by default. It is not an anonymity guarantee.
+- `Guest/TKPDevicePanel.m`: independent TK+ controls, explicit user opt-in and
+  inactive-state hiding; no native Vault download action yet.
+- `assemble_device_candidate.py`: pinned, no-overwrite private overlay assembly,
+  whole original add-on exclusion and complete member hash/CRC readback.
 - `Core/TKPTransfer.h/.c`: portable bounded transfer lease and record validation.
   No encryption, keys, paths or network access.
 - `Core/TKPStreamReader.h/.c`: incremental fixed-buffer receiver with encoded-byte
@@ -68,8 +73,11 @@ available only after GitHub recognizes the workflow on the default branch.
 
 ## Integration status
 
-This is a source slice, not a complete tweak or a new phone build. Guest model
-selection, UI actions, downloading, IPC, host media decode/confirmation/encrypted
-import and private packaging are not yet connected. Source and synthetic test
+The first device slice connects only the TK+ panel and local profile eligibility
+controls. Guest model selection, downloading, IPC and host media
+decode/confirmation/encrypted import are not yet connected. The separate
+`tkplus-device-addon.yml` workflow links only the independent ARM64 iOS18 dylib;
+private packaging remains local and never supplies a proprietary IPA to CI.
+Source and synthetic test
 results must be distinguished from native compatibility and signed-phone tests.
 Never turn an unsupported selector into a broad hook to make a test pass.

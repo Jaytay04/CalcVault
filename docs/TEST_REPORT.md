@@ -1,5 +1,35 @@
 # CalcVault test report
 
+## Independent TKPlus device slice 2026-10-02
+
+[Module run 37079294023](https://github.com/Jaytay04/CalcVault/actions/runs/37079294023)
+at `3ac57ee0484dab4a863a0a60d1cbeb96efafaef8` PASS: ten synthetic profile
+modes, 13 package-adapter tests, ARM64 iPhoneOS dylib linking with warnings as
+errors, exact platform/minimum metadata, entrypoint, system dependencies and
+ad-hoc signature verification. Xcode16.4/16F6, Apple Clang17.0.0, SDK18.5,
+minimum iOS18.0. Downloaded module digest and build-receipt commit match:
+136,928 bytes, SHA256
+`dfc1c88e8a6d02a25647e4c4ebe08e99742ae5d2f077ab3cff78e6278f787566`.
+First attempts exposed strict-C11 syntax and the SDK-linked CoreFoundation
+dependency; both were corrected before the passing run, with no warning gate
+removed. The exact dependency allowlist has a positive synthetic fixture.
+
+[Source run 37079294010](https://github.com/Jaytay04/CalcVault/actions/runs/37079294010)
+at the same commit PASS: 67,745 receiver checks, 16,502 transfer checks normally
+and under ASan/UBSan; four iPhoneOS objects; media selection; ten profile modes;
+six inventory tests. Logs reviewed. Local portable suite passes all 15 tests.
+
+Private assembly verifies all 2,755 members and CRCs; 33 original add-on files
+are excluded. All retained members except the bounded weak-dependency name slot
+are unchanged. Private-package fingerprint and size are retained only in the
+private receipt and ledger. Source packages are preserved. This is a
+SideStore-resignable testing derivative,
+not a new host archive or phone-tested complete implementation. Independent
+review found no blocking panel/image-guard issue; multi-scene reactivation is
+unverified. It uses the established app-main guest process, not an ordinary
+App Store extension compatibility certification. Device execution, provider
+anonymity and native-to-Vault downloading remain unestablished.
+
 ## Independent TKPlus stream receiver 2026-10-02
 
 The new incremental receiver and fixtures are source-only. Local Clang18.1.8
