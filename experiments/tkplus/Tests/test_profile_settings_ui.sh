@@ -65,6 +65,7 @@ xcrun --sdk iphonesimulator clang \
   -DTKP_DEVICE_PANEL_TESTING=1 \
   -I "$experiment_dir/Guest" \
   "$script_dir/TKPProfileSettingsUIFixture.m" \
+  "$experiment_dir/Guest/TKPDevicePanel.m" \
   "$experiment_dir/Guest/TKPProfileControls.m" \
   -framework Foundation -framework UIKit -framework QuartzCore -framework CoreGraphics \
   -o "$app_path/TKPProfileSettingsUIFixture"

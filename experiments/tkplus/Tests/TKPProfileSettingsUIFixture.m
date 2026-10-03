@@ -4,6 +4,8 @@
 #import <stdio.h>
 #import <stdlib.h>
 
+#import "TKPProfileControls.h"
+
 @interface TTKProfileViewsVisitor : NSObject
 @property (nonatomic) NSUInteger profileGetterCalls;
 @property (nonatomic) NSUInteger userGetterCalls;
@@ -33,8 +35,24 @@
 @implementation TTKProfileTabBaseButton
 @end
 
-#define TKP_DEVICE_PANEL_TESTING 1
-#import "../Guest/TKPDevicePanel.m"
+@interface TKPDevicePanelController : NSObject
++ (instancetype)sharedController;
+@property (nonatomic, weak, nullable, readonly) UIWindow *hostWindow;
+@property (nonatomic, weak, nullable, readonly) UIView *profileTabView;
+@property (nonatomic, strong, nullable, readonly) UILongPressGestureRecognizer *profilePressRecognizer;
+@property (nonatomic, strong, nullable, readonly) UIView *ownedScreenView;
+@property (nonatomic, strong, nullable, readonly) UIView *gearScreenView;
+@property (nonatomic, strong, nullable, readonly) UIView *settingsScreenView;
+@property (nonatomic, weak, nullable, readonly) UIButton *gearButton;
+@property (nonatomic, weak, nullable, readonly) UIButton *closeButton;
+@property (nonatomic, weak, nullable, readonly) UISwitch *suppressionSwitch;
+@property (nonatomic, weak, nullable, readonly) UILabel *statusLabel;
+- (BOOL)reconcileVisibleGuestTab;
+- (void)showGearScreen;
+- (void)applicationWillResignActive:(NSNotification * _Nullable)notification;
+@end
+
+extern void TKPDevicePanelStart(void);
 
 static NSUInteger gFailures = 0;
 
