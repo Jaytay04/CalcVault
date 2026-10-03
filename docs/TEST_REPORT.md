@@ -1,5 +1,15 @@
 # CalcVault test report
 
+## Profile gesture device failure 2026-10-02
+
+Owner reports FAIL for test2's bottom Profile-tab long press. The prior synthetic
+UIKit PASS established gesture attachment and controller actions only. Its
+manufactured exact Profile/button-container classes did not establish actual
+TikTok runtime compatibility. Production exact-class checks also exclude native
+subclasses. The corrective fixture will omit the assumed TTKTabBar class and
+exercise derived targets, ambiguity and trust rejection. Corrected Apple and
+phone execution remain NOT RUN until separately recorded.
+
 ## Profile tab settings replacement 2026-10-02
 
 Owner phone result for the previous floating entry: FAIL, black guest surface.

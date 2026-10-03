@@ -1,6 +1,8 @@
 #import <UIKit/UIKit.h>
 
 #import <dispatch/dispatch.h>
+#import <math.h>
+#import <objc/runtime.h>
 #import <stdio.h>
 #import <stdlib.h>
 
@@ -25,14 +27,29 @@
 }
 @end
 
-@interface TTKTabBar : UIView
-@end
-@implementation TTKTabBar
-@end
-
 @interface TTKProfileTabBaseButton : UIButton
 @end
 @implementation TTKProfileTabBaseButton
+@end
+
+@interface TTKProfileTabButton : TTKProfileTabBaseButton
+@end
+@implementation TTKProfileTabButton
+@end
+
+@interface TTKProfileFollowTabButton : TTKProfileTabBaseButton
+@end
+@implementation TTKProfileFollowTabButton
+@end
+
+@interface TTKHiddenProfileTabButton : TTKProfileTabBaseButton
+@end
+@implementation TTKHiddenProfileTabButton
+@end
+
+@interface TTKDisabledProfileTabButton : TTKProfileTabBaseButton
+@end
+@implementation TTKDisabledProfileTabButton
 @end
 
 @interface TKPDevicePanelController : NSObject
@@ -55,6 +72,15 @@
 extern void TKPDevicePanelStart(void);
 
 static NSUInteger gFailures = 0;
+
+static Class TKPCreateForeignImageProfileButtonClass(void) {
+    Class foreignClass = objc_allocateClassPair(
+        TTKProfileTabBaseButton.class, "TKPFixtureForeignImageProfileButton", 0);
+    if (foreignClass != Nil) {
+        objc_registerClassPair(foreignClass);
+    }
+    return foreignClass;
+}
 
 static void TKPCheck(BOOL condition, const char *description) {
     if (!condition) {
@@ -129,9 +155,11 @@ static void TKPCheckNoOwnedScreen(TKPDevicePanelController *controller,
 }
 
 @interface TKPProfileSettingsFixtureRootController : UIViewController
-@property (nonatomic, strong) TTKTabBar *syntheticTabBar;
-@property (nonatomic, strong) TTKProfileTabBaseButton *primaryProfileButton;
-@property (nonatomic, strong) TTKProfileTabBaseButton *ambiguousProfileButton;
+@property (nonatomic, strong) UIView *profileContainer;
+@property (nonatomic, strong) TTKProfileTabButton *primaryProfileButton;
+@property (nonatomic, strong) TTKProfileFollowTabButton *ambiguousProfileButton;
+@property (nonatomic, strong) TTKHiddenProfileTabButton *hiddenProfileButton;
+@property (nonatomic, strong) TTKDisabledProfileTabButton *disabledProfileButton;
 @property (nonatomic, strong) UIButton *sameTitleDecoyButton;
 @end
 
@@ -142,22 +170,32 @@ static void TKPCheckNoOwnedScreen(TKPDevicePanelController *controller,
 
     CGFloat width = CGRectGetWidth(self.view.bounds);
     CGFloat height = CGRectGetHeight(self.view.bounds);
-    self.syntheticTabBar = [[TTKTabBar alloc] initWithFrame:CGRectMake(0, height - 96, width, 96)];
-    self.syntheticTabBar.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleTopMargin;
-    self.syntheticTabBar.backgroundColor = UIColor.secondarySystemBackgroundColor;
-    [self.view addSubview:self.syntheticTabBar];
+    self.profileContainer = [[UIView alloc] initWithFrame:CGRectMake(0, height - 96, width, 96)];
+    self.profileContainer.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleTopMargin;
+    self.profileContainer.backgroundColor = UIColor.secondarySystemBackgroundColor;
+    [self.view addSubview:self.profileContainer];
 
-    self.primaryProfileButton = [[TTKProfileTabBaseButton alloc]
+    self.primaryProfileButton = [[TTKProfileTabButton alloc]
         initWithFrame:CGRectMake(width - 92, 16, 80, 64)];
     self.primaryProfileButton.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
     [self.primaryProfileButton setTitle:@"Profile" forState:UIControlStateNormal];
-    [self.syntheticTabBar addSubview:self.primaryProfileButton];
+    [self.profileContainer addSubview:self.primaryProfileButton];
 
-    self.ambiguousProfileButton = [[TTKProfileTabBaseButton alloc]
+    self.ambiguousProfileButton = [[TTKProfileFollowTabButton alloc]
         initWithFrame:CGRectMake(width - 184, 16, 80, 64)];
     self.ambiguousProfileButton.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
     [self.ambiguousProfileButton setTitle:@"Other" forState:UIControlStateNormal];
-    [self.syntheticTabBar addSubview:self.ambiguousProfileButton];
+    [self.profileContainer addSubview:self.ambiguousProfileButton];
+
+    self.hiddenProfileButton = [[TTKHiddenProfileTabButton alloc]
+        initWithFrame:CGRectMake(width - 276, 16, 80, 64)];
+    self.hiddenProfileButton.hidden = YES;
+    [self.profileContainer addSubview:self.hiddenProfileButton];
+
+    self.disabledProfileButton = [[TTKDisabledProfileTabButton alloc]
+        initWithFrame:CGRectMake(width - 368, 16, 80, 64)];
+    self.disabledProfileButton.userInteractionEnabled = NO;
+    [self.profileContainer addSubview:self.disabledProfileButton];
 
     self.sameTitleDecoyButton = [UIButton buttonWithType:UIButtonTypeSystem];
     self.sameTitleDecoyButton.frame = CGRectMake(12, height - 80, 88, 56);
@@ -172,6 +210,7 @@ static void TKPCheckNoOwnedScreen(TKPDevicePanelController *controller,
 @property (nonatomic, strong) UIWindow *unrelatedWindow;
 @property (nonatomic, strong) TKPProfileSettingsFixtureRootController *rootController;
 @property (nonatomic, strong) UIViewController *unrelatedRootController;
+@property (nonatomic, strong) UIView *wrongImageProfileButton;
 @end
 
 static void TKPFinishFixture(void) {
@@ -198,6 +237,13 @@ static void TKPRunFixtureSuite(TKPProfileSettingsFixtureSceneDelegate *sceneDele
     TKPCheck(scene.windows.count == 2 && [scene.windows containsObject:hostWindow] &&
              [scene.windows containsObject:sceneDelegate.unrelatedWindow],
              "synthetic host has two existing visible normal-level windows");
+    TKPCheck(NSClassFromString(@"TTKTabBar") == Nil,
+             "fixture intentionally has no TTKTabBar runtime class");
+    TKPCheck(sceneDelegate.wrongImageProfileButton.window == sceneDelegate.unrelatedWindow &&
+             !sceneDelegate.wrongImageProfileButton.hidden &&
+             sceneDelegate.wrongImageProfileButton.userInteractionEnabled &&
+             class_getImageName(object_getClass(sceneDelegate.wrongImageProfileButton)) == NULL,
+             "wrong-image dynamic subclass is visible and has no canonical image");
     TKPCheck(controller.hostWindow == nil,
              "ambiguous target is not assigned to either visible window");
     TKPCheck(controller.ownedScreenView == nil &&
@@ -208,10 +254,13 @@ static void TKPRunFixtureSuite(TKPProfileSettingsFixtureSceneDelegate *sceneDele
 
     TKPCheck(![controller reconcileVisibleGuestTab] && controller.profileTabView == nil &&
              controller.profilePressRecognizer == nil,
-             "two exact profile targets fail closed as ambiguous");
+             "two valid profile-subclass targets fail closed as ambiguous");
     TKPCheck(TKPLongPressCount(sceneDelegate.rootController.primaryProfileButton) == 0 &&
              TKPLongPressCount(sceneDelegate.rootController.ambiguousProfileButton) == 0,
-             "ambiguous profile controls receive no long-press recognizer");
+             "ambiguous subclass profile controls receive no long-press recognizer");
+    TKPCheck(TKPLongPressCount(sceneDelegate.rootController.hiddenProfileButton) == 0 &&
+             TKPLongPressCount(sceneDelegate.rootController.disabledProfileButton) == 0,
+             "hidden and noninteractive profile subclasses receive no gesture");
     TKPCheck(TKPLongPressCount(sceneDelegate.rootController.sameTitleDecoyButton) == 0,
              "a same-title plain button is not treated as the Profile control");
 
@@ -222,15 +271,29 @@ static void TKPRunFixtureSuite(TKPProfileSettingsFixtureSceneDelegate *sceneDele
                  "unique profile target resolves despite a second visible window without a target");
         TKPCheck(controller.hostWindow == hostWindow && controller.profileTabView ==
                  sceneDelegate.rootController.primaryProfileButton,
-                 "unique native Profile control is rediscovered in the existing window");
+                 "unique subclass Profile control is rediscovered in its existing window");
+        TKPCheck(object_getClass(sceneDelegate.rootController.primaryProfileButton) !=
+                     TTKProfileTabBaseButton.class &&
+                 [sceneDelegate.rootController.primaryProfileButton
+                     isKindOfClass:TTKProfileTabBaseButton.class],
+                 "resolved control is a concrete subclass of the verified Profile base");
         TKPCheck(controller.profilePressRecognizer != nil &&
                  [controller.profilePressRecognizer isKindOfClass:[UILongPressGestureRecognizer class]] &&
                  [sceneDelegate.rootController.primaryProfileButton.gestureRecognizers
                      containsObject:controller.profilePressRecognizer] &&
                  TKPLongPressCount(sceneDelegate.rootController.primaryProfileButton) == 1,
                  "one long-press recognizer is bound to the exact Profile button");
+        TKPCheck(fabs(controller.profilePressRecognizer.minimumPressDuration - 0.78) < 0.001 &&
+                 controller.profilePressRecognizer.cancelsTouchesInView &&
+                 !controller.profilePressRecognizer.delaysTouchesBegan &&
+                 !controller.profilePressRecognizer.delaysTouchesEnded,
+                 "recognizer uses its hold duration, cancels on recognition, and adds no touch delays");
         TKPCheck(TKPLongPressCount(sceneDelegate.rootController.sameTitleDecoyButton) == 0,
                  "text-matching decoy remains unbound after discovery");
+        TKPCheck(TKPLongPressCount(sceneDelegate.rootController.hiddenProfileButton) == 0 &&
+                 TKPLongPressCount(sceneDelegate.rootController.disabledProfileButton) == 0 &&
+                 TKPLongPressCount(sceneDelegate.wrongImageProfileButton) == 0,
+                 "hidden, disabled, and wrong-image subclasses remain unbound");
 
         [controller showGearScreen];
         [hostWindow layoutIfNeeded];
@@ -350,6 +413,16 @@ static void TKPRunFixtureSuite(TKPProfileSettingsFixtureSceneDelegate *sceneDele
 
     self.unrelatedRootController = [[UIViewController alloc] init];
     self.unrelatedRootController.view.backgroundColor = UIColor.tertiarySystemBackgroundColor;
+    Class wrongImageClass = TKPCreateForeignImageProfileButtonClass();
+    TKPCheck(wrongImageClass != Nil,
+             "fixture can allocate a dynamic foreign-image Profile subclass");
+    if (wrongImageClass != Nil) {
+        UIButton *wrongImageButton = [[wrongImageClass alloc]
+            initWithFrame:CGRectMake(16, 16, 120, 64)];
+        [wrongImageButton setTitle:@"Profile" forState:UIControlStateNormal];
+        self.wrongImageProfileButton = wrongImageButton;
+        [self.unrelatedRootController.view addSubview:wrongImageButton];
+    }
     self.unrelatedWindow = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
     self.unrelatedWindow.rootViewController = self.unrelatedRootController;
     self.unrelatedWindow.windowLevel = UIWindowLevelNormal;

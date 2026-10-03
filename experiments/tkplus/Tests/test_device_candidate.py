@@ -312,7 +312,7 @@ class FullAssemblyTests(unittest.TestCase):
         report = self._assemble()
 
         self.assertTrue(self.output.is_file())
-        self.assertEqual(report["candidate"], "TKPlusIndependent-profile-settings-test2")
+        self.assertEqual(report["candidate"], "TKPlusIndependent-profile-settings-test3")
         self.assertEqual(report["settings_entry"], "bottom Profile tab long press, then gear")
         self.assertEqual(report["device_install_test"], "NOT RUN")
         self.assertTrue(report["all_other_members_preserved"])

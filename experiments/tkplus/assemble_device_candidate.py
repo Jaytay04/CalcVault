@@ -177,7 +177,7 @@ def assemble(source, addon, output, addon_sha256):
             rewritten = redirect_weak_load(main)
             expected = {}
             omitted = []
-            receipt = {'schema': 1, 'candidate': 'TKPlusIndependent-profile-settings-test2',
+            receipt = {'schema': 1, 'candidate': 'TKPlusIndependent-profile-settings-test3',
                        'scope': 'profile-tab long press, gear entry and opt-in local profile eligibility only',
                        'settings_entry': 'bottom Profile tab long press, then gear',
                        'downloads_connected': False, 'provider_anonymity_verified': False,

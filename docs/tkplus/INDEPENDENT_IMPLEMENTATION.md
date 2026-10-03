@@ -137,3 +137,12 @@ with regressions passing in
 at `a6d49e9`. Private packaging and complete readback pass. The fixture invokes
 controller actions rather than physical touches; real tab mapping, touch
 arbitration and remote-scene compatibility remain owner-test gates.
+
+The owner subsequently reports that test2's Profile long press does not work.
+Its fixture defined both exact expected classes, so its PASS did not validate
+the real class family or container. The corrective test removes the unverified
+TTKTabBar dependency and accepts the fixed Profile-button base class or derived
+classes only when every class down to that base belongs to the canonical guest
+image. Unique visible target, bounded traversal and lifecycle checks remain.
+No label, screen-region or account-model fallback is authorized. A fresh phone
+test is still required; this is not evidence of a working entry yet.

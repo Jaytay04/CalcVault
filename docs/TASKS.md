@@ -1,5 +1,14 @@
 # CalcVault task ledger
 
+## Profile gesture repair 2026-10-02
+
+Owner test2 result: FAIL. Holding the bottom Profile tab does not open the gear
+screen. Earlier simulator coverage manufactured the exact expected button and
+container classes, missing the real-runtime compatibility gate. Corrective
+source and synthetic subclass/no-assumed-container fixtures are being prepared.
+Existing private packages and host/data identity remain preserved. No corrected
+phone behavior is claimed.
+
 ## Profile tab settings replacement 2026-10-02
 
 Owner reports the first floating TK+ entry blackened the guest. Source now uses

@@ -18,8 +18,8 @@ static const NSTimeInterval TKPDiscoveryLimit = 30.0;
 static const NSTimeInterval TKPProfilePressDuration = 0.78;
 static const NSUInteger TKPViewDepthLimit = 32;
 static const NSUInteger TKPViewCountLimit = 4096;
+static const NSUInteger TKPClassChainDepthLimit = 32;
 static const char * const TKPProfileTabClassName = "TTKProfileTabBaseButton";
-static const char * const TKPTabBarClassName = "TTKTabBar";
 static const char * const TKPLocalOnlyCaveat =
     "Local only: this suppresses two profile-view eligibility checks in this guest. "
     "Other reporting paths may still operate. This does not guarantee anonymous viewing.";
@@ -77,7 +77,12 @@ static BOOL TKPViewHasVisibleGeometry(UIView *view, UIWindow *window) {
 }
 
 static BOOL TKPClassIsUIViewSubclass(Class candidate) {
+    NSUInteger depth = 0;
     for (Class current = candidate; current != Nil; current = class_getSuperclass(current)) {
+        if (depth >= TKPClassChainDepthLimit) {
+            return NO;
+        }
+        depth += 1;
         if (current == UIView.class) {
             return YES;
         }
@@ -104,17 +109,39 @@ static BOOL TKPClassImageMatchesTrustedGuest(Class candidate, NSURL *trustedImag
         strcmp(canonicalImagePath, canonicalTrustedPath) == 0;
 }
 
+static BOOL TKPProfileTabClassChainMatchesTrustedGuest(Class actualClass,
+                                                       Class profileTabBaseClass,
+                                                       NSURL *trustedImageURL) {
+    if (actualClass == Nil || profileTabBaseClass == Nil ||
+        !TKPClassImageMatchesTrustedGuest(profileTabBaseClass, trustedImageURL) ||
+        !TKPClassIsUIViewSubclass(actualClass)) {
+        return NO;
+    }
+
+    NSUInteger depth = 0;
+    for (Class current = actualClass; current != Nil; current = class_getSuperclass(current)) {
+        if (depth >= TKPClassChainDepthLimit ||
+            !TKPClassImageMatchesTrustedGuest(current, trustedImageURL)) {
+            return NO;
+        }
+        depth += 1;
+        if (current == profileTabBaseClass) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
 typedef struct {
     __unsafe_unretained UIWindow *window;
     Class profileTabClass;
-    Class tabBarClass;
+    __unsafe_unretained NSURL *trustedImageURL;
     __unsafe_unretained NSMutableArray<UIView *> *candidates;
     NSUInteger visitedViewCount;
     BOOL boundsExceeded;
 } TKPProfileTargetScan;
 
 static void TKPScanProfileTabViews(UIView *view,
-                                  UIView *nearestTabBar,
                                   NSUInteger depth,
                                   TKPProfileTargetScan *scan) {
     if (scan->boundsExceeded || view == nil) {
@@ -128,11 +155,11 @@ static void TKPScanProfileTabViews(UIView *view,
         return;
     }
 
-    if (object_getClass(view) == scan->tabBarClass) {
-        nearestTabBar = view;
-    }
-    if (nearestTabBar != nil && object_getClass(view) == scan->profileTabClass &&
-        [view isKindOfClass:scan->profileTabClass] && view.isUserInteractionEnabled) {
+    Class actualClass = object_getClass(view);
+    if ([view isKindOfClass:scan->profileTabClass] &&
+        TKPProfileTabClassChainMatchesTrustedGuest(actualClass, scan->profileTabClass,
+                                                   scan->trustedImageURL) &&
+        view.isUserInteractionEnabled) {
         [scan->candidates addObject:view];
         if (scan->candidates.count > 1) {
             return;
@@ -141,7 +168,7 @@ static void TKPScanProfileTabViews(UIView *view,
 
     NSArray<UIView *> *subviews = view.subviews;
     for (UIView *subview in subviews) {
-        TKPScanProfileTabViews(subview, nearestTabBar, depth + 1, scan);
+        TKPScanProfileTabViews(subview, depth + 1, scan);
         if (scan->boundsExceeded || scan->candidates.count > 1) {
             return;
         }
@@ -179,10 +206,7 @@ TKPResolveUniqueProfileTab(UIView **candidateOut, UIWindow **windowOut) {
 
     Class profileTabClass = NSClassFromString(
         [NSString stringWithUTF8String:TKPProfileTabClassName]);
-    Class tabBarClass = NSClassFromString(
-        [NSString stringWithUTF8String:TKPTabBarClassName]);
-    if (!TKPClassImageMatchesTrustedGuest(profileTabClass, trustedImageURL) ||
-        !TKPClassImageMatchesTrustedGuest(tabBarClass, trustedImageURL)) {
+    if (!TKPClassImageMatchesTrustedGuest(profileTabClass, trustedImageURL)) {
         return TKPProfileTargetResolutionUnavailable;
     }
 
@@ -206,12 +230,12 @@ TKPResolveUniqueProfileTab(UIView **candidateOut, UIWindow **windowOut) {
             TKPProfileTargetScan scan = {
                 .window = window,
                 .profileTabClass = profileTabClass,
-                .tabBarClass = tabBarClass,
+                .trustedImageURL = trustedImageURL,
                 .candidates = candidates,
                 .visitedViewCount = visitedViewCount,
                 .boundsExceeded = NO,
             };
-            TKPScanProfileTabViews(rootView, nil, 0, &scan);
+            TKPScanProfileTabViews(rootView, 0, &scan);
             visitedViewCount = scan.visitedViewCount;
             if (scan.boundsExceeded) {
                 return TKPProfileTargetResolutionBoundsExceeded;
@@ -374,7 +398,8 @@ TKPResolveUniqueProfileTab(UIView **candidateOut, UIWindow **windowOut) {
         [[UILongPressGestureRecognizer alloc] initWithTarget:self
                                                       action:@selector(profileTabLongPressed:)];
     recognizer.minimumPressDuration = TKPProfilePressDuration;
-    recognizer.cancelsTouchesInView = NO;
+    // A recognized hold cancels the tab button's pending touch-up; shorter taps fail recognition and pass through.
+    recognizer.cancelsTouchesInView = YES;
     recognizer.delaysTouchesBegan = NO;
     recognizer.delaysTouchesEnded = NO;
     recognizer.delegate = self;
