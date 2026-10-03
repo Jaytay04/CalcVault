@@ -1,5 +1,19 @@
 # CalcVault task ledger
 
+## Profile entry class rejection 2026-10-02
+
+Owner diagnostic4 report FAIL. Constructor, main-queue startup and discovery
+ran; all observed discovery outcomes reject the class gate, ending after 110
+ticks. No recognizer, touch or gear overlay was recorded. Startup timing does
+not explain this attempt. Investigate the exact class/image subcondition while
+preserving strict guards, viewport and lifecycle policy. Native Vault downloads
+remain unwired. No private screenshot, input or package fingerprint is included.
+
+Diagnostic5 source and classifier fixture implemented. Same strict predicate,
+record budget, schedule and lifecycle; only fixed numeric cls_status added.
+All nine evaluated outcomes have synthetic cases. Device build excludes and
+rejects test-only wrapper exports. Fresh Apple build/runtime checks pending.
+
 ## Profile entry diagnostic follow up 2026-10-02
 
 Owner phone result for profile-settings-test3: FAIL; holding the bottom Profile

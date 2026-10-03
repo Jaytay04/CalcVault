@@ -39,7 +39,7 @@ jobs:
       - name: Upload only independently authored module and build evidence
         uses: actions/upload-artifact@v4
         with:
-          name: tkplus-independent-device-module-profile-entry-diagnostics4
+          name: tkplus-independent-device-module-profile-entry-diagnostics5
           path: ${{ runner.temp }}/tkp-device-module/
           if-no-files-found: error
           retention-days: 7

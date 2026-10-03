@@ -254,3 +254,40 @@ rejected, 16 interaction-context rejection, 17 deadline, 18 lifecycle cleanup
 and 19 gear drawn. Counter fields summarize only these guarded UI decisions;
 they do not identify any underlying content. A reason is an observed branch,
 not a diagnosis of its upstream cause.
+
+## Runtime class rejection follow up
+
+The owner diagnostic4 report establishes constructor, main-queue startup and
+discovery execution, followed by 110 reason-6 class rejections. No recognizer
+or gear view was installed. Startup readiness therefore does not explain this
+attempt. The static class metadata belongs to the same pinned guest input; the
+fixed loader route disables its conditional image-hiding behavior. Neither
+fact proves which runtime subcondition failed.
+
+Diagnostic5 preserves the exact class/image acceptance predicate and adds the
+latest numeric `cls_status` from the initial class gate to version-5 records.
+Only status 9 accepts a class; all other statuses still fail closed. No path,
+class name, address or account content is emitted. The existing 24-record cap,
+320-byte buffer, discovery schedule, getter guards, target checks and lifecycle
+cleanup remain unchanged. Test-only wrappers exercise the same classifier and
+are excluded from the device module.
+
+| Class status | Meaning |
+| --- | --- |
+| 0 | Initial class gate not evaluated yet |
+| 1 | Expected class lookup returned nil |
+| 2 | Candidate is a metaclass |
+| 3 | Expected image URL unavailable |
+| 4 | Candidate does not reach UIView within the existing depth bound |
+| 5 | Class image name unavailable or empty |
+| 6 | Class image path cannot be canonicalized |
+| 7 | Expected image path cannot be canonicalized |
+| 8 | Canonical class image differs from expected image |
+| 9 | Exact canonical image match and UIView ancestry |
+
+The gray search/context banner in the supplied screenshot belongs to native
+TikTok UI. Its reported position change has not been measured against a matched
+baseline. Diagnostic4 installed no independent overlay; diagnostic5 does not
+alter native window frames, safe areas, constraints or banner layout. The older
+add-on had tab-spacing hooks, but their removal is not established as the cause
+of this reported movement.

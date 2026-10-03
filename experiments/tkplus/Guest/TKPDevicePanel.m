@@ -61,6 +61,19 @@ typedef enum {
 } TKPEntryDiagnosticReason;
 
 typedef enum {
+    TKPClassImageStatusNotEvaluated = 0,
+    TKPClassImageStatusClassAbsent = 1,
+    TKPClassImageStatusMetaClass = 2,
+    TKPClassImageStatusExpectedImageMissing = 3,
+    TKPClassImageStatusNotUIView = 4,
+    TKPClassImageStatusClassImageMissing = 5,
+    TKPClassImageStatusClassImageCanonicalizationFailed = 6,
+    TKPClassImageStatusExpectedImageCanonicalizationFailed = 7,
+    TKPClassImageStatusImageMismatch = 8,
+    TKPClassImageStatusExactImageMatch = 9,
+} TKPClassImageStatus;
+
+typedef enum {
     TKPEntryCounterImage = 0,
     TKPEntryCounterClass,
     TKPEntryCounterGetter,
@@ -102,11 +115,12 @@ enum {
     TKPEntryDiagnosticRecordLimit = 24,
     TKPEntryDiagnosticCounterLimit = 9999,
     TKPEntryDiagnosticLineLimit = 320,
-    TKPEntryDiagnosticVersion = 4,
+    TKPEntryDiagnosticVersion = 5,
 };
 
 static _Atomic(uint32_t) gTKPEntryDiagnosticRecordCount = 0;
 static _Atomic(uint32_t) gTKPEntryDiagnosticCounters[TKPEntryCounterCount];
+static _Atomic(uint32_t) gTKPLatestClassImageStatus = TKPClassImageStatusNotEvaluated;
 
 static void TKPEntryDiagnosticNote(TKPEntryResolutionDiagnostics *diagnostics,
                                   TKPEntryDiagnosticReason reason);
@@ -408,6 +422,8 @@ static void TKPEntryDiagnosticEmit(uint32_t event,
         &gTKPEntryDiagnosticCounters[TKPEntryCounterImage], memory_order_relaxed);
     uint32_t classCount = atomic_load_explicit(
         &gTKPEntryDiagnosticCounters[TKPEntryCounterClass], memory_order_relaxed);
+    uint32_t classImageStatus = atomic_load_explicit(
+        &gTKPLatestClassImageStatus, memory_order_relaxed);
     uint32_t getter = atomic_load_explicit(
         &gTKPEntryDiagnosticCounters[TKPEntryCounterGetter], memory_order_relaxed);
     uint32_t view = atomic_load_explicit(
@@ -437,9 +453,9 @@ static void TKPEntryDiagnosticEmit(uint32_t event,
 
     char lineBuffer[TKPEntryDiagnosticLineLimit];
     int lineLength = snprintf(lineBuffer, sizeof(lineBuffer),
-        "CVLP_GUEST_GEOMETRY phase=tkp-entry version=%u event=%u reason=%u ticks=%u image=%u class=%u getter=%u view=%u array=%u no_bar=%u ambiguous=%u bounds=%u installed=%u touch_ok=%u touch_reject=%u context_reject=%u gear=%u inactive_retry=%u lifecycle=%u",
+        "CVLP_GUEST_GEOMETRY phase=tkp-entry version=%u event=%u reason=%u ticks=%u image=%u class=%u cls_status=%u getter=%u view=%u array=%u no_bar=%u ambiguous=%u bounds=%u installed=%u touch_ok=%u touch_reject=%u context_reject=%u gear=%u inactive_retry=%u lifecycle=%u",
         TKPEntryDiagnosticVersion, event, (uint32_t)reason, ticks, image,
-        classCount, getter, view, array, noBar, ambiguous, bounds, installed,
+        classCount, classImageStatus, getter, view, array, noBar, ambiguous, bounds, installed,
         touchAccepted, touchRejected, contextRejected, gearDrawn, inactiveRetry,
         lifecycleCleanup);
     if (lineLength <= 0 || (size_t)lineLength >= sizeof(lineBuffer)) {
@@ -461,20 +477,62 @@ static void TKPEntryDiagnosticEmit(uint32_t event,
     }
 }
 
-static BOOL TKPClassImageMatchesTrustedGuest(Class candidate, NSURL *trustedImageURL) {
-    if (candidate == Nil || class_isMetaClass(candidate) || trustedImageURL == nil ||
-        !TKPClassIsSubclassOfClass(candidate, UIView.class)) {
-        return NO;
+static TKPClassImageStatus TKPClassImagePathStatus(const char *imagePath,
+                                                  NSURL *trustedImageURL) {
+    if (imagePath == NULL || imagePath[0] == '\0') {
+        return TKPClassImageStatusClassImageMissing;
+    }
+    if (trustedImageURL == nil) {
+        return TKPClassImageStatusExpectedImageMissing;
     }
 
-    const char *imagePath = class_getImageName(candidate);
     const char *trustedPath = trustedImageURL.fileSystemRepresentation;
     char canonicalImagePath[PATH_MAX];
     char canonicalTrustedPath[PATH_MAX];
-    return TKPCanonicalPath(imagePath, canonicalImagePath) &&
-        TKPCanonicalPath(trustedPath, canonicalTrustedPath) &&
-        strcmp(canonicalImagePath, canonicalTrustedPath) == 0;
+    if (!TKPCanonicalPath(imagePath, canonicalImagePath)) {
+        return TKPClassImageStatusClassImageCanonicalizationFailed;
+    }
+    if (!TKPCanonicalPath(trustedPath, canonicalTrustedPath)) {
+        return TKPClassImageStatusExpectedImageCanonicalizationFailed;
+    }
+    return strcmp(canonicalImagePath, canonicalTrustedPath) == 0
+        ? TKPClassImageStatusExactImageMatch
+        : TKPClassImageStatusImageMismatch;
 }
+
+static TKPClassImageStatus TKPClassImageStatusForClass(Class candidate,
+                                                       NSURL *trustedImageURL) {
+    if (candidate == Nil) {
+        return TKPClassImageStatusClassAbsent;
+    }
+    if (class_isMetaClass(candidate)) {
+        return TKPClassImageStatusMetaClass;
+    }
+    if (trustedImageURL == nil) {
+        return TKPClassImageStatusExpectedImageMissing;
+    }
+    if (!TKPClassIsSubclassOfClass(candidate, UIView.class)) {
+        return TKPClassImageStatusNotUIView;
+    }
+    return TKPClassImagePathStatus(class_getImageName(candidate), trustedImageURL);
+}
+
+static BOOL TKPClassImageMatchesTrustedGuest(Class candidate, NSURL *trustedImageURL) {
+    return TKPClassImageStatusForClass(candidate, trustedImageURL) ==
+        TKPClassImageStatusExactImageMatch;
+}
+
+#if defined(TKP_DEVICE_PANEL_TESTING)
+__attribute__((visibility("default")))
+uint32_t TKPTestClassImageStatus(Class candidate, NSURL *trustedImageURL) {
+    return (uint32_t)TKPClassImageStatusForClass(candidate, trustedImageURL);
+}
+
+__attribute__((visibility("default")))
+uint32_t TKPTestClassImagePathStatus(const char *imagePath, NSURL *trustedImageURL) {
+    return (uint32_t)TKPClassImagePathStatus(imagePath, trustedImageURL);
+}
+#endif
 
 static BOOL TKPTabBarClassChainMatchesTrustedGuest(Class actualClass,
                                                    Class tabBarBaseClass,
@@ -767,12 +825,19 @@ TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow *
 
     NSURL *trustedImageURL = TKPTrustedGuestImageURL();
     if (trustedImageURL == nil) {
+        atomic_store_explicit(&gTKPLatestClassImageStatus,
+                              TKPClassImageStatusExpectedImageMissing,
+                              memory_order_relaxed);
         TKPEntryDiagnosticNote(diagnostics, TKPEntryReasonImageRejected);
         return TKPProfileTargetResolutionUnavailable;
     }
 
     Class tabBarBaseClass = objc_getClass(TKPTabBarClassName);
-    if (!TKPClassImageMatchesTrustedGuest(tabBarBaseClass, trustedImageURL)) {
+    TKPClassImageStatus classImageStatus =
+        TKPClassImageStatusForClass(tabBarBaseClass, trustedImageURL);
+    atomic_store_explicit(&gTKPLatestClassImageStatus, (uint32_t)classImageStatus,
+                          memory_order_relaxed);
+    if (classImageStatus != TKPClassImageStatusExactImageMatch) {
         TKPEntryDiagnosticNote(diagnostics, TKPEntryReasonClassRejected);
         return TKPProfileTargetResolutionUnavailable;
     }

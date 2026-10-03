@@ -12,6 +12,22 @@
 
 #import "TKPProfileControls.h"
 
+extern uint32_t TKPTestClassImageStatus(Class candidate, NSURL *trustedImageURL);
+extern uint32_t TKPTestClassImagePathStatus(const char *imagePath, NSURL *trustedImageURL);
+
+typedef NS_ENUM(uint32_t, TKPFixtureClassImageStatus) {
+    TKPFixtureClassImageStatusNotEvaluated = 0,
+    TKPFixtureClassImageStatusClassAbsent = 1,
+    TKPFixtureClassImageStatusMetaClass = 2,
+    TKPFixtureClassImageStatusExpectedImageMissing = 3,
+    TKPFixtureClassImageStatusNotUIView = 4,
+    TKPFixtureClassImageStatusClassImageMissing = 5,
+    TKPFixtureClassImageStatusClassImageCanonicalizationFailed = 6,
+    TKPFixtureClassImageStatusExpectedImageCanonicalizationFailed = 7,
+    TKPFixtureClassImageStatusImageMismatch = 8,
+    TKPFixtureClassImageStatusExactImageMatch = 9,
+};
+
 static NSMutableArray<NSString *> *gEntryDiagnosticLines = nil;
 
 // The fixture owns this stand-in; it never writes files or calls the host.
@@ -108,13 +124,63 @@ static void TKPCheckEntryDiagnostics(void) {
         @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 _-=.,:;[]|"];
     BOOL sanitized = YES;
     for (NSString *line in gEntryDiagnosticLines) {
-        if (![line hasPrefix:@"CVLP_GUEST_GEOMETRY phase=tkp-entry version=4 "] ||
+        if (![line hasPrefix:@"CVLP_GUEST_GEOMETRY phase=tkp-entry version=5 "] ||
             line.length > 2048 ||
+            [line rangeOfString:@" cls_status="].location == NSNotFound ||
             [line rangeOfCharacterFromSet:allowed.invertedSet].location != NSNotFound) {
             sanitized = NO;
         }
     }
     TKPCheck(sanitized, "entry diagnostics contain only the fixed marker and sanitized status fields");
+}
+
+static void TKPCheckClassImageStatusClassifier(void) {
+    NSURL *mainExecutableURL = [NSURL fileURLWithPath:NSBundle.mainBundle.executablePath];
+    NSString *temporaryDirectory = NSTemporaryDirectory();
+    NSString *missingName = [NSString stringWithFormat:
+        @"TKP-missing-image-%@", [[NSUUID UUID] UUIDString]];
+    NSString *missingImagePath = [temporaryDirectory stringByAppendingPathComponent:missingName];
+    NSURL *missingImageURL = [NSURL fileURLWithPath:missingImagePath];
+
+    TKPCheck(TKPTestClassImageStatus(Nil, mainExecutableURL) ==
+                 TKPFixtureClassImageStatusClassAbsent,
+             "class image classifier distinguishes an absent class");
+    TKPCheck(TKPTestClassImageStatus(object_getClass(TTKTabBar.class), mainExecutableURL) ==
+                 TKPFixtureClassImageStatusMetaClass,
+             "class image classifier rejects a metaclass before image lookup");
+    TKPCheck(TKPTestClassImageStatus(TTKTabBar.class, nil) ==
+                 TKPFixtureClassImageStatusExpectedImageMissing,
+             "class image classifier distinguishes a missing expected image URL");
+    TKPCheck(TKPTestClassImageStatus(NSObject.class, mainExecutableURL) ==
+                 TKPFixtureClassImageStatusNotUIView,
+             "class image classifier rejects a non-UIView class");
+
+    Class dynamicUIViewClass = NSClassFromString(@"TKPFixtureForeignImageTabBar");
+    TKPCheck(dynamicUIViewClass != Nil &&
+             class_getImageName(dynamicUIViewClass) == NULL &&
+             TKPTestClassImageStatus(dynamicUIViewClass, mainExecutableURL) ==
+                 TKPFixtureClassImageStatusClassImageMissing,
+             "class image classifier reports a runtime UIView class without an image name");
+
+    TKPCheck(![[NSFileManager defaultManager] fileExistsAtPath:missingImagePath] &&
+             TKPTestClassImageStatus(TTKTabBar.class, missingImageURL) ==
+                 TKPFixtureClassImageStatusExpectedImageCanonicalizationFailed,
+             "class image classifier distinguishes an expected image path that cannot be canonicalized");
+    TKPCheck(TKPTestClassImagePathStatus(missingImagePath.fileSystemRepresentation,
+                                         mainExecutableURL) ==
+                 TKPFixtureClassImageStatusClassImageCanonicalizationFailed,
+             "class image classifier distinguishes an actual image path that cannot be canonicalized");
+    TKPCheck(TKPTestClassImageStatus(TTKTabBar.class, mainExecutableURL) ==
+                 TKPFixtureClassImageStatusExactImageMatch,
+             "class image classifier accepts the exact canonical fixture executable image");
+
+    NSURL *existingDifferentImageURL = [NSBundle.mainBundle.bundleURL
+        URLByAppendingPathComponent:@"Info.plist" isDirectory:NO];
+    TKPCheck([[NSFileManager defaultManager]
+                 fileExistsAtPath:existingDifferentImageURL.path] &&
+             TKPTestClassImageStatus(TTKTabBar.class, existingDifferentImageURL) ==
+                 TKPFixtureClassImageStatusImageMismatch,
+             "class image classifier rejects a different existing canonical image path");
 }
 
 static NSArray<UIView *> *gForeignBarButtons = nil;
@@ -460,6 +526,8 @@ static void TKPFinishFixture(void) {
 }
 
 static void TKPRunFixtureSuite(TKPProfileSettingsFixtureSceneDelegate *sceneDelegate) {
+    TKPCheckClassImageStatusClassifier();
+
     TKPDevicePanelController *controller = [TKPDevicePanelController sharedController];
     UIWindow *firstWindow = sceneDelegate.window;
     UIWindow *selectedWindow = sceneDelegate.unrelatedWindow;

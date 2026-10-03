@@ -1,5 +1,30 @@
 # CalcVault test report
 
+## Profile entry class rejection 2026-10-02
+
+Owner diagnostic4 report: FAIL for settings entry. Fixed version4 records show
+constructor, start and bounded discovery execution; 110 class rejections and
+zero installed/touch/gear counts. The gate precedes getter or view traversal.
+This does not distinguish missing class, invalid UIView ancestry or canonical
+image mismatch. The prior startup hypothesis is not supported for this attempt.
+Native layout movement is owner-reported but not measured against a baseline;
+no independent overlay was installed or drawn. No gate relaxation or layout
+change has been made. Existing synthetic boundary observations are not a
+security certification.
+
+Read-only review ties the static class metadata to the same pinned guest input.
+The adapter preserves unrelated guest members, and the fixed launch config
+disables the loader's conditional image-hiding route and TweakLoader. No static
+finding justifies an image-guard fallback. Local adapter and reference checks
+PASS 13/13 and 6/6 respectively; runtime class subconditions still need evidence.
+
+Diagnostic5 source implements one classifier shared by the Boolean image guard
+and initial gate's numeric status. Nine evaluated outcomes have synthetic
+fixture cases. Static maximum formatted length is 304 characters within the
+320-byte buffer. Test-only wrappers are excluded from production; the device
+build rejects their exports. Record limits, target guards, viewport and
+lifecycle are unchanged. Fresh Apple build/runtime checks pending.
+
 ## Profile entry diagnostic follow up 2026-10-02
 
 Owner phone result for profile-settings-test3: FAIL. Bottom Profile hold still

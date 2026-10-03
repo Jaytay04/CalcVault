@@ -92,3 +92,10 @@ binding and lifecycle policy and sends only bounded fixed-label/numeric entry
 observations through the existing guest report. It does not add a floating
 entry, a generic callback bridge or filesystem authority. Phone cause and entry
 success remain unverified.
+
+Diagnostic4 owner records establish startup and report delivery but reject the
+initial class gate on every discovery tick. Diagnostic5 adds only a numeric
+class-gate subcondition (`cls_status`); it does not relax image ownership,
+alter the viewport or claim that Profile hold is repaired. See the status map
+in `docs/tkplus/INDEPENDENT_IMPLEMENTATION.md`. The device build rejects exports
+of the classifier's synthetic-test wrappers.
