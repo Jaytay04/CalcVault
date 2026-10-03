@@ -267,6 +267,13 @@ fact proves which runtime subcondition failed.
 The same package's superclass chained bind resolves to UITabBar, consistent
 with UIView ancestry. This static result does not replace runtime validation.
 
+The diagnostic5 phone report has `cls_status=9`: the looked-up base passes.
+Reason 6 is also emitted during visible-view traversal when a derived tab-bar
+class fails the strict same-image chain check. That later site accounts for
+the new report; reason 6 alone did not establish a pre-traversal failure.
+The actual subclass is not identified. Runtime-generated wrappers and a
+packaged subclass in another image remain hypotheses, not diagnoses.
+
 Diagnostic5 preserves the exact class/image acceptance predicate and adds the
 latest numeric `cls_status` from the initial class gate to version-5 records.
 Only status 9 accepts a class; all other statuses still fail closed. No path,
@@ -287,6 +294,14 @@ are excluded from the device module.
 | 7 | Expected image path cannot be canonicalized |
 | 8 | Canonical class image differs from expected image |
 | 9 | Exact canonical image match and UIView ancestry |
+
+Diagnostic6 retains `cls_status` for the base result and adds `cs` for the
+first failed image status in a rejected candidate's class chain and `cd` for
+its zero-based superclass-hop depth. Both are zero when not evaluated. The
+status codes above are reused; no class names, image paths or addresses are
+reported. The strict chain acceptance remains unchanged. A synthetic dynamic
+subclass inheriting the valid base getter must still be rejected without a
+gesture: getter provenance alone is not substituted for class ownership.
 
 The gray search/context banner in the supplied screenshot belongs to native
 TikTok UI. Its reported position change has not been measured against a matched

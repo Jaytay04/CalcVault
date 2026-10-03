@@ -1,5 +1,20 @@
 # CalcVault task ledger
 
+## Profile entry subclass rejection 2026-10-02
+
+Owner diagnostic5 entry FAIL. Base-class cls_status=9 passes, but a later
+visible tab-bar subclass fails the class-chain gate; no gesture/gear is drawn.
+Reason6 has two source sites, so the earlier preflight-only reading is withdrawn.
+Trace the rejected intermediate class without relaxing strict guards or
+changing layout/lifecycle. Runtime wrapper vs other image remains unverified.
+
+Diagnostic6 adds only first failed chain status and superclass-hop depth with
+strict acceptance unchanged. Synthetic inherited-getter wrapper rejection is
+implemented. Local adapter/reference checks PASS 13/13 and 6/6 after correcting
+the stale receipt-version expectation and an indentation error. Valid-value
+formatter maximum is 311 characters in the 320-byte buffer. Fresh Apple
+verification and private assembly/publication remain pending.
+
 ## Profile entry class rejection 2026-10-02
 
 Owner diagnostic4 report FAIL. Constructor, main-queue startup and discovery

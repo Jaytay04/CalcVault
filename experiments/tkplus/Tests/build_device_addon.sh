@@ -28,7 +28,7 @@ grep -Eq '^[[:space:]]*minos 18\.0$' "$output/platform.txt"
 xcrun otool -L "$output/TKP.dylib" | tee "$output/dependencies.txt"
 xcrun nm -gU "$output/TKP.dylib" | tee "$output/exports.txt"
 grep -Eq '[[:space:]]_TKPDevicePanelStart$' "$output/exports.txt"
-if grep -Eq '[[:space:]]_TKPTestClassImage(Status|PathStatus)$' "$output/exports.txt"; then
+if grep -Eq '[[:space:]]_TKPTest(ClassImage(Status|PathStatus)|TabBarClassChainStatus)$' "$output/exports.txt"; then
   echo 'Device module unexpectedly exports a test-only class diagnostic entry.' >&2
   exit 1
 fi

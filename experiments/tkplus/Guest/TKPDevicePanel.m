@@ -115,18 +115,30 @@ enum {
     TKPEntryDiagnosticRecordLimit = 24,
     TKPEntryDiagnosticCounterLimit = 9999,
     TKPEntryDiagnosticLineLimit = 320,
-    TKPEntryDiagnosticVersion = 5,
+    TKPEntryDiagnosticVersion = 6,
 };
 
 static _Atomic(uint32_t) gTKPEntryDiagnosticRecordCount = 0;
 static _Atomic(uint32_t) gTKPEntryDiagnosticCounters[TKPEntryCounterCount];
 static _Atomic(uint32_t) gTKPLatestClassImageStatus = TKPClassImageStatusNotEvaluated;
+static _Atomic(uint32_t) gTKPFirstTabBarChainFailureStatus = TKPClassImageStatusNotEvaluated;
+static _Atomic(uint32_t) gTKPFirstTabBarChainFailureDepth = 0;
 
 static void TKPEntryDiagnosticNote(TKPEntryResolutionDiagnostics *diagnostics,
                                   TKPEntryDiagnosticReason reason);
 static void TKPEntryDiagnosticEmit(uint32_t event,
                                    TKPEntryDiagnosticReason reason,
                                    uint32_t ticks);
+static BOOL TKPTabBarClassChainMatchesTrustedGuestWithFailure(
+    Class actualClass,
+    Class tabBarBaseClass,
+    NSURL *trustedImageURL,
+    TKPClassImageStatus *failureStatusOut,
+    uint32_t *failureDepthOut);
+static void TKPEntryDiagnosticResetTabBarChainFailure(void);
+static void TKPEntryDiagnosticCaptureFirstTabBarChainFailure(
+    TKPClassImageStatus status,
+    uint32_t depth);
 
 typedef NS_ENUM(NSUInteger, TKPProfileTargetResolution) {
     TKPProfileTargetResolutionUnavailable = 0,
@@ -424,6 +436,10 @@ static void TKPEntryDiagnosticEmit(uint32_t event,
         &gTKPEntryDiagnosticCounters[TKPEntryCounterClass], memory_order_relaxed);
     uint32_t classImageStatus = atomic_load_explicit(
         &gTKPLatestClassImageStatus, memory_order_relaxed);
+    uint32_t chainFailureStatus = atomic_load_explicit(
+        &gTKPFirstTabBarChainFailureStatus, memory_order_relaxed);
+    uint32_t chainFailureDepth = atomic_load_explicit(
+        &gTKPFirstTabBarChainFailureDepth, memory_order_relaxed);
     uint32_t getter = atomic_load_explicit(
         &gTKPEntryDiagnosticCounters[TKPEntryCounterGetter], memory_order_relaxed);
     uint32_t view = atomic_load_explicit(
@@ -453,11 +469,11 @@ static void TKPEntryDiagnosticEmit(uint32_t event,
 
     char lineBuffer[TKPEntryDiagnosticLineLimit];
     int lineLength = snprintf(lineBuffer, sizeof(lineBuffer),
-        "CVLP_GUEST_GEOMETRY phase=tkp-entry version=%u event=%u reason=%u ticks=%u image=%u class=%u cls_status=%u getter=%u view=%u array=%u no_bar=%u ambiguous=%u bounds=%u installed=%u touch_ok=%u touch_reject=%u context_reject=%u gear=%u inactive_retry=%u lifecycle=%u",
+        "CVLP_GUEST_GEOMETRY phase=tkp-entry version=%u event=%u reason=%u ticks=%u image=%u class=%u cls_status=%u getter=%u view=%u array=%u no_bar=%u ambiguous=%u bounds=%u installed=%u touch_ok=%u touch_reject=%u context_reject=%u gear=%u inactive_retry=%u lifecycle=%u cs=%u cd=%u",
         TKPEntryDiagnosticVersion, event, (uint32_t)reason, ticks, image,
         classCount, classImageStatus, getter, view, array, noBar, ambiguous, bounds, installed,
         touchAccepted, touchRejected, contextRejected, gearDrawn, inactiveRetry,
-        lifecycleCleanup);
+        lifecycleCleanup, chainFailureStatus, chainFailureDepth);
     if (lineLength <= 0 || (size_t)lineLength >= sizeof(lineBuffer)) {
         return;
     }
@@ -532,21 +548,73 @@ __attribute__((visibility("default")))
 uint32_t TKPTestClassImagePathStatus(const char *imagePath, NSURL *trustedImageURL) {
     return (uint32_t)TKPClassImagePathStatus(imagePath, trustedImageURL);
 }
+
+__attribute__((visibility("default")))
+uint32_t TKPTestTabBarClassChainStatus(Class actualClass,
+                                       Class tabBarBaseClass,
+                                       NSURL *trustedImageURL,
+                                       uint32_t *failureStatusOut,
+                                       uint32_t *failureDepthOut) {
+    TKPClassImageStatus failureStatus = TKPClassImageStatusNotEvaluated;
+    uint32_t failureDepth = 0;
+    BOOL matches = TKPTabBarClassChainMatchesTrustedGuestWithFailure(
+        actualClass, tabBarBaseClass, trustedImageURL, &failureStatus, &failureDepth);
+    if (failureStatusOut != NULL) {
+        *failureStatusOut = (uint32_t)failureStatus;
+    }
+    if (failureDepthOut != NULL) {
+        *failureDepthOut = failureDepth;
+    }
+    return matches ? 1u : 0u;
+}
 #endif
 
 static BOOL TKPTabBarClassChainMatchesTrustedGuest(Class actualClass,
                                                    Class tabBarBaseClass,
                                                    NSURL *trustedImageURL) {
-    if (actualClass == Nil || tabBarBaseClass == Nil ||
-        !TKPClassImageMatchesTrustedGuest(tabBarBaseClass, trustedImageURL) ||
-        !TKPClassIsSubclassOfClass(actualClass, tabBarBaseClass)) {
+    return TKPTabBarClassChainMatchesTrustedGuestWithFailure(
+        actualClass, tabBarBaseClass, trustedImageURL, NULL, NULL);
+}
+
+static BOOL TKPTabBarClassChainMatchesTrustedGuestWithFailure(
+    Class actualClass,
+    Class tabBarBaseClass,
+    NSURL *trustedImageURL,
+    TKPClassImageStatus *failureStatusOut,
+    uint32_t *failureDepthOut) {
+    if (failureStatusOut != NULL) {
+        *failureStatusOut = TKPClassImageStatusNotEvaluated;
+    }
+    if (failureDepthOut != NULL) {
+        *failureDepthOut = 0;
+    }
+    if (actualClass == Nil || tabBarBaseClass == Nil) {
+        return NO;
+    }
+    if (!TKPClassImageMatchesTrustedGuest(tabBarBaseClass, trustedImageURL)) {
+        if (failureStatusOut != NULL) {
+            *failureStatusOut = TKPClassImageStatusForClass(tabBarBaseClass,
+                                                             trustedImageURL);
+        }
+        return NO;
+    }
+    if (!TKPClassIsSubclassOfClass(actualClass, tabBarBaseClass)) {
         return NO;
     }
 
-    NSUInteger depth = 0;
+    uint32_t depth = 0;
     for (Class current = actualClass; current != Nil; current = class_getSuperclass(current)) {
-        if (depth >= TKPClassChainDepthLimit ||
-            !TKPClassImageMatchesTrustedGuest(current, trustedImageURL)) {
+        if (depth >= TKPClassChainDepthLimit) {
+            return NO;
+        }
+        TKPClassImageStatus status = TKPClassImageStatusForClass(current, trustedImageURL);
+        if (status != TKPClassImageStatusExactImageMatch) {
+            if (failureStatusOut != NULL) {
+                *failureStatusOut = status;
+            }
+            if (failureDepthOut != NULL) {
+                *failureDepthOut = depth;
+            }
             return NO;
         }
         depth += 1;
@@ -555,6 +623,27 @@ static BOOL TKPTabBarClassChainMatchesTrustedGuest(Class actualClass,
         }
     }
     return NO;
+}
+
+static void TKPEntryDiagnosticResetTabBarChainFailure(void) {
+    atomic_store_explicit(&gTKPFirstTabBarChainFailureStatus,
+                          TKPClassImageStatusNotEvaluated, memory_order_relaxed);
+    atomic_store_explicit(&gTKPFirstTabBarChainFailureDepth, 0, memory_order_relaxed);
+}
+
+static void TKPEntryDiagnosticCaptureFirstTabBarChainFailure(
+    TKPClassImageStatus status,
+    uint32_t depth) {
+    if (status == TKPClassImageStatusNotEvaluated) {
+        return;
+    }
+    uint32_t expected = TKPClassImageStatusNotEvaluated;
+    if (atomic_compare_exchange_strong_explicit(
+            &gTKPFirstTabBarChainFailureStatus, &expected, (uint32_t)status,
+            memory_order_relaxed, memory_order_relaxed)) {
+        atomic_store_explicit(&gTKPFirstTabBarChainFailureDepth, depth,
+                              memory_order_relaxed);
+    }
 }
 
 static BOOL TKPIMPImageMatchesTrustedGuest(IMP implementation, NSURL *trustedImageURL) {
@@ -766,8 +855,11 @@ static void TKPScanTabBars(UIView *view, NSUInteger depth, TKPTabBarScan *scan) 
     }
 
     Class actualClass = object_getClass(view);
-    if (TKPTabBarClassChainMatchesTrustedGuest(actualClass, scan->tabBarBaseClass,
-                                               scan->trustedImageURL)) {
+    TKPClassImageStatus chainFailureStatus = TKPClassImageStatusNotEvaluated;
+    uint32_t chainFailureDepth = 0;
+    if (TKPTabBarClassChainMatchesTrustedGuestWithFailure(
+            actualClass, scan->tabBarBaseClass, scan->trustedImageURL,
+            &chainFailureStatus, &chainFailureDepth)) {
         if (++*scan->discoveredTabBarCount > TKPTabBarCandidateCountLimit) {
             scan->boundsExceeded = YES;
             return;
@@ -782,6 +874,8 @@ static void TKPScanTabBars(UIView *view, NSUInteger depth, TKPTabBarScan *scan) 
             }
         }
     } else if (TKPClassIsSubclassOfClass(actualClass, scan->tabBarBaseClass)) {
+        TKPEntryDiagnosticCaptureFirstTabBarChainFailure(chainFailureStatus,
+                                                         chainFailureDepth);
         TKPEntryDiagnosticNote(scan->diagnostics, TKPEntryReasonClassRejected);
     }
 
@@ -807,6 +901,7 @@ static BOOL TKPWindowIsVisibleGuestCandidate(UIWindow *window, UIWindowScene *sc
 static TKPProfileTargetResolution
 TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow **windowOut,
                               TKPEntryResolutionDiagnostics *diagnostics) {
+    TKPEntryDiagnosticResetTabBarChainFailure();
     if (tabBarOut != NULL) {
         *tabBarOut = nil;
     }
@@ -1062,6 +1157,7 @@ TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow *
 
 - (BOOL)reconcileVisibleGuestTab {
     NSAssert([NSThread isMainThread], @"Guest tab discovery must run on the main thread.");
+    TKPEntryDiagnosticResetTabBarChainFailure();
     if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive) {
         [self detachProfileGestureAndOverlay];
         TKPEntryDiagnosticIncrement(TKPEntryCounterInactiveRetry, 1);

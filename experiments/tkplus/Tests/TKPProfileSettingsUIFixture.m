@@ -14,6 +14,11 @@
 
 extern uint32_t TKPTestClassImageStatus(Class candidate, NSURL *trustedImageURL);
 extern uint32_t TKPTestClassImagePathStatus(const char *imagePath, NSURL *trustedImageURL);
+extern uint32_t TKPTestTabBarClassChainStatus(Class actualClass,
+                                               Class tabBarBaseClass,
+                                               NSURL *trustedImageURL,
+                                               uint32_t *failureStatusOut,
+                                               uint32_t *failureDepthOut);
 
 typedef NS_ENUM(uint32_t, TKPFixtureClassImageStatus) {
     TKPFixtureClassImageStatusNotEvaluated = 0,
@@ -124,9 +129,11 @@ static void TKPCheckEntryDiagnostics(void) {
         @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 _-=.,:;[]|"];
     BOOL sanitized = YES;
     for (NSString *line in gEntryDiagnosticLines) {
-        if (![line hasPrefix:@"CVLP_GUEST_GEOMETRY phase=tkp-entry version=5 "] ||
-            line.length > 2048 ||
+        if (![line hasPrefix:@"CVLP_GUEST_GEOMETRY phase=tkp-entry version=6 "] ||
+            line.length >= 320 ||
             [line rangeOfString:@" cls_status="].location == NSNotFound ||
+            [line rangeOfString:@" cs="].location == NSNotFound ||
+            [line rangeOfString:@" cd="].location == NSNotFound ||
             [line rangeOfCharacterFromSet:allowed.invertedSet].location != NSNotFound) {
             sanitized = NO;
         }
@@ -181,6 +188,42 @@ static void TKPCheckClassImageStatusClassifier(void) {
              TKPTestClassImageStatus(TTKTabBar.class, existingDifferentImageURL) ==
                  TKPFixtureClassImageStatusImageMismatch,
              "class image classifier rejects a different existing canonical image path");
+
+    uint32_t chainFailureStatus = UINT32_MAX;
+    uint32_t chainFailureDepth = UINT32_MAX;
+    TKPCheck(TKPTestTabBarClassChainStatus(TTKTabBar.class, TTKTabBar.class,
+                 mainExecutableURL, &chainFailureStatus, &chainFailureDepth) == 1 &&
+             chainFailureStatus == TKPFixtureClassImageStatusNotEvaluated &&
+             chainFailureDepth == 0,
+             "the trusted static tab-bar base remains accepted with no chain failure");
+
+    Class inheritedGetterClass = objc_allocateClassPair(TTKTabBar.class,
+        "TKPFixtureDynamicInheritedGetterTabBar", 0);
+    if (inheritedGetterClass != Nil) {
+        objc_registerClassPair(inheritedGetterClass);
+    }
+    unsigned int inheritedGetterMethodCount = 0;
+    Method *inheritedGetterMethods = inheritedGetterClass == Nil ? NULL
+        : class_copyMethodList(inheritedGetterClass, &inheritedGetterMethodCount);
+    BOOL ownsButtonsGetter = NO;
+    for (unsigned int index = 0; index < inheritedGetterMethodCount; index += 1) {
+        if (method_getName(inheritedGetterMethods[index]) == @selector(buttons)) {
+            ownsButtonsGetter = YES;
+            break;
+        }
+    }
+    free(inheritedGetterMethods);
+    chainFailureStatus = UINT32_MAX;
+    chainFailureDepth = UINT32_MAX;
+    TKPCheck(inheritedGetterClass != Nil &&
+             class_getImageName(inheritedGetterClass) == NULL && !ownsButtonsGetter &&
+             TKPTestClassImageStatus(inheritedGetterClass, mainExecutableURL) ==
+                 TKPFixtureClassImageStatusClassImageMissing &&
+             TKPTestTabBarClassChainStatus(inheritedGetterClass, TTKTabBar.class,
+                 mainExecutableURL, &chainFailureStatus, &chainFailureDepth) == 0 &&
+             chainFailureStatus == TKPFixtureClassImageStatusClassImageMissing &&
+             chainFailureDepth == 0,
+             "a runtime subclass with only the inherited buttons getter fails at chain depth zero");
 }
 
 static NSArray<UIView *> *gForeignBarButtons = nil;
@@ -594,6 +637,54 @@ static void TKPRunFixtureSuite(TKPProfileSettingsFixtureSceneDelegate *sceneDele
              !controller.profilePressRecognizer.delaysTouchesBegan &&
              !controller.profilePressRecognizer.delaysTouchesEnded,
              "one recognizer is attached to the bar at 0.4 seconds with only recognized-touch cancellation");
+
+    Class inheritedGetterClass = NSClassFromString(@"TKPFixtureDynamicInheritedGetterTabBar");
+    TTKTabBar *inheritedGetterBar = inheritedGetterClass == Nil ? nil
+        : [[inheritedGetterClass alloc] initWithFrame:selectedBar.frame];
+    inheritedGetterBar.backgroundColor = UIColor.tertiarySystemBackgroundColor;
+    NSArray<UIView *> *inheritedGetterButtons =
+        TKPCreateButtonsForBar(inheritedGetterBar, NULL);
+    inheritedGetterBar.buttons = inheritedGetterButtons;
+    if (inheritedGetterBar != nil) {
+        [selectedRoot.view addSubview:inheritedGetterBar];
+    }
+    [selectedRoot.view layoutIfNeeded];
+    firstBar.hidden = YES;
+    selectedBar.hidden = YES;
+    sceneDelegate.foreignImageTabBar.hidden = YES;
+    NSUInteger diagnosticLineStart = gEntryDiagnosticLines.count;
+    BOOL inheritedGetterResolved = [controller reconcileVisibleGuestTab];
+    BOOL inheritedGetterRejectionReported = NO;
+    for (NSUInteger index = diagnosticLineStart;
+         index < gEntryDiagnosticLines.count; index += 1) {
+        NSString *line = gEntryDiagnosticLines[index];
+        if ([line rangeOfString:@" event=5 reason=6 "].location != NSNotFound &&
+            [line hasSuffix:@" cs=5 cd=0"]) {
+            inheritedGetterRejectionReported = YES;
+            break;
+        }
+    }
+    TKPCheck(inheritedGetterBar.window == selectedWindow &&
+             inheritedGetterButtons.count == 5 &&
+             TKPButtonsAreVisibleChildren(inheritedGetterButtons,
+                 inheritedGetterBar, selectedWindow) &&
+             inheritedGetterBar.buttons == inheritedGetterButtons,
+             "the visible runtime tab-bar subclass exposes five items through its inherited getter");
+    TKPCheck(!inheritedGetterResolved && controller.hostWindow == nil &&
+             controller.tabBarView == nil && controller.profileTabView == nil &&
+             controller.profilePressRecognizer == nil &&
+             TKPLongPressCount(inheritedGetterBar) == 0 &&
+             inheritedGetterRejectionReported,
+             "the visible inherited-getter subclass stays unbound and reports class rejection status 5 at depth 0");
+    [inheritedGetterBar removeFromSuperview];
+    firstBar.hidden = NO;
+    selectedBar.hidden = NO;
+    sceneDelegate.foreignImageTabBar.hidden = NO;
+    TKPCheck([controller reconcileVisibleGuestTab] &&
+             controller.tabBarView == selectedBar &&
+             controller.profileTabView == originalButtons[4],
+             "the trusted visible tab bar is rediscovered after the runtime subclass case");
+
     TKPCheck(TKPLongPressCount(firstBar) == 0 &&
              TKPLongPressCount(sceneDelegate.foreignImageTabBar) == 0,
              "no gesture is attached to the empty or foreign-image tab bar");

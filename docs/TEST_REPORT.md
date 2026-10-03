@@ -1,10 +1,27 @@
 # CalcVault test report
 
+## Profile entry subclass rejection 2026-10-02
+
+Owner diagnostic5 report: entry FAIL, base cls_status=9, one reason6 rejection
+per observed discovery tick, installed/touch/gear zero. The second reason6
+site is in view traversal for an expected-tab-bar subclass whose strict class
+chain fails. Initial preflight passes in this report. The earlier reading that
+reason6 necessarily preceded view traversal is withdrawn. The failing class,
+depth and runtime ownership remain unknown; no broad fallback is justified.
+
+Diagnostic6 source/fixture implemented: numeric chain failure status/depth,
+inherited-getter wrapper rejection, unchanged guards and existing record bounds.
+Local adapter/reference checks PASS 13/13 and 6/6 after correcting a stale
+candidate-name assertion and an indentation error. Valid-value formatter
+maximum is 311 characters in the 320-byte buffer. Apple execution and phone
+entry success remain unverified.
+
 ## Profile entry class rejection 2026-10-02
 
 Owner diagnostic4 report: FAIL for settings entry. Fixed version4 records show
 constructor, start and bounded discovery execution; 110 class rejections and
-zero installed/touch/gear counts. The gate precedes getter or view traversal.
+zero installed/touch/gear counts. Rejection precedes getter selection, but
+reason6 alone does not establish rejection before view traversal.
 This does not distinguish missing class, invalid UIView ancestry or canonical
 image mismatch. The prior startup hypothesis is not supported for this attempt.
 Native layout movement is owner-reported but not measured against a baseline;
