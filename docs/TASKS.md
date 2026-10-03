@@ -26,6 +26,19 @@ assertions remain unverified. Fixture-only console/exit-drain adjustment keeps
 actual assertion-derived exit status and all script gates; no production change.
 Fresh full Apple run required before private assembly.
 
+Fresh module/UI run 37102537030 and source run 37102537094 PASS at
+d19fe25da50d90e0d253d0b1e564e6ddf1ab7f3f. New class rejection, trusted-bar
+rediscovery, exact suite marker and cap/cleanup verified. Fixture-only follow-up
+review PASS. Module receipt/digest match and local private full-member hash/CRC
+readback PASS. Private fingerprints remain unpublished. Phone NOT RUN;
+private release publication pending.
+
+Private diagnostic6 publication/readback PASS: non-draft prerelease, verified
+PRIVATE destination before/after upload and all three asset digests/sizes/states
+match local evidence. No private fingerprints or IPA published to public Git or
+Actions. Next required owner evidence: version6 base/chain status and hop depth
+after Profile hold and Lock. Phone repair remains unverified.
+
 ## Profile entry class rejection 2026-10-02
 
 Owner diagnostic4 report FAIL. Constructor, main-queue startup and discovery

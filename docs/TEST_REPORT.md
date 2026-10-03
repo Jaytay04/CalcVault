@@ -29,6 +29,20 @@ streams, flushes both and drains for one second before the unchanged assertion-
 derived exit. Exact-marker, timeout and nonzero-status gates remain enabled.
 Production module unchanged; fresh Apple verification required.
 
+Fresh module/UI run 37102537030 and source run 37102537094 PASS at
+d19fe25da50d90e0d253d0b1e564e6ddf1ab7f3f, Xcode16.4/16F6,
+SDK18.5/arm64/minOS18.0 and synthetic iPhone16/iOS18.5. Verified new wrapper
+class rejection, trusted-bar rediscovery, exact suite marker, sanitation,
+record cap and cleanup. Fixture-only follow-up review PASS. Module receipt
+matches artifact digest; production exports exclude test wrappers. Local
+private full-member hash/CRC readback PASS; no private fingerprints published.
+Prior candidates preserved. Phone NOT RUN; private release publication pending.
+
+Private diagnostic6 publication/readback PASS: non-draft prerelease, PRIVATE
+visibility reverified and all three asset digests/sizes/uploaded states match
+local files. No private output fingerprint is published here. This proves
+publication, not phone installation, repaired Profile hold or native layout.
+
 ## Profile entry class rejection 2026-10-02
 
 Owner diagnostic4 report: FAIL for settings entry. Fixed version4 records show
