@@ -557,15 +557,21 @@ static void TKPCheckNoOwnedScreen(TKPDevicePanelController *controller,
 @end
 
 static void TKPFinishFixture(void) {
+    int exitStatus = gFailures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
     if (gFailures == 0) {
         fprintf(stdout, "PASS: synthetic profile settings UI fixture\n");
-        fflush(stdout);
-        exit(EXIT_SUCCESS);
+    } else {
+        fprintf(stderr, "FAIL: synthetic profile settings UI fixture (%lu failed checks)\n",
+                (unsigned long)gFailures);
     }
-    fprintf(stderr, "FAIL: synthetic profile settings UI fixture (%lu failed checks)\n",
-            (unsigned long)gFailures);
+    fflush(stdout);
     fflush(stderr);
-    exit(EXIT_FAILURE);
+    // Let simctl's console relay drain before this synthetic process exits.
+    // Both success and failure retain their actual assertion-derived status.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        exit(exitStatus);
+    });
 }
 
 static void TKPRunFixtureSuite(TKPProfileSettingsFixtureSceneDelegate *sceneDelegate) {
@@ -1004,6 +1010,11 @@ static void TKPRunFixtureSuite(TKPProfileSettingsFixtureSceneDelegate *sceneDele
 @end
 
 int main(int argc, char *argv[]) {
+    if (setvbuf(stdout, NULL, _IONBF, 0) != 0 ||
+        setvbuf(stderr, NULL, _IONBF, 0) != 0) {
+        fprintf(stderr, "FAIL: synthetic fixture console buffering setup\n");
+        return EXIT_FAILURE;
+    }
     @autoreleasepool {
         return UIApplicationMain(argc, argv, nil,
                                  NSStringFromClass([TKPProfileSettingsFixtureAppDelegate class]));

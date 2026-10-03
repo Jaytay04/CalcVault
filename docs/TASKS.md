@@ -15,6 +15,17 @@ the stale receipt-version expectation and an indentation error. Valid-value
 formatter maximum is 311 characters in the 320-byte buffer. Fresh Apple
 verification and private assembly/publication remain pending.
 
+Independent review PASS: strict acceptance/order and diagnostic/reset bounds
+unchanged. Public source f45534b29a7dd51274d41154c51050280b6abd5c pushed.
+Apple source run 37101999554 PASS; module run 37101999569 linked successfully.
+Simulator/artifact completion and private assembly/publication remain pending.
+
+Module run 37101999569 FAILED missing exact suite completion marker. Console
+ended mid-line despite zero simctl status; new chain assertions passed, later
+assertions remain unverified. Fixture-only console/exit-drain adjustment keeps
+actual assertion-derived exit status and all script gates; no production change.
+Fresh full Apple run required before private assembly.
+
 ## Profile entry class rejection 2026-10-02
 
 Owner diagnostic4 report FAIL. Constructor, main-queue startup and discovery

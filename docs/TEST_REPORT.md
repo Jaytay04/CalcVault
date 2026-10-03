@@ -16,6 +16,19 @@ candidate-name assertion and an indentation error. Valid-value formatter
 maximum is 311 characters in the 320-byte buffer. Apple execution and phone
 entry success remain unverified.
 
+Independent review PASS with no blocker or acceptance/scope regression.
+Apple source run 37101999554 PASS at
+f45534b29a7dd51274d41154c51050280b6abd5c, including sanitizer, compile,
+media/profile and reference checks. Module run 37101999569 device link PASS;
+simulator/artifact completion and private assembly remain pending.
+
+Module run 37101999569 FAILED: missing exact suite PASS marker, zero simctl
+status and mid-line console end. New subclass-rejection assertions passed;
+remaining assertions are not proved. Fixture-only follow-up checks unbuffered
+streams, flushes both and drains for one second before the unchanged assertion-
+derived exit. Exact-marker, timeout and nonzero-status gates remain enabled.
+Production module unchanged; fresh Apple verification required.
+
 ## Profile entry class rejection 2026-10-02
 
 Owner diagnostic4 report: FAIL for settings entry. Fixed version4 records show
