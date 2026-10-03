@@ -16,6 +16,13 @@ rejection, ambiguity, restoration and balanced teardown. Local PASS: adapter
 13/13, reference tools 6/6, transfer 16,502 checks, stream reader 67,745 checks,
 shell syntax and 318-byte report bound. Apple runtime evidence is pending.
 
+Apple source run 37106012485 PASS at `0bf7b7e`. Device run 37106012538 FAIL
+with one fresh-record assertion during intentionally deduplicated ambiguity.
+Genuine observer shape/binding, spoof rejection/restoration, gear/settings and
+observer teardown passed. No artifact was uploaded. Fixture correction moves
+the mask assertion to Installed and requires the spoof mask explicitly;
+production source is unchanged. Fresh Apple execution remains required.
+
 ## Profile entry subclass rejection 2026-10-02
 
 Owner diagnostic5 report: entry FAIL, base cls_status=9, one reason6 rejection

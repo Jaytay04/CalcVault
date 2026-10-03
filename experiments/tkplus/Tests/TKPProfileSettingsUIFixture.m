@@ -672,8 +672,21 @@ static void TKPRunFixtureSuite(TKPProfileSettingsFixtureSceneDelegate *sceneDele
                  @"tkp.guest.profile-controls.gear-button") == nil,
              "launch shows no floating profile-settings control");
 
-    NSUInteger kvoDiagnosticStart = gEntryDiagnosticLines.count;
     BOOL kvoAmbiguousResolution = ![controller reconcileVisibleGuestTab];
+    TKPCheck(kvoAmbiguousResolution && controller.hostWindow == nil &&
+             controller.tabBarView == nil && controller.profileTabView == nil &&
+             controller.profilePressRecognizer == nil,
+             "two valid bars across visible windows fail closed as ambiguous");
+    TKPCheck(TKPLongPressCount(firstBar) == 0 && TKPLongPressCount(selectedBar) == 0,
+             "ambiguous tab bars receive no long-press recognizer");
+
+    firstBar.buttons = nil;
+    // Unchanged ambiguity is deliberately deduplicated by production diagnostics.
+    // Transition to Installed before requiring a new compatibility record.
+    NSUInteger kvoDiagnosticStart = gEntryDiagnosticLines.count;
+    TKPCheck([controller reconcileVisibleGuestTab] && controller.hostWindow == selectedWindow &&
+             controller.tabBarView == selectedBar && controller.profileTabView == originalButtons[4],
+             "one valid bar resolves in the second window while an untrusted dynamic bar is ignored");
     BOOL kvoAdmissionReported = NO;
     for (NSUInteger index = kvoDiagnosticStart;
          index < gEntryDiagnosticLines.count; index += 1) {
@@ -683,19 +696,8 @@ static void TKPRunFixtureSuite(TKPProfileSettingsFixtureSceneDelegate *sceneDele
             break;
         }
     }
-    TKPCheck(kvoAmbiguousResolution && kvoAdmissionReported,
+    TKPCheck(kvoAdmissionReported,
              "the genuine KVO wrapper passes every bounded compatibility gate and reports wf 511");
-    TKPCheck(controller.hostWindow == nil &&
-             controller.tabBarView == nil && controller.profileTabView == nil &&
-             controller.profilePressRecognizer == nil,
-             "two valid bars across visible windows fail closed as ambiguous");
-    TKPCheck(TKPLongPressCount(firstBar) == 0 && TKPLongPressCount(selectedBar) == 0,
-             "ambiguous tab bars receive no long-press recognizer");
-
-    firstBar.buttons = nil;
-    TKPCheck([controller reconcileVisibleGuestTab] && controller.hostWindow == selectedWindow &&
-             controller.tabBarView == selectedBar && controller.profileTabView == originalButtons[4],
-             "one valid bar resolves in the second window while an untrusted dynamic bar is ignored");
     TKPCheck(controller.profilePressRecognizer.view == selectedBar &&
              [selectedBar.gestureRecognizers containsObject:controller.profilePressRecognizer] &&
              TKPLongPressCount(selectedBar) == 1 &&
@@ -742,7 +744,7 @@ static void TKPRunFixtureSuite(TKPProfileSettingsFixtureSceneDelegate *sceneDele
         spoofRejectedWithoutCalling = !spoofResolved &&
             gKVOClassReporterSpoofCalls == 0 &&
             controller.profilePressRecognizer == nil &&
-            (!kvoAdmissionReported || spoofFlagsReported);
+            spoofFlagsReported;
     }
     TKPCheck(classReporter != NULL && trustedClassReporter != NULL &&
              spoofRejectedWithoutCalling,

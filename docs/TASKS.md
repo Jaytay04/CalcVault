@@ -15,6 +15,12 @@ and teardown are required by the fixture. Local PASS: adapter 13/13, reference
 tools 6/6, transfer 16,502 checks, stream reader 67,745 checks, shell syntax
 and 318-byte numeric report bound. Apple execution remains pending.
 
+Source run 37106012485 PASS at `0bf7b7e`. Module run 37106012538 compiled
+but failed one fixture diagnostic assertion during unchanged ambiguity. Genuine
+observer admission/binding, spoof rejection/restoration, UI flow and removal
+passed. Assert the fresh mask on the existing Installed transition and require
+spoof-mask reporting explicitly. Production guards are unchanged; rerun required.
+
 ## Profile entry subclass rejection 2026-10-02
 
 Owner diagnostic5 entry FAIL. Base-class cls_status=9 passes, but a later
