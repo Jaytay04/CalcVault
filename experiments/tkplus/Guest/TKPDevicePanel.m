@@ -326,7 +326,7 @@ static uint32_t TKPDiagnosticSaturatedAdd(uint32_t current, uint32_t increment) 
 
 static void TKPEntryDiagnosticIncrement(TKPEntryDiagnosticCounter counter,
                                         uint32_t increment) {
-    if (counter >= TKPEntryDiagnosticCounterCount || increment == 0) {
+    if (counter >= TKPEntryCounterCount || increment == 0) {
         return;
     }
     uint32_t current = atomic_load_explicit(&gTKPEntryDiagnosticCounters[counter],
@@ -367,7 +367,7 @@ static void TKPEntryDiagnosticMerge(const TKPEntryResolutionDiagnostics *diagnos
     if (diagnostics == NULL) {
         return;
     }
-    for (NSUInteger index = 0; index < TKPEntryDiagnosticCounterCount; index += 1) {
+    for (NSUInteger index = 0; index < TKPEntryCounterCount; index += 1) {
         TKPEntryDiagnosticIncrement((TKPEntryDiagnosticCounter)index,
                                     diagnostics->counters[index]);
     }

@@ -17,6 +17,11 @@ Local 13 package and six reference checks PASS. The synthetic sink fixture adds
 fixed-marker/ASCII checks, exact 24-record budget exhaustion and continued
 cleanup after exhaustion. Actual Apple compile/simulator execution is pending.
 
+Source run 37094187563 PASS at 002868a559728573fb39743b86261a768425a7c4.
+Module run 37094187548 failed before simulator execution on two undeclared
+counter-bound identifiers. Corrected them to the declared TKPEntryCounterCount;
+no gate or runtime predicate changed. Fresh Apple execution is required.
+
 ## Profile gesture device failure 2026-10-02
 
 Corrected [module/UIKit run 37091324940](https://github.com/Jaytay04/CalcVault/actions/runs/37091324940)
