@@ -264,6 +264,9 @@ attempt. The static class metadata belongs to the same pinned guest input; the
 fixed loader route disables its conditional image-hiding behavior. Neither
 fact proves which runtime subcondition failed.
 
+The same package's superclass chained bind resolves to UITabBar, consistent
+with UIView ancestry. This static result does not replace runtime validation.
+
 Diagnostic5 preserves the exact class/image acceptance predicate and adds the
 latest numeric `cls_status` from the initial class gate to version-5 records.
 Only status 9 accepts a class; all other statuses still fail closed. No path,

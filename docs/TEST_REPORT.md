@@ -18,12 +18,30 @@ disables the loader's conditional image-hiding route and TweakLoader. No static
 finding justifies an image-guard fallback. Local adapter and reference checks
 PASS 13/13 and 6/6 respectively; runtime class subconditions still need evidence.
 
+Exact pinned metadata maps the expected tab class's superclass to UITabBar,
+consistent with UIView ancestry. This is not proof of runtime registration or
+image-path canonicalization; the ancestry guard remains enabled.
+
 Diagnostic5 source implements one classifier shared by the Boolean image guard
 and initial gate's numeric status. Nine evaluated outcomes have synthetic
 fixture cases. Static maximum formatted length is 304 characters within the
 320-byte buffer. Test-only wrappers are excluded from production; the device
 build rejects their exports. Record limits, target guards, viewport and
-lifecycle are unchanged. Fresh Apple build/runtime checks pending.
+lifecycle are unchanged. Fresh Apple results are recorded below.
+
+Module/UI run 37097577703 and source run 37097577671 PASS at
+e4cd3cc273bff80ead09a49c220374fe040cc178, using Xcode16.4/16F6,
+SDK18.5/minOS18.0/arm64 and synthetic iPhone16/iOS18.5. Exact fixture PASS
+marker and all nine classifier cases verified; cap exhaustion and lifecycle
+cleanup remain covered. Device exports exclude test wrappers. Independent
+review found no guard/fallback/scheduling/authority change. Module receipt
+matches downloaded digest; private full-member hash/CRC readback PASS. No
+private package fingerprint is published here. Phone report NOT RUN.
+
+Private publication/readback PASS: non-draft prerelease, PRIVATE visibility
+reverified, all three remote asset digests/sizes/uploaded states match local
+evidence. This does not prove phone installation, settings entry or a layout
+fix. The public build used only independent source and synthetic fixtures.
 
 ## Profile entry diagnostic follow up 2026-10-02
 

@@ -12,7 +12,20 @@ remain unwired. No private screenshot, input or package fingerprint is included.
 Diagnostic5 source and classifier fixture implemented. Same strict predicate,
 record budget, schedule and lifecycle; only fixed numeric cls_status added.
 All nine evaluated outcomes have synthetic cases. Device build excludes and
-rejects test-only wrapper exports. Fresh Apple build/runtime checks pending.
+rejects test-only wrapper exports. Fresh Apple results are recorded below.
+
+Fresh module/UIKit run 37097577703 and source run 37097577671 PASS at
+e4cd3cc273bff80ead09a49c220374fe040cc178. All nine classifier cases and
+existing entry/cap/cleanup assertions verified. Independent source review PASS;
+no guard relaxation, scheduling, viewport or authority change. Downloaded
+module receipt/digest match. Local private assembly/full-member readback PASS;
+IPA fingerprints remain private. Diagnostic5 phone report NOT RUN.
+
+Private release publication/readback PASS: non-draft prerelease, destination
+visibility verified PRIVATE before/after upload, and all three remote asset
+digests/sizes/states match local files. No private package or output fingerprint
+was added to public Git or Actions. Next required evidence is version5
+cls_status from the owner's phone; entry repair remains unverified.
 
 ## Profile entry diagnostic follow up 2026-10-02
 
