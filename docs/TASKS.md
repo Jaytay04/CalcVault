@@ -1,5 +1,17 @@
 # CalcVault task ledger
 
+## Profile tab settings replacement 2026-10-02
+
+Owner reports the first floating TK+ entry blackened the guest. Source now uses
+bottom Profile-tab long press, a separate gear screen and owned settings views
+inside the existing window, without creating or hiding a native window.
+[Module and synthetic UIKit run 37084180710](https://github.com/Jaytay04/CalcVault/actions/runs/37084180710)
+and [source regression run 37084180711](https://github.com/Jaytay04/CalcVault/actions/runs/37084180711)
+PASS at `a6d49e90cc34f1816a2c423e2f70ea892d86e622`. Local private packaging
+and full member readback PASS; fingerprint and size remain in the private ledger
+and receipts. Real tab mapping, long-press/native-touch arbitration and phone
+behavior remain NOT RUN. Native Vault downloads remain unwired.
+
 ## Independent TKPlus device slice 2026-10-02
 
 Public source commit `3ac57ee0484dab4a863a0a60d1cbeb96efafaef8` adds the

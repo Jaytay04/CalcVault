@@ -1,5 +1,32 @@
 # CalcVault test report
 
+## Profile tab settings replacement 2026-10-02
+
+Owner phone result for the previous floating entry: FAIL, black guest surface.
+The separate-window/modal path was removed; its causal role is a hypothesis,
+not a reproduced root cause. Reviewed source uses owned UIView content and
+guarded exact Profile/tab-bar class discovery. No original licensing code is
+restored. The test-only image seam is absent from the device build.
+
+[Run 37084180710](https://github.com/Jaytay04/CalcVault/actions/runs/37084180710)
+at `a6d49e9` PASS: ARM64 iPhoneOS module linking/metadata/signature checks and
+actual iPhone16/iOS18.5 synthetic UIKit fixture. Checks cover two pre-existing
+windows, ambiguous/unique targets, same-label decoy rejection, gesture attachment,
+gear/settings actions, default-off controls, opt-in/out synthetic getters, one
+Close, repeated cleanup and inactive cleanup. The fixture calls controller and
+control actions, not physical touches; it does not prove native long-press
+arbitration, real TikTok class mapping, remote-scene rendering or rejection of a
+target class from another image. Exact TTKTabBar runtime availability is unknown.
+[Regression run 37084180711](https://github.com/Jaytay04/CalcVault/actions/runs/37084180711)
+PASS. Xcode16.4/16F6, Apple Clang17, SDK18.5, minimum iOS18.
+
+Initial run 37083848386 linked the device module but failed fixture compilation
+with nullability-completeness errors because it included an implementation as a
+header. The fixture now links that source separately; no warnings or test gates
+were disabled. Local private assembly and complete hash/CRC readback PASS;
+host/data metadata remain unchanged. Private artifact fingerprints stay in
+private receipts. New phone installation/behavior NOT RUN; no anonymity guarantee.
+
 ## Independent TKPlus device slice 2026-10-02
 
 [Module run 37079294023](https://github.com/Jaytay04/CalcVault/actions/runs/37079294023)

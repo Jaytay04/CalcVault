@@ -129,3 +129,11 @@ a feature-complete release. The owner reports the first floating TK+ panel
 blackened the guest. Its replacement uses Profile-tab long press, a gear entry
 and own settings views. Actual entry and target eligibility remain owner-test
 gates; native media delivery is still unwired.
+
+The Profile-tab replacement links and runs its synthetic iOS settings fixture
+in [run 37084180710](https://github.com/Jaytay04/CalcVault/actions/runs/37084180710),
+with regressions passing in
+[run 37084180711](https://github.com/Jaytay04/CalcVault/actions/runs/37084180711),
+at `a6d49e9`. Private packaging and complete readback pass. The fixture invokes
+controller actions rather than physical touches; real tab mapping, touch
+arbitration and remote-scene compatibility remain owner-test gates.
