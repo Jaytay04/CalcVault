@@ -12,8 +12,16 @@ through the existing guest report; no account, media, path or signing data.
 Preserve existing packages. Native Vault downloads remain unwired.
 
 Diagnostic source and synthetic sink/cap fixture implemented. Local 13 package
-and six reference tests PASS. Independent source review and Apple execution are
-pending; no next private package or repaired phone entry is claimed yet.
+and six reference tests PASS. Reviewed module/UIKit run 37094318577 and source
+run 37094318472 PASS at 098edd37befb9cc5d289cc167166bbb0ac31f905.
+Module digest matches the build receipt. Private assembly/full retained-member
+readback PASS; IPA fingerprint and size remain private. This candidate only
+adds diagnostics. Its phone entry and report delivery remain NOT RUN.
+
+The diagnostic testing derivative is published to the verified private release
+destination. All three remote asset digests/sizes/states match local evidence;
+no private IPA or output fingerprint was placed in public Git or Actions.
+Next owner check is a Profile hold followed by Lock and the existing Host report.
 
 ## Profile gesture repair 2026-10-02
 

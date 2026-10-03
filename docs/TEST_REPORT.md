@@ -15,7 +15,16 @@ next candidate is diagnostic-only, with no binding/lifecycle policy change.
 
 Local 13 package and six reference checks PASS. The synthetic sink fixture adds
 fixed-marker/ASCII checks, exact 24-record budget exhaustion and continued
-cleanup after exhaustion. Actual Apple compile/simulator execution is pending.
+cleanup after exhaustion. Fresh module/UIKit run 37094318577 and source run
+37094318472 PASS at 098edd37befb9cc5d289cc167166bbb0ac31f905, using
+Xcode16.4/16F6, SDK18.5/minimum18.0 arm64 and synthetic iPhone16/iOS18.5.
+Exact fixture PASS marker and new assertions verified. Module digest matches
+the source receipt. Local private full-member hash/CRC readback PASS; package
+fingerprints remain private. Phone sink resolution and Profile hold NOT RUN.
+
+Private publication/readback PASS: non-draft prerelease, PRIVATE visibility and
+all three asset digests/sizes/upload states verified. This is not a phone result
+or evidence that the Profile hold is repaired.
 
 Source run 37094187563 PASS at 002868a559728573fb39743b86261a768425a7c4.
 Module run 37094187548 failed before simulator execution on two undeclared
