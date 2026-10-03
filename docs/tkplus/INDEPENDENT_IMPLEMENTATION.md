@@ -146,3 +146,55 @@ classes only when every class down to that base belongs to the canonical guest
 image. Unique visible target, bounded traversal and lifecycle checks remain.
 No label, screen-region or account-model fallback is authorized. A fresh phone
 test is still required; this is not evidence of a working entry yet.
+
+That corrective candidate is withheld. Targeted class metadata links the base
+to AWESlidingTabButton and Video/Like/Favourite descendants, suggesting the tabs
+inside a profile rather than the requested bottom navigation tab. View containment
+is not established by metadata. Further work must trace the original installer's
+actual target selection and image ownership, not treat the base name as proof.
+No test3 IPA or device result is claimed.
+
+## Verified original Profile entry
+
+Read-only disassembly of the preserved original add-on establishes a different
+entry protocol. Its exact `TTKTabBar` registration hooks `layoutSubviews` and
+`reload`. Layout calls the saved original implementation before the installer;
+reload schedules its installer on the main queue. The installer reads the bar's
+`buttons` collection, requires at least five entries, selects index four and
+requires a UIView. It enables interaction, installs a 0.4-second long press and
+uses an associated object to avoid duplicate recognizers. Its handler acts only
+in the began state. A captured alert-action block calls
+`openRootOptionsController`; the handler itself presents an action sheet, so
+this does not establish the exact rendering of the owner's gear-only screenshot.
+
+The independent replacement source uses that observed navigation collection and
+index, not an inner-profile button name or a screen coordinate. Only the exact
+trusted tab-bar family and its image/ABI-checked `buttons` UI getter are eligible.
+A filtered recognizer on the stable bar will resolve the current fifth button
+before accepting a touch and again before opening our own gear/settings views.
+This deliberately avoids copying the original layout hooks, action bodies or
+licensing logic. Lock cleanup, ambiguity rejection and explicit opt-in remain.
+
+Only eligible visible bars count toward ambiguity. The getter's method list,
+array size and view traversal are bounded; getter/array exceptions fail closed.
+The accepted item is captured weakly at touch start and must still equal a fresh
+selection at began and before drawing. Disabled native items are rejected rather
+than enabled as in the original. A whole-bar replacement after the initial
+bounded discovery is not automatically hooked: foreground activation reacquires
+it. Stable-bar child replacement is handled without copying layout/reload hooks.
+These are deliberate differences and compatibility limits, not claims of exact
+replication. Apple and phone execution remain separately recorded test gates.
+
+Fresh direct chained-pointer parsing positively establishes TTKTabBar in the
+native MusicallyCore class list. Its class object is at 0x3023d628, class_ro at
+0x3023d5c8 and name pointer at 0x25357080 in __cstring. An earlier parser path's
+partial-name result did not reproduce and is withdrawn; it was not a Swift or
+runtime-absence finding. Runtime activation, actual view containment and touch
+delivery remain phone tests. Missing or incompatible runtime classes must still
+fail closed; synthetic fixtures cannot prove phone compatibility.
+
+TTKTabBar directly declares the `buttons` getter with type encoding `@16@0:8`
+(object return, self and selector only), implementation VA 0x15babb48. The
+replacement validates runtime metadata and image ownership, never that raw
+address. The getter body was not inspected; the original installer's use of
+its result and runtime array/view checks establish the narrow UI protocol.

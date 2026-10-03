@@ -15,11 +15,17 @@ __attribute__((visibility("default"))) void TKPDevicePanelStart(void);
 
 static const NSTimeInterval TKPDiscoveryInterval = 0.25;
 static const NSTimeInterval TKPDiscoveryLimit = 30.0;
-static const NSTimeInterval TKPProfilePressDuration = 0.78;
+static const NSTimeInterval TKPProfilePressDuration = 0.4;
 static const NSUInteger TKPViewDepthLimit = 32;
 static const NSUInteger TKPViewCountLimit = 4096;
 static const NSUInteger TKPClassChainDepthLimit = 32;
-static const char * const TKPProfileTabClassName = "TTKProfileTabBaseButton";
+static const NSUInteger TKPClassMethodCountLimit = 4096;
+static const NSUInteger TKPTabBarCandidateCountLimit = 32;
+static const NSUInteger TKPTabButtonsMinimumCount = 5;
+static const NSUInteger TKPTabButtonsMaximumCount = 16;
+static const NSUInteger TKPProfileButtonIndex = 4;
+static const char * const TKPTabBarClassName = "TTKTabBar";
+static const char * const TKPTabButtonsGetterName = "buttons";
 static const char * const TKPLocalOnlyCaveat =
     "Local only: this suppresses two profile-view eligibility checks in this guest. "
     "Other reporting paths may still operate. This does not guarantee anonymous viewing.";
@@ -50,7 +56,11 @@ static BOOL TKPViewHasVisibleGeometry(UIView *view, UIWindow *window) {
     }
 
     BOOL reachedWindow = NO;
+    NSUInteger ancestorDepth = 0;
     for (UIView *ancestor = view; ancestor != nil; ancestor = ancestor.superview) {
+        if (ancestorDepth++ >= TKPViewDepthLimit) {
+            return NO;
+        }
         if (ancestor.hidden || ancestor.alpha <= 0.01) {
             return NO;
         }
@@ -76,14 +86,17 @@ static BOOL TKPViewHasVisibleGeometry(UIView *view, UIWindow *window) {
     return TKPRectHasArea(CGRectIntersection(windowRect, window.bounds));
 }
 
-static BOOL TKPClassIsUIViewSubclass(Class candidate) {
+static BOOL TKPClassIsSubclassOfClass(Class candidate, Class ancestorClass) {
+    if (candidate == Nil || ancestorClass == Nil) {
+        return NO;
+    }
     NSUInteger depth = 0;
     for (Class current = candidate; current != Nil; current = class_getSuperclass(current)) {
         if (depth >= TKPClassChainDepthLimit) {
             return NO;
         }
         depth += 1;
-        if (current == UIView.class) {
+        if (current == ancestorClass) {
             return YES;
         }
     }
@@ -96,7 +109,7 @@ static BOOL TKPCanonicalPath(const char *path, char output[PATH_MAX]) {
 
 static BOOL TKPClassImageMatchesTrustedGuest(Class candidate, NSURL *trustedImageURL) {
     if (candidate == Nil || class_isMetaClass(candidate) || trustedImageURL == nil ||
-        !TKPClassIsUIViewSubclass(candidate)) {
+        !TKPClassIsSubclassOfClass(candidate, UIView.class)) {
         return NO;
     }
 
@@ -109,12 +122,12 @@ static BOOL TKPClassImageMatchesTrustedGuest(Class candidate, NSURL *trustedImag
         strcmp(canonicalImagePath, canonicalTrustedPath) == 0;
 }
 
-static BOOL TKPProfileTabClassChainMatchesTrustedGuest(Class actualClass,
-                                                       Class profileTabBaseClass,
-                                                       NSURL *trustedImageURL) {
-    if (actualClass == Nil || profileTabBaseClass == Nil ||
-        !TKPClassImageMatchesTrustedGuest(profileTabBaseClass, trustedImageURL) ||
-        !TKPClassIsUIViewSubclass(actualClass)) {
+static BOOL TKPTabBarClassChainMatchesTrustedGuest(Class actualClass,
+                                                   Class tabBarBaseClass,
+                                                   NSURL *trustedImageURL) {
+    if (actualClass == Nil || tabBarBaseClass == Nil ||
+        !TKPClassImageMatchesTrustedGuest(tabBarBaseClass, trustedImageURL) ||
+        !TKPClassIsSubclassOfClass(actualClass, tabBarBaseClass)) {
         return NO;
     }
 
@@ -125,25 +138,201 @@ static BOOL TKPProfileTabClassChainMatchesTrustedGuest(Class actualClass,
             return NO;
         }
         depth += 1;
-        if (current == profileTabBaseClass) {
+        if (current == tabBarBaseClass) {
             return YES;
         }
     }
     return NO;
 }
 
+static BOOL TKPIMPImageMatchesTrustedGuest(IMP implementation, NSURL *trustedImageURL) {
+    if (implementation == NULL || trustedImageURL == nil) {
+        return NO;
+    }
+
+    Dl_info implementationImage = {0};
+    if (dladdr((const void *)(uintptr_t)implementation, &implementationImage) == 0 ||
+        implementationImage.dli_fname == NULL) {
+        return NO;
+    }
+
+    const char *trustedPath = trustedImageURL.fileSystemRepresentation;
+    char canonicalImplementationPath[PATH_MAX];
+    char canonicalTrustedPath[PATH_MAX];
+    return TKPCanonicalPath(implementationImage.dli_fname, canonicalImplementationPath) &&
+        TKPCanonicalPath(trustedPath, canonicalTrustedPath) &&
+        strcmp(canonicalImplementationPath, canonicalTrustedPath) == 0;
+}
+
+static BOOL TKPMethodHasExactNoArgumentObjectSignature(Method method) {
+    if (method == NULL || method_getNumberOfArguments(method) != 2) {
+        return NO;
+    }
+
+    char *returnType = method_copyReturnType(method);
+    char *selfType = method_copyArgumentType(method, 0);
+    char *selectorType = method_copyArgumentType(method, 1);
+    BOOL matches = returnType != NULL && strcmp(returnType, "@") == 0 &&
+        selfType != NULL && strcmp(selfType, "@") == 0 &&
+        selectorType != NULL && strcmp(selectorType, ":") == 0;
+    free(returnType);
+    free(selfType);
+    free(selectorType);
+    return matches;
+}
+
+static BOOL TKPFindTrustedTabButtonsGetter(Class actualClass,
+                                           Class tabBarBaseClass,
+                                           NSURL *trustedImageURL,
+                                           IMP *implementationOut) {
+    if (implementationOut != NULL) {
+        *implementationOut = NULL;
+    }
+    if (!TKPTabBarClassChainMatchesTrustedGuest(actualClass, tabBarBaseClass,
+                                                trustedImageURL)) {
+        return NO;
+    }
+
+    SEL getterSelector = sel_registerName(TKPTabButtonsGetterName);
+    NSUInteger depth = 0;
+    for (Class current = actualClass; current != Nil; current = class_getSuperclass(current)) {
+        if (depth++ >= TKPClassChainDepthLimit) {
+            return NO;
+        }
+
+        unsigned int methodCount = 0;
+        Method *methods = class_copyMethodList(current, &methodCount);
+        if ((methods == NULL && methodCount != 0) ||
+            methodCount > TKPClassMethodCountLimit) {
+            free(methods);
+            return NO;
+        }
+        Method getterMethod = NULL;
+        BOOL duplicateGetter = NO;
+        for (unsigned int index = 0; index < methodCount; index += 1) {
+            if (method_getName(methods[index]) == getterSelector) {
+                if (getterMethod != NULL) {
+                    duplicateGetter = YES;
+                    break;
+                }
+                getterMethod = methods[index];
+            }
+        }
+        free(methods);
+
+        if (duplicateGetter) {
+            return NO;
+        }
+        if (getterMethod != NULL) {
+            if (!TKPMethodHasExactNoArgumentObjectSignature(getterMethod)) {
+                return NO;
+            }
+            IMP implementation = method_getImplementation(getterMethod);
+            if (!TKPIMPImageMatchesTrustedGuest(implementation, trustedImageURL)) {
+                return NO;
+            }
+            if (implementationOut != NULL) {
+                *implementationOut = implementation;
+            }
+            return YES;
+        }
+        if (current == tabBarBaseClass) {
+            break;
+        }
+    }
+    return NO;
+}
+
+static BOOL TKPViewIsDescendantOfView(UIView *view, UIView *ancestor) {
+    if (view == nil || ancestor == nil || view == ancestor) {
+        return NO;
+    }
+
+    NSUInteger depth = 0;
+    for (UIView *current = view.superview; current != nil; current = current.superview) {
+        if (depth++ >= TKPViewDepthLimit) {
+            return NO;
+        }
+        if (current == ancestor) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+static BOOL TKPResolveButtonsProfileTarget(UIView *tabBar,
+                                          Class tabBarBaseClass,
+                                          NSURL *trustedImageURL,
+                                          UIWindow *window,
+                                          UIView **targetOut) {
+    if (targetOut != NULL) {
+        *targetOut = nil;
+    }
+    // Do not change disabled native views to make the gesture available.
+    if (tabBar == nil || window == nil || !tabBar.isUserInteractionEnabled ||
+        !TKPViewHasVisibleGeometry(tabBar, window)) {
+        return NO;
+    }
+
+    IMP getterImplementation = NULL;
+    Class actualClass = object_getClass(tabBar);
+    if (!TKPFindTrustedTabButtonsGetter(actualClass, tabBarBaseClass,
+                                        trustedImageURL, &getterImplementation)) {
+        return NO;
+    }
+
+    typedef id (*TKPTabButtonsGetter)(id, SEL);
+    id buttonsObject = nil;
+    NSUInteger buttonCount = 0;
+    id selectedButton = nil;
+    @try {
+        buttonsObject = ((TKPTabButtonsGetter)getterImplementation)(tabBar,
+            sel_registerName(TKPTabButtonsGetterName));
+        Class buttonsClass = object_getClass(buttonsObject);
+        if (!TKPClassIsSubclassOfClass(buttonsClass, NSArray.class)) {
+            return NO;
+        }
+
+        NSArray *buttons = (NSArray *)buttonsObject;
+        buttonCount = buttons.count;
+        if (buttonCount < TKPTabButtonsMinimumCount ||
+            buttonCount > TKPTabButtonsMaximumCount) {
+            return NO;
+        }
+        selectedButton = [buttons objectAtIndex:TKPProfileButtonIndex];
+    } @catch (NSException *exception) {
+        (void)exception;
+        return NO;
+    }
+
+    Class selectedButtonClass = object_getClass(selectedButton);
+    if (!TKPClassIsSubclassOfClass(selectedButtonClass, UIView.class)) {
+        return NO;
+    }
+
+    UIView *target = (UIView *)selectedButton;
+    if (!target.isUserInteractionEnabled || target.window != window ||
+        !TKPViewIsDescendantOfView(target, tabBar) ||
+        !TKPViewHasVisibleGeometry(target, window)) {
+        return NO;
+    }
+    if (targetOut != NULL) {
+        *targetOut = target;
+    }
+    return YES;
+}
+
 typedef struct {
     __unsafe_unretained UIWindow *window;
-    Class profileTabClass;
+    Class tabBarBaseClass;
     __unsafe_unretained NSURL *trustedImageURL;
-    __unsafe_unretained NSMutableArray<UIView *> *candidates;
+    __unsafe_unretained NSMutableArray<UIView *> *tabBars;
+    NSUInteger *discoveredTabBarCount;
     NSUInteger visitedViewCount;
     BOOL boundsExceeded;
-} TKPProfileTargetScan;
+} TKPTabBarScan;
 
-static void TKPScanProfileTabViews(UIView *view,
-                                  NSUInteger depth,
-                                  TKPProfileTargetScan *scan) {
+static void TKPScanTabBars(UIView *view, NSUInteger depth, TKPTabBarScan *scan) {
     if (scan->boundsExceeded || view == nil) {
         return;
     }
@@ -156,20 +345,27 @@ static void TKPScanProfileTabViews(UIView *view,
     }
 
     Class actualClass = object_getClass(view);
-    if ([view isKindOfClass:scan->profileTabClass] &&
-        TKPProfileTabClassChainMatchesTrustedGuest(actualClass, scan->profileTabClass,
-                                                   scan->trustedImageURL) &&
-        view.isUserInteractionEnabled) {
-        [scan->candidates addObject:view];
-        if (scan->candidates.count > 1) {
+    if (TKPTabBarClassChainMatchesTrustedGuest(actualClass, scan->tabBarBaseClass,
+                                               scan->trustedImageURL)) {
+        if (++*scan->discoveredTabBarCount > TKPTabBarCandidateCountLimit) {
+            scan->boundsExceeded = YES;
             return;
+        }
+        UIView *profileTarget = nil;
+        if (TKPResolveButtonsProfileTarget(view, scan->tabBarBaseClass,
+                                           scan->trustedImageURL, scan->window,
+                                           &profileTarget)) {
+            [scan->tabBars addObject:view];
+            if (scan->tabBars.count > 1) {
+                return;
+            }
         }
     }
 
     NSArray<UIView *> *subviews = view.subviews;
     for (UIView *subview in subviews) {
-        TKPScanProfileTabViews(subview, depth + 1, scan);
-        if (scan->boundsExceeded || scan->candidates.count > 1) {
+        TKPScanTabBars(subview, depth + 1, scan);
+        if (scan->boundsExceeded || scan->tabBars.count > 1) {
             return;
         }
     }
@@ -177,7 +373,7 @@ static void TKPScanProfileTabViews(UIView *view,
 
 static BOOL TKPWindowIsVisibleGuestCandidate(UIWindow *window, UIWindowScene *scene) {
     if (window == nil || scene == nil || window.windowScene != scene || window.hidden ||
-        window.alpha <= 0.01 || window.windowLevel > UIWindowLevelNormal ||
+        window.alpha <= 0.01 || window.windowLevel != UIWindowLevelNormal ||
         window.rootViewController == nil || !TKPRectHasArea(window.bounds)) {
         return NO;
     }
@@ -186,9 +382,12 @@ static BOOL TKPWindowIsVisibleGuestCandidate(UIWindow *window, UIWindowScene *sc
 }
 
 static TKPProfileTargetResolution
-TKPResolveUniqueProfileTab(UIView **candidateOut, UIWindow **windowOut) {
-    if (candidateOut != NULL) {
-        *candidateOut = nil;
+TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow **windowOut) {
+    if (tabBarOut != NULL) {
+        *tabBarOut = nil;
+    }
+    if (targetOut != NULL) {
+        *targetOut = nil;
     }
     if (windowOut != NULL) {
         *windowOut = nil;
@@ -204,14 +403,14 @@ TKPResolveUniqueProfileTab(UIView **candidateOut, UIWindow **windowOut) {
         return TKPProfileTargetResolutionUnavailable;
     }
 
-    Class profileTabClass = NSClassFromString(
-        [NSString stringWithUTF8String:TKPProfileTabClassName]);
-    if (!TKPClassImageMatchesTrustedGuest(profileTabClass, trustedImageURL)) {
+    Class tabBarBaseClass = objc_getClass(TKPTabBarClassName);
+    if (!TKPClassImageMatchesTrustedGuest(tabBarBaseClass, trustedImageURL)) {
         return TKPProfileTargetResolutionUnavailable;
     }
 
-    NSMutableArray<UIView *> *candidates = [NSMutableArray arrayWithCapacity:2];
-    UIWindow *candidateWindow = nil;
+    NSMutableArray<UIView *> *tabBars = [NSMutableArray arrayWithCapacity:2];
+    UIWindow *tabBarWindow = nil;
+    NSUInteger discoveredTabBarCount = 0;
     NSUInteger visitedViewCount = 0;
 
     for (UIScene *scene in application.connectedScenes) {
@@ -226,37 +425,48 @@ TKPResolveUniqueProfileTab(UIView **candidateOut, UIWindow **windowOut) {
             }
 
             UIView *rootView = window.rootViewController.viewIfLoaded;
-            NSUInteger candidateCountBeforeWindow = candidates.count;
-            TKPProfileTargetScan scan = {
+            NSUInteger tabBarCountBeforeWindow = tabBars.count;
+            TKPTabBarScan scan = {
                 .window = window,
-                .profileTabClass = profileTabClass,
+                .tabBarBaseClass = tabBarBaseClass,
                 .trustedImageURL = trustedImageURL,
-                .candidates = candidates,
+                .tabBars = tabBars,
+                .discoveredTabBarCount = &discoveredTabBarCount,
                 .visitedViewCount = visitedViewCount,
                 .boundsExceeded = NO,
             };
-            TKPScanProfileTabViews(rootView, 0, &scan);
+            TKPScanTabBars(rootView, 0, &scan);
             visitedViewCount = scan.visitedViewCount;
             if (scan.boundsExceeded) {
                 return TKPProfileTargetResolutionBoundsExceeded;
             }
-            if (candidates.count > 1) {
+            if (tabBars.count > 1) {
                 return TKPProfileTargetResolutionAmbiguous;
             }
-            if (candidates.count == candidateCountBeforeWindow + 1) {
-                candidateWindow = window;
+            if (tabBars.count == tabBarCountBeforeWindow + 1) {
+                tabBarWindow = window;
             }
         }
     }
 
-    if (candidates.count != 1 || candidateWindow == nil) {
+    if (tabBars.count != 1 || tabBarWindow == nil) {
         return TKPProfileTargetResolutionNotFound;
     }
-    if (candidateOut != NULL) {
-        *candidateOut = candidates.firstObject;
+
+    UIView *tabBar = tabBars.firstObject;
+    UIView *target = nil;
+    if (!TKPResolveButtonsProfileTarget(tabBar, tabBarBaseClass, trustedImageURL,
+                                        tabBarWindow, &target)) {
+        return TKPProfileTargetResolutionNotFound;
+    }
+    if (tabBarOut != NULL) {
+        *tabBarOut = tabBar;
+    }
+    if (targetOut != NULL) {
+        *targetOut = target;
     }
     if (windowOut != NULL) {
-        *windowOut = candidateWindow;
+        *windowOut = tabBarWindow;
     }
     return TKPProfileTargetResolutionUnique;
 }
@@ -265,7 +475,9 @@ TKPResolveUniqueProfileTab(UIView **candidateOut, UIWindow **windowOut) {
 @property (nonatomic, strong, nullable) NSTimer *discoveryTimer;
 @property (nonatomic, weak, nullable) UIWindow *hostWindow;
 @property (nonatomic, weak, nullable) UIWindowScene *hostScene;
+@property (nonatomic, weak, nullable) UIView *tabBarView;
 @property (nonatomic, weak, nullable) UIView *profileTabView;
+@property (nonatomic, weak, nullable) UIView *acceptedProfilePressTarget;
 @property (nonatomic, strong, nullable) UILongPressGestureRecognizer *profilePressRecognizer;
 @property (nonatomic, strong, nullable) UIView *ownedScreenView;
 @property (nonatomic, strong, nullable) UIView *gearScreenView;
@@ -284,6 +496,7 @@ TKPResolveUniqueProfileTab(UIView **candidateOut, UIWindow **windowOut) {
 - (void)closeButtonTapped:(UIButton *)sender;
 - (void)suppressionSwitchChanged:(UISwitch *)sender;
 - (BOOL)reconcileVisibleGuestTab;
+- (BOOL)acceptProfilePressTouchInView:(nullable UIView *)touchedView;
 - (void)applicationWillResignActive:(NSNotification *)notification;
 @end
 
@@ -375,16 +588,20 @@ TKPResolveUniqueProfileTab(UIView **candidateOut, UIWindow **windowOut) {
         return NO;
     }
 
+    UIView *tabBar = nil;
     UIView *candidate = nil;
     UIWindow *window = nil;
-    TKPProfileTargetResolution resolution = TKPResolveUniqueProfileTab(&candidate, &window);
-    if (resolution != TKPProfileTargetResolutionUnique || candidate == nil || window == nil) {
+    TKPProfileTargetResolution resolution =
+        TKPResolveUniqueProfileTarget(&tabBar, &candidate, &window);
+    if (resolution != TKPProfileTargetResolutionUnique || tabBar == nil ||
+        candidate == nil || window == nil) {
         [self detachProfileGestureAndOverlay];
         return NO;
     }
 
-    if (self.profileTabView == candidate && self.hostWindow == window &&
-        self.profilePressRecognizer.view == candidate) {
+    if (self.tabBarView == tabBar && self.hostWindow == window &&
+        self.profilePressRecognizer.view == tabBar) {
+        self.profileTabView = candidate;
         self.hostScene = window.windowScene;
         return YES;
     }
@@ -392,40 +609,50 @@ TKPResolveUniqueProfileTab(UIView **candidateOut, UIWindow **windowOut) {
     [self detachProfileGestureAndOverlay];
     self.hostWindow = window;
     self.hostScene = window.windowScene;
+    self.tabBarView = tabBar;
     self.profileTabView = candidate;
 
     UILongPressGestureRecognizer *recognizer =
         [[UILongPressGestureRecognizer alloc] initWithTarget:self
                                                       action:@selector(profileTabLongPressed:)];
     recognizer.minimumPressDuration = TKPProfilePressDuration;
-    // A recognized hold cancels the tab button's pending touch-up; shorter taps fail recognition and pass through.
+    // Match the observed 0.4-second hold; actual native tap delivery remains device-unverified.
     recognizer.cancelsTouchesInView = YES;
     recognizer.delaysTouchesBegan = NO;
     recognizer.delaysTouchesEnded = NO;
     recognizer.delegate = self;
     self.profilePressRecognizer = recognizer;
-    [candidate addGestureRecognizer:recognizer];
+    [tabBar addGestureRecognizer:recognizer];
     return YES;
 }
 
 - (BOOL)hasCurrentInteractionContext {
     UIWindow *window = self.hostWindow;
     UIWindowScene *scene = self.hostScene;
-    UIView *candidate = self.profileTabView;
+    UIView *tabBar = self.tabBarView;
     if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive ||
         window == nil || scene == nil || window.windowScene != scene ||
         scene.activationState != UISceneActivationStateForegroundActive ||
         !TKPWindowIsVisibleGuestCandidate(window, scene) ||
-        !TKPViewHasVisibleGeometry(candidate, window) ||
-        self.profilePressRecognizer.view != candidate) {
+        tabBar == nil || !tabBar.isUserInteractionEnabled ||
+        !TKPViewHasVisibleGeometry(tabBar, window) ||
+        self.profilePressRecognizer.view != tabBar) {
         return NO;
     }
 
+    UIView *resolvedTabBar = nil;
     UIView *resolvedCandidate = nil;
     UIWindow *resolvedWindow = nil;
-    return TKPResolveUniqueProfileTab(&resolvedCandidate, &resolvedWindow) ==
-            TKPProfileTargetResolutionUnique &&
-        resolvedCandidate == candidate && resolvedWindow == window;
+    if (TKPResolveUniqueProfileTarget(&resolvedTabBar, &resolvedCandidate, &resolvedWindow) !=
+            TKPProfileTargetResolutionUnique ||
+        resolvedTabBar != tabBar || resolvedWindow != window || resolvedCandidate == nil) {
+        return NO;
+    }
+
+    // The native button array can be rebuilt while the tab bar instance remains stable.
+    // Refresh the authorized hit target from the validated getter on every interaction.
+    self.profileTabView = resolvedCandidate;
+    return YES;
 }
 
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
@@ -435,35 +662,73 @@ TKPResolveUniqueProfileTab(UIView **candidateOut, UIWindow **windowOut) {
 }
 
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
-       shouldReceiveTouch:(UITouch *)touch {
-    if (gestureRecognizer != self.profilePressRecognizer ||
-        ![self hasCurrentInteractionContext]) {
+    shouldReceiveTouch:(UITouch *)touch {
+    if (gestureRecognizer != self.profilePressRecognizer) {
         return NO;
     }
+
+    return [self acceptProfilePressTouchInView:touch.view];
+}
+
+- (BOOL)acceptProfilePressTouchInView:(UIView *)touchedView {
+    self.acceptedProfilePressTarget = nil;
+    if (![self hasCurrentInteractionContext]) {
+        return NO;
+    }
+
     UIView *target = self.profileTabView;
-    UIView *touchedView = touch.view;
-    return touchedView != nil && target != nil &&
-        (touchedView == target || [touchedView isDescendantOfView:target]) &&
+    BOOL acceptsTouch = touchedView != nil && target != nil &&
+        (touchedView == target || TKPViewIsDescendantOfView(touchedView, target)) &&
         TKPViewHasVisibleGeometry(touchedView, self.hostWindow);
+    if (acceptsTouch) {
+        self.acceptedProfilePressTarget = target;
+    }
+    return acceptsTouch;
 }
 
 - (void)profileTabLongPressed:(UILongPressGestureRecognizer *)recognizer {
-    if (recognizer != self.profilePressRecognizer ||
-        recognizer.state != UIGestureRecognizerStateBegan) {
+    if (recognizer != self.profilePressRecognizer) {
         return;
     }
-    if (![self hasCurrentInteractionContext]) {
-        [self detachProfileGestureAndOverlay];
+
+    if (recognizer.view != self.tabBarView) {
+        self.acceptedProfilePressTarget = nil;
+        return;
+    }
+    if (recognizer.state != UIGestureRecognizerStateBegan) {
+        if (recognizer.state == UIGestureRecognizerStateEnded ||
+            recognizer.state == UIGestureRecognizerStateCancelled ||
+            recognizer.state == UIGestureRecognizerStateFailed) {
+            self.acceptedProfilePressTarget = nil;
+        }
+        return;
+    }
+
+    UIView *acceptedTarget = self.acceptedProfilePressTarget;
+    BOOL hasCurrentContext = [self hasCurrentInteractionContext];
+    if (!hasCurrentContext || acceptedTarget == nil ||
+        acceptedTarget != self.profileTabView) {
+        self.acceptedProfilePressTarget = nil;
+        if (!hasCurrentContext) {
+            [self detachProfileGestureAndOverlay];
+        }
         return;
     }
     [self showGearScreen];
 }
 
 - (void)showGearScreen {
-    if (![self hasCurrentInteractionContext]) {
-        [self detachProfileGestureAndOverlay];
+    UIView *acceptedTarget = self.acceptedProfilePressTarget;
+    BOOL hasCurrentContext = [self hasCurrentInteractionContext];
+    if (!hasCurrentContext ||
+        (acceptedTarget != nil && acceptedTarget != self.profileTabView)) {
+        self.acceptedProfilePressTarget = nil;
+        if (!hasCurrentContext) {
+            [self detachProfileGestureAndOverlay];
+        }
         return;
     }
+    self.acceptedProfilePressTarget = nil;
     if (self.ownedScreenView != nil) {
         return;
     }
@@ -704,13 +969,15 @@ TKPResolveUniqueProfileTab(UIView **candidateOut, UIWindow **windowOut) {
 
 - (void)detachProfileGestureAndOverlay {
     [self removeOwnedOverlay];
-    UIView *candidate = self.profileTabView;
+    UIView *tabBar = self.tabBarView;
     UILongPressGestureRecognizer *recognizer = self.profilePressRecognizer;
-    if (candidate != nil && recognizer != nil && recognizer.view == candidate) {
-        [candidate removeGestureRecognizer:recognizer];
+    if (tabBar != nil && recognizer != nil && recognizer.view == tabBar) {
+        [tabBar removeGestureRecognizer:recognizer];
     }
     self.profilePressRecognizer = nil;
+    self.tabBarView = nil;
     self.profileTabView = nil;
+    self.acceptedProfilePressTarget = nil;
     self.hostWindow = nil;
     self.hostScene = nil;
 }

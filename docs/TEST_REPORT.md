@@ -2,13 +2,31 @@
 
 ## Profile gesture device failure 2026-10-02
 
+Corrected source/fixture use the original bottom-navigation buttons protocol,
+not inner-profile classes. Fixture covers invalid/ambiguous targets and an
+accepted A to replacement B before Began, plus gear/settings and cleanup.
+Recognition is synthetic; physical touches remain NOT RUN. Local 13 package
+and six reference tests PASS; fresh Apple execution pending.
+
 Owner reports FAIL for test2's bottom Profile-tab long press. The prior synthetic
 UIKit PASS established gesture attachment and controller actions only. Its
 manufactured exact Profile/button-container classes did not establish actual
-TikTok runtime compatibility. Production exact-class checks also exclude native
-subclasses. The corrective fixture will omit the assumed TTKTabBar class and
-exercise derived targets, ambiguity and trust rejection. Corrected Apple and
-phone execution remain NOT RUN until separately recorded.
+TikTok runtime compatibility. First corrective source `75f66fe` was withheld
+because class metadata suggests an inner-profile section selector rather than
+the bottom navigation control. Source run 37087006265 PASS; device module run
+37087006261 linked but simulator launch timed out without fixture output.
+No UI assertions ran; rerun cancelled and no IPA packaged.
+
+PASS static original-entry trace, not phone execution: exact TTKTabBar
+registration installs a 0.4-second long press on buttons index four after a
+count >= five and UIView check, with an association duplicate guard and began
+handler. Layout/reload reinstall it; a settings action block calls
+openRootOptionsController. The handler presents an action sheet; the exact
+gear-only screen rendering is not established by this trace. Independent source
+will retain its own requested gear/settings views. Fresh direct PTR_64 parsing
+positively resolves TTKTabBar in MusicallyCore; an earlier partial-name decoder
+result did not reproduce and is withdrawn. Corrected Apple execution, actual
+view containment and physical gesture delivery remain NOT RUN.
 
 ## Profile tab settings replacement 2026-10-02
 

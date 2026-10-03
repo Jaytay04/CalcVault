@@ -2,12 +2,29 @@
 
 ## Profile gesture repair 2026-10-02
 
-Owner test2 result: FAIL. Holding the bottom Profile tab does not open the gear
-screen. Earlier simulator coverage manufactured the exact expected button and
-container classes, missing the real-runtime compatibility gate. Corrective
-source and synthetic subclass/no-assumed-container fixtures are being prepared.
-Existing private packages and host/data identity remain preserved. No corrected
-phone behavior is claimed.
+Corrected replacement uses trusted TTKTabBar.buttons index four, a 0.4-second
+hold and independent gear/settings views. Getter ABI/image guards and captured
+target rechecks reject invalid arrays and mid-hold replacement. Synthetic
+fixture models plain buttons; fresh Apple CI and physical touches are pending.
+
+Owner test2 result: FAIL. Earlier synthetic classes did not establish actual
+bottom-navigation compatibility. The first corrective candidate at `75f66fe`
+was withheld: metadata suggests its Profile base belongs to inner Video/Like/
+Favourite sections, not bottom navigation. Source regressions run 37087006265
+PASS; module run 37087006261 linked, but simulator launch timed out without
+fixture output. Its rerun was cancelled; no test3 IPA was produced.
+
+Read-only original installer trace now establishes exact TTKTabBar registration,
+the bar's buttons collection index four after count >= five, a UIView gate,
+0.4-second hold, duplicate association guard and began-only action. Layout and
+reload invoke the installer; a settings action calls openRootOptionsController.
+Replacement uses that UI protocol with image/ABI checks and fresh target
+selection, not inner-profile class names or screen coordinates. Fresh direct
+chained-pointer parsing positively identifies TTKTabBar in MusicallyCore.
+Earlier partial-name output did not reproduce and is withdrawn, not interpreted
+as a Swift or absence finding. Runtime containment/touch delivery remain unproved.
+Existing private packages and host/data identity are preserved; phone behavior
+is not inferred from synthetic execution.
 
 ## Profile tab settings replacement 2026-10-02
 
