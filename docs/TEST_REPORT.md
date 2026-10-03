@@ -8,6 +8,11 @@ accepted A to replacement B before Began, plus gear/settings and cleanup.
 Recognition is synthetic; physical touches remain NOT RUN. Local 13 package
 and six reference tests PASS; fresh Apple execution pending.
 
+Run 37091128710 PASS at bb32228. Run 37091128699 linked the iPhoneOS module,
+but simulator fixture compilation failed on UIView.setTitle:forState: before
+UI assertions. Corrected the synthetic externalCandidate property to UIButton;
+no production behavior or gate changed. Fresh run required.
+
 Owner reports FAIL for test2's bottom Profile-tab long press. The prior synthetic
 UIKit PASS established gesture attachment and controller actions only. Its
 manufactured exact Profile/button-container classes did not establish actual

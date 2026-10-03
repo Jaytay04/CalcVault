@@ -368,7 +368,7 @@ static void TKPCheckNoOwnedScreen(TKPDevicePanelController *controller,
 @property (nonatomic, copy) NSArray<UIView *> *buttons;
 @property (nonatomic, strong) UIView *targetDescendant;
 @property (nonatomic, strong) TTKProfileTabBaseButton *innerProfileDecoy;
-@property (nonatomic, strong) UIView *externalCandidate;
+@property (nonatomic, strong) UIButton *externalCandidate;
 @end
 
 @implementation TKPProfileSettingsFixtureRootController

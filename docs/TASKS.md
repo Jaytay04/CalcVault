@@ -7,6 +7,11 @@ hold and independent gear/settings views. Getter ABI/image guards and captured
 target rechecks reject invalid arrays and mid-hold replacement. Synthetic
 fixture models plain buttons; fresh Apple CI and physical touches are pending.
 
+Source regressions run 37091128710 PASS at bb32228. Module run 37091128699
+linked but fixture compilation failed because its externalCandidate was typed
+UIView while invoking UIButton.setTitle:forState:. That synthetic property is
+corrected to UIButton; no production code or warning/test gate changed.
+
 Owner test2 result: FAIL. Earlier synthetic classes did not establish actual
 bottom-navigation compatibility. The first corrective candidate at `75f66fe`
 was withheld: metadata suggests its Profile base belongs to inner Video/Like/
