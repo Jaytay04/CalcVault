@@ -2,6 +2,12 @@
 
 ## Profile gesture repair 2026-10-02
 
+Corrected module/UIKit run 37091324940 and source run 37091324817 PASS at
+50a3326e15f468c297428ebfd912250c4b048947. Downloaded independent module
+matches the source-build receipt. Local private test3 assembly and full retained
+member hash/CRC readback PASS. Fingerprint/size remain private; actual phone
+gesture and installation are NOT RUN. Native Vault downloads remain unwired.
+
 Corrected replacement uses trusted TTKTabBar.buttons index four, a 0.4-second
 hold and independent gear/settings views. Getter ABI/image guards and captured
 target rechecks reject invalid arrays and mid-hold replacement. Synthetic

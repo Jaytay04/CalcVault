@@ -2,6 +2,16 @@
 
 ## Profile gesture device failure 2026-10-02
 
+Corrected [module/UIKit run 37091324940](https://github.com/Jaytay04/CalcVault/actions/runs/37091324940)
+and [source run 37091324817](https://github.com/Jaytay04/CalcVault/actions/runs/37091324817)
+PASS at 50a3326e15f468c297428ebfd912250c4b048947. Xcode16.4/16F6,
+SDK18.5; arm64/minimum iOS18 and synthetic iPhone16/iOS18.5. Exact fixture
+PASS marker verified for buttons[4], invalid/ambiguous targets, accepted A to
+replacement B rejection, fresh B opening, gear/settings/toggle/Close/repeat and
+inactive/stale-timer cleanup. Module receipt and downloaded digest match.
+Local private assembly/full retained-member readback PASS; IPA fingerprints and
+size stay private. Actual touches/native arbitration and installation NOT RUN.
+
 Corrected source/fixture use the original bottom-navigation buttons protocol,
 not inner-profile classes. Fixture covers invalid/ambiguous targets and an
 accepted A to replacement B before Began, plus gear/settings and cleanup.
