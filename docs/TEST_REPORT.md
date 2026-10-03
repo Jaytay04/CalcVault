@@ -23,6 +23,20 @@ observer teardown passed. No artifact was uploaded. Fixture correction moves
 the mask assertion to Installed and requires the spoof mask explicitly;
 production source is unchanged. Fresh Apple execution remains required.
 
+Fresh Apple source/UI validation PASS at
+`1a28432806a147ad4b27f1efcf800f6ddba0bcd3`:
+[source run 37106320108](https://github.com/Jaytay04/CalcVault/actions/runs/37106320108),
+[device/UI run 37106320057](https://github.com/Jaytay04/CalcVault/actions/runs/37106320057).
+Xcode16.4, iOS18.5 SDK, iPhone16 simulator. Exact completion marker observed;
+genuine observer admission wf511, reporter-spoof wf95 with zero invocation,
+restoration, observer removal, gear/settings, ambiguity, stale-target and
+lifecycle cleanup, sanitized bounded diagnostics PASS. System-only arm64 iOS18
+module has no test exports and a receipt matching the tested source; no private
+input was used. Local private assembly member readback PASS. Owner-private
+publication completed with all assets uploaded and size/digest verified;
+destination privacy rechecked. Physical long press and phone wrapper identity
+are unverified. No private artifact links or fingerprints are published here.
+
 ## Profile entry subclass rejection 2026-10-02
 
 Owner diagnostic5 report: entry FAIL, base cls_status=9, one reason6 rejection

@@ -21,6 +21,15 @@ observer admission/binding, spoof rejection/restoration, UI flow and removal
 passed. Assert the fresh mask on the existing Installed transition and require
 spoof-mask reporting explicitly. Production guards are unchanged; rerun required.
 
+Fresh tested source `1a28432806a147ad4b27f1efcf800f6ddba0bcd3`: Apple source
+run 37106320108 and device/UI run 37106320057 PASS. Real Foundation observer
+reports wf511; substituted reporter requires wf95 and is never invoked;
+restoration, observer teardown and existing UI/lifecycle bounds pass. Public
+execution used no private inputs. Local private assembly passed complete member
+hash/CRC readback. Owner-private publication completed with asset state, size
+and digest readback; destination privacy reverified. Physical phone entry remains
+unverified. No native Vault downloads added. Private links/fingerprints omitted.
+
 ## Profile entry subclass rejection 2026-10-02
 
 Owner diagnostic5 entry FAIL. Base-class cls_status=9 passes, but a later
