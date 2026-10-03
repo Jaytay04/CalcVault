@@ -309,3 +309,44 @@ baseline. Diagnostic4 installed no independent overlay; diagnostic5 does not
 alter native window frames, safe areas, constraints or banner layout. The older
 add-on had tab-spacing hooks, but their removal is not established as the cause
 of this reported movement.
+
+## Observation wrapper compatibility
+
+The diagnostic6 owner report has `cls_status=9 cs=5 cd=0`, with no installed
+gesture or gear screen. The visible candidate's actual runtime class has no
+image name at the first hop; the statically named base passes. This establishes
+the rejected condition, not a specific wrapper identity. Local loader review
+does not identify the wrapper's creator.
+
+Apple documents that automatic observation substitutes an intermediate runtime
+class and recommends the object's `class` method for membership checks. See
+[Key Value Observing implementation details](https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/KeyValueObserving/Articles/KVOImplementation.html).
+KVO is therefore a hypothesis worth testing, not an established phone diagnosis.
+The next candidate admits only a verified, exact observation-wrapper shape;
+unknown dynamic subclasses remain unsupported. It never treats an unchecked
+`class` response or an inherited getter alone as sufficient provenance.
+
+Version-7 `wf` is a bounded numeric bitmask. The bits describe exact known KVO
+name (1), direct expected superclass (2), equal instance size and no own ivars
+(4), no own `buttons` getter (8), a nonempty bounded own method list (16),
+Foundation implementation ownership for every own method (32), an own `class`
+method with exact Class-return ABI (64), its verified direct implementation
+returning the expected base for this object (128), and accepted compatibility
+(256). A partial mask is not acceptance. The existing `cs`/`cd` fields retain
+their meaning for rejected candidates. The report includes no arbitrary class
+names, paths, addresses or account content. The 24-record/320-byte limits and
+existing discovery schedule remain unchanged.
+
+The wrapper must have a null runtime image name, at most 64 own methods,
+and implementations in the same fixed Foundation image as a verified
+Foundation reference method. The reporter implementation is captured and
+validated before direct invocation; it is not fetched again after validation.
+`wf` records the first derived candidate's partial flags, with an accepted
+wrapper (`511`) taking priority. A valid-value maximum report is 318 ASCII
+bytes within the unchanged 320-byte buffer.
+
+The acceptance branch requires fresh real Foundation observer fixtures,
+foreign and spoofed wrapper rejection, unchanged getter/target/ambiguity checks,
+and lifecycle cleanup. It is conditional compatibility, not a general runtime
+security certification or a confirmed physical gesture fix. Native Vault
+downloads remain unconnected.

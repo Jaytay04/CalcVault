@@ -28,7 +28,7 @@ grep -Eq '^[[:space:]]*minos 18\.0$' "$output/platform.txt"
 xcrun otool -L "$output/TKP.dylib" | tee "$output/dependencies.txt"
 xcrun nm -gU "$output/TKP.dylib" | tee "$output/exports.txt"
 grep -Eq '[[:space:]]_TKPDevicePanelStart$' "$output/exports.txt"
-if grep -Eq '[[:space:]]_TKPTest(ClassImage(Status|PathStatus)|TabBarClassChainStatus)$' "$output/exports.txt"; then
+if grep -Eq '[[:space:]]_TKPTest[^[:space:]]*$' "$output/exports.txt"; then
   echo 'Device module unexpectedly exports a test-only class diagnostic entry.' >&2
   exit 1
 fi
@@ -44,7 +44,7 @@ module = (output / 'TKP.dylib').read_bytes()
 verify_addon(module)
 receipt = {'schema': 1, 'source_commit': os.environ.get('GITHUB_SHA', 'local'),
            'platform': 'iOS', 'architecture': 'arm64', 'minimum_os': '18.0',
-           'scope': 'profile-tab entry diagnostics, gear entry and opt-in local profile eligibility settings',
+           'scope': 'narrow observation-wrapper compatibility, gear entry and opt-in local profile eligibility settings',
            'module_sha256': hashlib.sha256(module).hexdigest(), 'module_bytes': len(module),
            'private_input_used': False, 'device_execution': 'NOT RUN'}
 (output / 'source-build.json').write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n')

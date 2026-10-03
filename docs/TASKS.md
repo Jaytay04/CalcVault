@@ -1,5 +1,20 @@
 # CalcVault task ledger
 
+## Profile entry observation wrapper investigation 2026-10-03
+
+Owner diagnostic6 entry FAIL: base status9 passes, while the visible derived
+class has no image at hop0. No gesture or gear was installed. The record does
+not identify KVO. Investigating narrowly checked Foundation observation-wrapper
+compatibility, keeping arbitrary dynamic subclasses rejected. Local adapter
+checks PASS 13/13. Fresh Apple tests/review and phone verification are pending.
+No private input, screenshots or fingerprints are published here.
+
+Version-7 narrow wrapper path is implemented and independently source-reviewed.
+Real Foundation observer admission, ambiguity, spoof rejection, restoration
+and teardown are required by the fixture. Local PASS: adapter 13/13, reference
+tools 6/6, transfer 16,502 checks, stream reader 67,745 checks, shell syntax
+and 318-byte numeric report bound. Apple execution remains pending.
+
 ## Profile entry subclass rejection 2026-10-02
 
 Owner diagnostic5 entry FAIL. Base-class cls_status=9 passes, but a later

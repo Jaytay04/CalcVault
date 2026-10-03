@@ -101,3 +101,11 @@ status (`cs`) and zero-based superclass-hop depth (`cd`). It does not relax
 image ownership, alter the viewport or claim that Profile hold is repaired.
 See the status map in `docs/tkplus/INDEPENDENT_IMPLEMENTATION.md`. The device
 build rejects exports of the classifier's synthetic-test wrappers.
+
+Diagnostic6 confirms an image-less visible subclass (`cs=5 cd=0`), not the
+mechanism that created it. The `profile-entry-kvo1` candidate adds one narrowly
+checked Foundation observation-wrapper compatibility path and version-7
+numeric wrapper flags (`wf`). It does not generally accept dynamic subclasses.
+Fresh Apple fixture results and physical entry behavior must be checked
+separately; recognizing a genuine synthetic observer does not prove that the
+phone uses that wrapper. Existing layout and lock behavior are unchanged.

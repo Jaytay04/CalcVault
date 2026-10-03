@@ -83,6 +83,33 @@ static NSMutableArray<NSString *> *gEntryDiagnosticLines = nil;
 @implementation TTKTabBar
 @end
 
+static char gTKPFixtureKVOContextStorage;
+static void *TKPFixtureKVOContext = &gTKPFixtureKVOContextStorage;
+static NSUInteger gKVOClassReporterSpoofCalls = 0;
+
+@interface TKPFixtureKVOObserver : NSObject
+@end
+@implementation TKPFixtureKVOObserver
+- (void)observeValueForKeyPath:(NSString *)keyPath
+                      ofObject:(id)object
+                        change:(NSDictionary<NSKeyValueChangeKey, id> *)change
+                       context:(void *)context {
+    (void)object;
+    (void)change;
+    if (context == TKPFixtureKVOContext && [keyPath isEqualToString:@"buttons"]) {
+        return;
+    }
+    [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
+}
+@end
+
+static Class TKPFixtureSpoofedKVOClassReporter(id receiver, SEL selector) {
+    (void)receiver;
+    (void)selector;
+    gKVOClassReporterSpoofCalls += 1;
+    return NSObject.class;
+}
+
 @interface TKPDevicePanelController : NSObject <UIGestureRecognizerDelegate>
 + (instancetype)sharedController;
 @property (nonatomic, strong, nullable, readonly) NSTimer *discoveryTimer;
@@ -129,11 +156,14 @@ static void TKPCheckEntryDiagnostics(void) {
         @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 _-=.,:;[]|"];
     BOOL sanitized = YES;
     for (NSString *line in gEntryDiagnosticLines) {
-        if (![line hasPrefix:@"CVLP_GUEST_GEOMETRY phase=tkp-entry version=6 "] ||
+        if (![line hasPrefix:@"CVLP_GUEST_GEOMETRY phase=tkp-entry version=7 "] ||
             line.length >= 320 ||
             [line rangeOfString:@" cls_status="].location == NSNotFound ||
             [line rangeOfString:@" cs="].location == NSNotFound ||
             [line rangeOfString:@" cd="].location == NSNotFound ||
+            [line rangeOfString:@" wf="].location == NSNotFound ||
+            [line rangeOfString:@"NSKVONotifying"].location != NSNotFound ||
+            [line rangeOfString:@"/System/Library"].location != NSNotFound ||
             [line rangeOfCharacterFromSet:allowed.invertedSet].location != NSNotFound) {
             sanitized = NO;
         }
@@ -587,6 +617,24 @@ static void TKPRunFixtureSuite(TKPProfileSettingsFixtureSceneDelegate *sceneDele
     TTKTabBar *selectedBar = selectedRoot.tabBar;
     NSArray<UIView *> *firstButtons = firstRoot.buttons;
     NSArray<UIView *> *originalButtons = selectedRoot.buttons;
+    TKPFixtureKVOObserver *kvoObserver = [[TKPFixtureKVOObserver alloc] init];
+    BOOL kvoObservationInstalled = NO;
+    @try {
+        [selectedBar addObserver:kvoObserver forKeyPath:@"buttons"
+                         options:NSKeyValueObservingOptionNew
+                         context:TKPFixtureKVOContext];
+        kvoObservationInstalled = YES;
+    } @catch (NSException *exception) {
+        (void)exception;
+    }
+    Class observedKVOClass = object_getClass(selectedBar);
+    const char *observedKVOClassName = class_getName(observedKVOClass);
+    TKPCheck(kvoObservationInstalled && observedKVOClass != Nil &&
+             observedKVOClassName != NULL &&
+             strcmp(observedKVOClassName, "NSKVONotifying_TTKTabBar") == 0 &&
+             class_getImageName(observedKVOClass) == NULL &&
+             class_getSuperclass(observedKVOClass) == TTKTabBar.class,
+             "a real Foundation observer creates the exact image-less KVO tab-bar wrapper");
     NSTimer *staleDiscoveryTimer = controller.discoveryTimer;
     uint64_t staleDiscoveryEpoch = [staleDiscoveryTimer.userInfo unsignedLongLongValue];
 
@@ -624,7 +672,20 @@ static void TKPRunFixtureSuite(TKPProfileSettingsFixtureSceneDelegate *sceneDele
                  @"tkp.guest.profile-controls.gear-button") == nil,
              "launch shows no floating profile-settings control");
 
-    TKPCheck(![controller reconcileVisibleGuestTab] && controller.hostWindow == nil &&
+    NSUInteger kvoDiagnosticStart = gEntryDiagnosticLines.count;
+    BOOL kvoAmbiguousResolution = ![controller reconcileVisibleGuestTab];
+    BOOL kvoAdmissionReported = NO;
+    for (NSUInteger index = kvoDiagnosticStart;
+         index < gEntryDiagnosticLines.count; index += 1) {
+        if ([gEntryDiagnosticLines[index] rangeOfString:@" wf=511"].location !=
+            NSNotFound) {
+            kvoAdmissionReported = YES;
+            break;
+        }
+    }
+    TKPCheck(kvoAmbiguousResolution && kvoAdmissionReported,
+             "the genuine KVO wrapper passes every bounded compatibility gate and reports wf 511");
+    TKPCheck(controller.hostWindow == nil &&
              controller.tabBarView == nil && controller.profileTabView == nil &&
              controller.profilePressRecognizer == nil,
              "two valid bars across visible windows fail closed as ambiguous");
@@ -643,6 +704,54 @@ static void TKPRunFixtureSuite(TKPProfileSettingsFixtureSceneDelegate *sceneDele
              !controller.profilePressRecognizer.delaysTouchesBegan &&
              !controller.profilePressRecognizer.delaysTouchesEnded,
              "one recognizer is attached to the bar at 0.4 seconds with only recognized-touch cancellation");
+
+    Class kvoClass = object_getClass(selectedBar);
+    Method classReporter = NULL;
+    unsigned int kvoMethodCount = 0;
+    Method *kvoMethods = class_copyMethodList(kvoClass, &kvoMethodCount);
+    for (unsigned int index = 0; index < kvoMethodCount; index += 1) {
+        if (method_getName(kvoMethods[index]) == @selector(class)) {
+            classReporter = kvoMethods[index];
+            break;
+        }
+    }
+    free(kvoMethods);
+    IMP trustedClassReporter = classReporter == NULL ? NULL
+        : method_getImplementation(classReporter);
+    BOOL spoofRejectedWithoutCalling = NO;
+    if (classReporter != NULL && trustedClassReporter != NULL) {
+        gKVOClassReporterSpoofCalls = 0;
+        IMP previousImplementation = method_setImplementation(
+            classReporter, (IMP)TKPFixtureSpoofedKVOClassReporter);
+        NSUInteger spoofDiagnosticStart = gEntryDiagnosticLines.count;
+        BOOL spoofResolved = YES;
+        BOOL spoofFlagsReported = NO;
+        @try {
+            spoofResolved = [controller reconcileVisibleGuestTab];
+            for (NSUInteger index = spoofDiagnosticStart;
+                 index < gEntryDiagnosticLines.count; index += 1) {
+                NSString *line = gEntryDiagnosticLines[index];
+                if ([line rangeOfString:@" wf=95"].location != NSNotFound) {
+                    spoofFlagsReported = YES;
+                    break;
+                }
+            }
+        } @finally {
+            (void)method_setImplementation(classReporter, previousImplementation);
+        }
+        spoofRejectedWithoutCalling = !spoofResolved &&
+            gKVOClassReporterSpoofCalls == 0 &&
+            controller.profilePressRecognizer == nil &&
+            (!kvoAdmissionReported || spoofFlagsReported);
+    }
+    TKPCheck(classReporter != NULL && trustedClassReporter != NULL &&
+             spoofRejectedWithoutCalling,
+             "an exact-name KVO wrapper with a replaced class reporter is rejected without invoking it");
+    TKPCheck([controller reconcileVisibleGuestTab] &&
+             controller.tabBarView == selectedBar &&
+             classReporter != NULL &&
+             method_getImplementation(classReporter) == trustedClassReporter,
+             "restoring the Foundation class reporter restores trusted tab-bar discovery");
 
     Class inheritedGetterClass = NSClassFromString(@"TKPFixtureDynamicInheritedGetterTabBar");
     TTKTabBar *inheritedGetterBar = inheritedGetterClass == Nil ? nil
@@ -665,7 +774,7 @@ static void TKPRunFixtureSuite(TKPProfileSettingsFixtureSceneDelegate *sceneDele
          index < gEntryDiagnosticLines.count; index += 1) {
         NSString *line = gEntryDiagnosticLines[index];
         if ([line rangeOfString:@" event=5 reason=6 "].location != NSNotFound &&
-            [line hasSuffix:@" cs=5 cd=0"]) {
+            [line rangeOfString:@" cs=5 cd=0 wf="].location != NSNotFound) {
             inheritedGetterRejectionReported = YES;
             break;
         }
@@ -936,6 +1045,18 @@ static void TKPRunFixtureSuite(TKPProfileSettingsFixtureSceneDelegate *sceneDele
         for (NSUInteger attempt = 0; attempt < 40; attempt++) {
             [controller applicationWillResignActive:nil];
         }
+        BOOL kvoObserverRemoved = !kvoObservationInstalled;
+        if (kvoObservationInstalled) {
+            @try {
+                [selectedBar removeObserver:kvoObserver forKeyPath:@"buttons"
+                                    context:TKPFixtureKVOContext];
+                kvoObserverRemoved = YES;
+            } @catch (NSException *exception) {
+                (void)exception;
+            }
+        }
+        TKPCheck(kvoObserverRemoved && object_getClass(selectedBar) == TTKTabBar.class,
+                 "balanced observer removal restores the original tab-bar class");
         TKPCheckEntryDiagnostics();
         NSUInteger diagnosticCount = gEntryDiagnosticLines.count;
         TKPCheck(diagnosticCount == 24,

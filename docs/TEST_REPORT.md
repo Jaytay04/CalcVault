@@ -1,5 +1,21 @@
 # CalcVault test report
 
+## Profile entry observation wrapper investigation 2026-10-03
+
+Owner diagnostic6: entry FAIL; base cls_status9, visible subclass cs5/cd0,
+installed/touch/gear zero. Missing image is established; KVO is not.
+Apple documents observation's intermediate runtime class in its
+[implementation details](https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/KeyValueObserving/Articles/KVOImplementation.html).
+A narrowly checked compatibility path requires fresh real Foundation observer
+fixtures, spoof/override rejection and independent review. Local adapter checks
+PASS 13/13; new Apple execution and phone repair are NOT RUN at this checkpoint.
+
+Version-7 implementation passes independent source review. Fixture requirements
+include genuine Foundation observation, unknown-wrapper and replaced-reporter
+rejection, ambiguity, restoration and balanced teardown. Local PASS: adapter
+13/13, reference tools 6/6, transfer 16,502 checks, stream reader 67,745 checks,
+shell syntax and 318-byte report bound. Apple runtime evidence is pending.
+
 ## Profile entry subclass rejection 2026-10-02
 
 Owner diagnostic5 report: entry FAIL, base cls_status=9, one reason6 rejection

@@ -27,6 +27,8 @@ static const NSUInteger TKPTabButtonsMaximumCount = 16;
 static const NSUInteger TKPProfileButtonIndex = 4;
 static const char * const TKPTabBarClassName = "TTKTabBar";
 static const char * const TKPTabButtonsGetterName = "buttons";
+static const char * const TKPKVONotifyingTabBarClassName =
+    "NSKVONotifying_TTKTabBar";
 static const char * const TKPLocalOnlyCaveat =
     "Local only: this suppresses two profile-view eligibility checks in this guest. "
     "Other reporting paths may still operate. This does not guarantee anonymous viewing.";
@@ -115,7 +117,21 @@ enum {
     TKPEntryDiagnosticRecordLimit = 24,
     TKPEntryDiagnosticCounterLimit = 9999,
     TKPEntryDiagnosticLineLimit = 320,
-    TKPEntryDiagnosticVersion = 6,
+    TKPEntryDiagnosticVersion = 7,
+};
+
+enum {
+    TKPKVOFlagExactName = 1u << 0,
+    TKPKVOFlagDirectSuperclass = 1u << 1,
+    TKPKVOFlagInstanceLayout = 1u << 2,
+    TKPKVOFlagNoOwnButtonsGetter = 1u << 3,
+    TKPKVOFlagBoundedOwnMethods = 1u << 4,
+    TKPKVOFlagFoundationOwnMethods = 1u << 5,
+    TKPKVOFlagExactClassMethod = 1u << 6,
+    TKPKVOFlagReporterReturnsBase = 1u << 7,
+    TKPKVOFlagAccepted = 1u << 8,
+    TKPKVOFlagRequired = (1u << 7) - 1u,
+    TKPKVOFlagCaptureUnset = 1u << 9,
 };
 
 static _Atomic(uint32_t) gTKPEntryDiagnosticRecordCount = 0;
@@ -123,6 +139,7 @@ static _Atomic(uint32_t) gTKPEntryDiagnosticCounters[TKPEntryCounterCount];
 static _Atomic(uint32_t) gTKPLatestClassImageStatus = TKPClassImageStatusNotEvaluated;
 static _Atomic(uint32_t) gTKPFirstTabBarChainFailureStatus = TKPClassImageStatusNotEvaluated;
 static _Atomic(uint32_t) gTKPFirstTabBarChainFailureDepth = 0;
+static _Atomic(uint32_t) gTKPFirstKVOCompatibilityFlags = TKPKVOFlagCaptureUnset;
 
 static void TKPEntryDiagnosticNote(TKPEntryResolutionDiagnostics *diagnostics,
                                   TKPEntryDiagnosticReason reason);
@@ -139,6 +156,7 @@ static void TKPEntryDiagnosticResetTabBarChainFailure(void);
 static void TKPEntryDiagnosticCaptureFirstTabBarChainFailure(
     TKPClassImageStatus status,
     uint32_t depth);
+static void TKPEntryDiagnosticCaptureFirstKVOCompatibilityFlags(uint32_t flags);
 
 typedef NS_ENUM(NSUInteger, TKPProfileTargetResolution) {
     TKPProfileTargetResolutionUnavailable = 0,
@@ -440,6 +458,11 @@ static void TKPEntryDiagnosticEmit(uint32_t event,
         &gTKPFirstTabBarChainFailureStatus, memory_order_relaxed);
     uint32_t chainFailureDepth = atomic_load_explicit(
         &gTKPFirstTabBarChainFailureDepth, memory_order_relaxed);
+    uint32_t kvoCompatibilityFlags = atomic_load_explicit(
+        &gTKPFirstKVOCompatibilityFlags, memory_order_relaxed);
+    if (kvoCompatibilityFlags == TKPKVOFlagCaptureUnset) {
+        kvoCompatibilityFlags = 0;
+    }
     uint32_t getter = atomic_load_explicit(
         &gTKPEntryDiagnosticCounters[TKPEntryCounterGetter], memory_order_relaxed);
     uint32_t view = atomic_load_explicit(
@@ -469,11 +492,12 @@ static void TKPEntryDiagnosticEmit(uint32_t event,
 
     char lineBuffer[TKPEntryDiagnosticLineLimit];
     int lineLength = snprintf(lineBuffer, sizeof(lineBuffer),
-        "CVLP_GUEST_GEOMETRY phase=tkp-entry version=%u event=%u reason=%u ticks=%u image=%u class=%u cls_status=%u getter=%u view=%u array=%u no_bar=%u ambiguous=%u bounds=%u installed=%u touch_ok=%u touch_reject=%u context_reject=%u gear=%u inactive_retry=%u lifecycle=%u cs=%u cd=%u",
+        "CVLP_GUEST_GEOMETRY phase=tkp-entry version=%u event=%u reason=%u ticks=%u image=%u class=%u cls_status=%u getter=%u view=%u array=%u no_bar=%u ambiguous=%u bounds=%u installed=%u touch_ok=%u touch_reject=%u context_reject=%u gear=%u inactive_retry=%u lifecycle=%u cs=%u cd=%u wf=%u",
         TKPEntryDiagnosticVersion, event, (uint32_t)reason, ticks, image,
         classCount, classImageStatus, getter, view, array, noBar, ambiguous, bounds, installed,
         touchAccepted, touchRejected, contextRejected, gearDrawn, inactiveRetry,
-        lifecycleCleanup, chainFailureStatus, chainFailureDepth);
+        lifecycleCleanup, chainFailureStatus, chainFailureDepth,
+        kvoCompatibilityFlags);
     if (lineLength <= 0 || (size_t)lineLength >= sizeof(lineBuffer)) {
         return;
     }
@@ -625,10 +649,278 @@ static BOOL TKPTabBarClassChainMatchesTrustedGuestWithFailure(
     return NO;
 }
 
+static BOOL TKPMethodHasExactReturnNoArgumentSignature(Method method,
+                                                       const char *expectedReturnType) {
+    if (method == NULL || expectedReturnType == NULL ||
+        method_getNumberOfArguments(method) != 2) {
+        return NO;
+    }
+    char *returnType = method_copyReturnType(method);
+    char *selfType = method_copyArgumentType(method, 0);
+    char *selectorType = method_copyArgumentType(method, 1);
+    BOOL matches = returnType != NULL && strcmp(returnType, expectedReturnType) == 0 &&
+        selfType != NULL && strcmp(selfType, "@") == 0 &&
+        selectorType != NULL && strcmp(selectorType, ":") == 0;
+    free(returnType);
+    free(selfType);
+    free(selectorType);
+    return matches;
+}
+
+static BOOL TKPIsFixedFoundationImagePath(const char *path) {
+    static const char FoundationImageSuffix[] =
+        "/System/Library/Frameworks/Foundation.framework/Foundation";
+    if (path == NULL) {
+        return NO;
+    }
+#if defined(TKP_DEVICE_PANEL_TESTING)
+    size_t pathLength = strlen(path);
+    size_t suffixLength = sizeof(FoundationImageSuffix) - 1;
+    // Simulator dyld paths include the runtime root before this fixed system path.
+    return pathLength >= suffixLength &&
+        strcmp(path + pathLength - suffixLength, FoundationImageSuffix) == 0;
+#else
+    return strcmp(path, FoundationImageSuffix) == 0;
+#endif
+}
+
+static BOOL TKPTrustedFoundationReferenceImage(Dl_info *imageInfoOut) {
+    if (imageInfoOut != NULL) {
+        memset(imageInfoOut, 0, sizeof(*imageInfoOut));
+    }
+    Class notificationCenterMetaclass = object_getClass(NSNotificationCenter.class);
+    if (notificationCenterMetaclass == Nil ||
+        !class_isMetaClass(notificationCenterMetaclass)) {
+        return NO;
+    }
+
+    SEL selector = sel_registerName("defaultCenter");
+    unsigned int methodCount = 0;
+    Method *methods = class_copyMethodList(notificationCenterMetaclass, &methodCount);
+    if ((methods == NULL && methodCount != 0) ||
+        methodCount > TKPClassMethodCountLimit) {
+        free(methods);
+        return NO;
+    }
+    Method referenceMethod = NULL;
+    BOOL duplicateMethod = NO;
+    for (unsigned int index = 0; index < methodCount; index += 1) {
+        if (method_getName(methods[index]) == selector) {
+            if (referenceMethod != NULL) {
+                duplicateMethod = YES;
+                break;
+            }
+            referenceMethod = methods[index];
+        }
+    }
+    free(methods);
+    if (duplicateMethod || referenceMethod == NULL ||
+        !TKPMethodHasExactReturnNoArgumentSignature(referenceMethod, "@")) {
+        return NO;
+    }
+
+    IMP referenceImplementation = method_getImplementation(referenceMethod);
+    Dl_info referenceImage = {0};
+    if (referenceImplementation == NULL ||
+        dladdr((const void *)(uintptr_t)referenceImplementation, &referenceImage) == 0 ||
+        referenceImage.dli_fbase == NULL ||
+        !TKPIsFixedFoundationImagePath(referenceImage.dli_fname)) {
+        return NO;
+    }
+    if (imageInfoOut != NULL) {
+        *imageInfoOut = referenceImage;
+    }
+    return YES;
+}
+
+static BOOL TKPImplementationMatchesTrustedFoundation(IMP implementation,
+                                                       const Dl_info *referenceImage) {
+    if (implementation == NULL || referenceImage == NULL ||
+        referenceImage->dli_fbase == NULL) {
+        return NO;
+    }
+    Dl_info implementationImage = {0};
+    return dladdr((const void *)(uintptr_t)implementation, &implementationImage) != 0 &&
+        implementationImage.dli_fbase == referenceImage->dli_fbase &&
+        TKPIsFixedFoundationImagePath(implementationImage.dli_fname);
+}
+
+static BOOL TKPVerifiedKVOCompatibilityForTabBar(UIView *tabBar,
+                                                 Class tabBarBaseClass,
+                                                 NSURL *trustedImageURL,
+                                                 uint32_t *flagsOut) {
+    uint32_t flags = 0;
+    if (flagsOut != NULL) {
+        *flagsOut = 0;
+    }
+    if (tabBar == nil || tabBarBaseClass == Nil) {
+        return NO;
+    }
+
+    Class actualClass = object_getClass(tabBar);
+    if (actualClass == Nil || class_isMetaClass(actualClass)) {
+        return NO;
+    }
+    const char *className = class_getName(actualClass);
+    if (className != NULL && strcmp(className, TKPKVONotifyingTabBarClassName) == 0) {
+        flags |= TKPKVOFlagExactName;
+    }
+    if (class_getSuperclass(actualClass) == tabBarBaseClass) {
+        flags |= TKPKVOFlagDirectSuperclass;
+    }
+    const char *actualImage = class_getImageName(actualClass);
+    if ((flags & (TKPKVOFlagExactName | TKPKVOFlagDirectSuperclass)) !=
+            (TKPKVOFlagExactName | TKPKVOFlagDirectSuperclass) ||
+        !TKPClassImageMatchesTrustedGuest(tabBarBaseClass, trustedImageURL) ||
+        !TKPClassIsSubclassOfClass(actualClass, UIView.class) ||
+        actualImage != NULL) {
+        if (flagsOut != NULL) {
+            *flagsOut = flags;
+        }
+        return NO;
+    }
+
+    unsigned int ivarCount = 0;
+    Ivar *ivars = class_copyIvarList(actualClass, &ivarCount);
+    free(ivars);
+    if (class_getInstanceSize(actualClass) == class_getInstanceSize(tabBarBaseClass) &&
+        ivarCount == 0) {
+        flags |= TKPKVOFlagInstanceLayout;
+    }
+
+    unsigned int methodCount = 0;
+    Method *methods = class_copyMethodList(actualClass, &methodCount);
+    BOOL methodsBounded = methods != NULL && methodCount > 0 && methodCount <= 64;
+    if (methodsBounded) {
+        flags |= TKPKVOFlagBoundedOwnMethods;
+    }
+    BOOL ownsButtonsGetter = NO;
+    Method classReporterMethod = NULL;
+    IMP classReporterImplementation = NULL;
+    BOOL duplicateClassReporter = NO;
+    IMP ownImplementations[64] = {0};
+    SEL buttonsSelector = sel_registerName(TKPTabButtonsGetterName);
+    SEL classSelector = sel_registerName("class");
+    if (methodsBounded) {
+        for (unsigned int index = 0; index < methodCount; index += 1) {
+            ownImplementations[index] = method_getImplementation(methods[index]);
+            SEL selector = method_getName(methods[index]);
+            if (selector == buttonsSelector) {
+                ownsButtonsGetter = YES;
+            } else if (selector == classSelector) {
+                if (classReporterMethod != NULL) {
+                    duplicateClassReporter = YES;
+                } else {
+                    classReporterMethod = methods[index];
+                    classReporterImplementation = ownImplementations[index];
+                }
+            }
+        }
+    }
+    if (methodsBounded && !ownsButtonsGetter) {
+        flags |= TKPKVOFlagNoOwnButtonsGetter;
+    }
+
+    Dl_info trustedFoundationImage = {0};
+    BOOL allOwnMethodsUseFoundation = methodsBounded &&
+        TKPTrustedFoundationReferenceImage(&trustedFoundationImage);
+    if (allOwnMethodsUseFoundation) {
+        for (unsigned int index = 0; index < methodCount; index += 1) {
+            if (!TKPImplementationMatchesTrustedFoundation(
+                    ownImplementations[index], &trustedFoundationImage)) {
+                allOwnMethodsUseFoundation = NO;
+                break;
+            }
+        }
+    }
+    if (allOwnMethodsUseFoundation) {
+        flags |= TKPKVOFlagFoundationOwnMethods;
+    }
+    BOOL exactClassReporter = !duplicateClassReporter && classReporterMethod != NULL &&
+        classReporterImplementation != NULL &&
+        TKPMethodHasExactReturnNoArgumentSignature(classReporterMethod, "#");
+    if (exactClassReporter) {
+        flags |= TKPKVOFlagExactClassMethod;
+    }
+
+    BOOL accepted = NO;
+    if ((flags & TKPKVOFlagRequired) == TKPKVOFlagRequired) {
+        typedef Class (*TKPKVOClassReporter)(id, SEL);
+        Class reportedClass = Nil;
+        @try {
+            reportedClass = ((TKPKVOClassReporter)classReporterImplementation)(
+                tabBar, classSelector);
+        } @catch (NSException *exception) {
+            (void)exception;
+            reportedClass = Nil;
+        }
+        if (reportedClass == tabBarBaseClass && object_getClass(tabBar) == actualClass) {
+            flags |= TKPKVOFlagReporterReturnsBase;
+            accepted = YES;
+        }
+    }
+    if (accepted) {
+        flags |= TKPKVOFlagAccepted;
+    }
+    free(methods);
+    if (flagsOut != NULL) {
+        *flagsOut = flags;
+    }
+    return accepted;
+}
+
+static BOOL TKPTabBarInstanceMatchesTrustedGuest(UIView *tabBar,
+                                                 Class actualClass,
+                                                 Class tabBarBaseClass,
+                                                 NSURL *trustedImageURL,
+                                                 uint32_t *kvoFlagsOut) {
+    if (kvoFlagsOut != NULL) {
+        *kvoFlagsOut = 0;
+    }
+    if (tabBar == nil || actualClass == Nil ||
+        object_getClass(tabBar) != actualClass) {
+        return NO;
+    }
+    if (TKPTabBarClassChainMatchesTrustedGuest(actualClass, tabBarBaseClass,
+                                               trustedImageURL)) {
+        return YES;
+    }
+    if (actualClass == tabBarBaseClass ||
+        !TKPClassIsSubclassOfClass(actualClass, tabBarBaseClass)) {
+        return NO;
+    }
+    uint32_t kvoFlags = 0;
+    BOOL accepted = TKPVerifiedKVOCompatibilityForTabBar(
+        tabBar, tabBarBaseClass, trustedImageURL, &kvoFlags);
+    if (kvoFlagsOut != NULL) {
+        *kvoFlagsOut = kvoFlags;
+    }
+    return accepted;
+}
+
 static void TKPEntryDiagnosticResetTabBarChainFailure(void) {
     atomic_store_explicit(&gTKPFirstTabBarChainFailureStatus,
                           TKPClassImageStatusNotEvaluated, memory_order_relaxed);
     atomic_store_explicit(&gTKPFirstTabBarChainFailureDepth, 0, memory_order_relaxed);
+}
+
+static void TKPEntryDiagnosticResetKVOCompatibilityFlags(void) {
+    atomic_store_explicit(&gTKPFirstKVOCompatibilityFlags,
+                          TKPKVOFlagCaptureUnset, memory_order_relaxed);
+}
+
+static void TKPEntryDiagnosticCaptureFirstKVOCompatibilityFlags(uint32_t flags) {
+    if ((flags & (TKPKVOFlagRequired | TKPKVOFlagReporterReturnsBase |
+                  TKPKVOFlagAccepted)) ==
+        (TKPKVOFlagRequired | TKPKVOFlagReporterReturnsBase | TKPKVOFlagAccepted)) {
+        atomic_store_explicit(&gTKPFirstKVOCompatibilityFlags, flags,
+                              memory_order_relaxed);
+        return;
+    }
+    uint32_t expected = TKPKVOFlagCaptureUnset;
+    (void)atomic_compare_exchange_strong_explicit(
+        &gTKPFirstKVOCompatibilityFlags, &expected, flags,
+        memory_order_relaxed, memory_order_relaxed);
 }
 
 static void TKPEntryDiagnosticCaptureFirstTabBarChainFailure(
@@ -682,15 +974,16 @@ static BOOL TKPMethodHasExactNoArgumentObjectSignature(Method method) {
     return matches;
 }
 
-static BOOL TKPFindTrustedTabButtonsGetter(Class actualClass,
+static BOOL TKPFindTrustedTabButtonsGetter(UIView *tabBar,
+                                           Class actualClass,
                                            Class tabBarBaseClass,
                                            NSURL *trustedImageURL,
                                            IMP *implementationOut) {
     if (implementationOut != NULL) {
         *implementationOut = NULL;
     }
-    if (!TKPTabBarClassChainMatchesTrustedGuest(actualClass, tabBarBaseClass,
-                                                trustedImageURL)) {
+    if (!TKPTabBarInstanceMatchesTrustedGuest(tabBar, actualClass, tabBarBaseClass,
+                                              trustedImageURL, NULL)) {
         return NO;
     }
 
@@ -779,7 +1072,7 @@ static BOOL TKPResolveButtonsProfileTarget(UIView *tabBar,
 
     IMP getterImplementation = NULL;
     Class actualClass = object_getClass(tabBar);
-    if (!TKPFindTrustedTabButtonsGetter(actualClass, tabBarBaseClass,
+    if (!TKPFindTrustedTabButtonsGetter(tabBar, actualClass, tabBarBaseClass,
                                         trustedImageURL, &getterImplementation)) {
         TKPEntryDiagnosticNote(diagnostics, TKPEntryReasonGetterRejected);
         return NO;
@@ -857,9 +1150,20 @@ static void TKPScanTabBars(UIView *view, NSUInteger depth, TKPTabBarScan *scan) 
     Class actualClass = object_getClass(view);
     TKPClassImageStatus chainFailureStatus = TKPClassImageStatusNotEvaluated;
     uint32_t chainFailureDepth = 0;
-    if (TKPTabBarClassChainMatchesTrustedGuestWithFailure(
-            actualClass, scan->tabBarBaseClass, scan->trustedImageURL,
-            &chainFailureStatus, &chainFailureDepth)) {
+    BOOL trustedChain = TKPTabBarClassChainMatchesTrustedGuestWithFailure(
+        actualClass, scan->tabBarBaseClass, scan->trustedImageURL,
+        &chainFailureStatus, &chainFailureDepth);
+    uint32_t kvoFlags = 0;
+    BOOL trustedTabBar = trustedChain;
+    if (actualClass != scan->tabBarBaseClass &&
+        TKPClassIsSubclassOfClass(actualClass, scan->tabBarBaseClass)) {
+        if (!trustedChain) {
+            trustedTabBar = TKPVerifiedKVOCompatibilityForTabBar(
+                view, scan->tabBarBaseClass, scan->trustedImageURL, &kvoFlags);
+        }
+        TKPEntryDiagnosticCaptureFirstKVOCompatibilityFlags(kvoFlags);
+    }
+    if (trustedTabBar) {
         if (++*scan->discoveredTabBarCount > TKPTabBarCandidateCountLimit) {
             scan->boundsExceeded = YES;
             return;
@@ -902,6 +1206,7 @@ static TKPProfileTargetResolution
 TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow **windowOut,
                               TKPEntryResolutionDiagnostics *diagnostics) {
     TKPEntryDiagnosticResetTabBarChainFailure();
+    TKPEntryDiagnosticResetKVOCompatibilityFlags();
     if (tabBarOut != NULL) {
         *tabBarOut = nil;
     }
@@ -1158,6 +1463,7 @@ TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow *
 - (BOOL)reconcileVisibleGuestTab {
     NSAssert([NSThread isMainThread], @"Guest tab discovery must run on the main thread.");
     TKPEntryDiagnosticResetTabBarChainFailure();
+    TKPEntryDiagnosticResetKVOCompatibilityFlags();
     if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive) {
         [self detachProfileGestureAndOverlay];
         TKPEntryDiagnosticIncrement(TKPEntryCounterInactiveRetry, 1);
