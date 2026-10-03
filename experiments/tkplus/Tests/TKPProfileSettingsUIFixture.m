@@ -12,6 +12,21 @@
 
 #import "TKPProfileControls.h"
 
+static NSMutableArray<NSString *> *gEntryDiagnosticLines = nil;
+
+// The fixture owns this stand-in; it never writes files or calls the host.
+@interface CVLPProbe : NSObject
++ (void)recordGuestDiagnostic:(NSString *)line;
+@end
+@implementation CVLPProbe
++ (void)recordGuestDiagnostic:(NSString *)line {
+    if (gEntryDiagnosticLines == nil) {
+        gEntryDiagnosticLines = [NSMutableArray array];
+    }
+    [gEntryDiagnosticLines addObject:[line copy]];
+}
+@end
+
 @interface TTKProfileViewsVisitor : NSObject
 @property (nonatomic) NSUInteger profileGetterCalls;
 @property (nonatomic) NSUInteger userGetterCalls;
@@ -75,6 +90,8 @@ extern void TKPDevicePanelStart(void);
 
 static NSUInteger gFailures = 0;
 
+static void TKPCheckEntryDiagnostics(void);
+
 static void TKPCheck(BOOL condition, const char *description) {
     if (!condition) {
         gFailures += 1;
@@ -82,6 +99,22 @@ static void TKPCheck(BOOL condition, const char *description) {
         return;
     }
     fprintf(stdout, "PASS: %s\n", description);
+}
+
+static void TKPCheckEntryDiagnostics(void) {
+    TKPCheck(gEntryDiagnosticLines.count > 0 && gEntryDiagnosticLines.count <= 24,
+             "entry diagnostics reach the fixture sink within the 24-record limit");
+    NSCharacterSet *allowed = [NSCharacterSet characterSetWithCharactersInString:
+        @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 _-=.,:;[]|"];
+    BOOL sanitized = YES;
+    for (NSString *line in gEntryDiagnosticLines) {
+        if (![line hasPrefix:@"CVLP_GUEST_GEOMETRY phase=tkp-entry version=4 "] ||
+            line.length > 2048 ||
+            [line rangeOfCharacterFromSet:allowed.invertedSet].location != NSNotFound) {
+            sanitized = NO;
+        }
+    }
+    TKPCheck(sanitized, "entry diagnostics contain only the fixed marker and sanitized status fields");
 }
 
 static NSArray<UIView *> *gForeignBarButtons = nil;
@@ -735,6 +768,20 @@ static void TKPRunFixtureSuite(TKPProfileSettingsFixtureSceneDelegate *sceneDele
                  selectedWindow.rootViewController == selectedRoot &&
                  firstWindow.rootViewController == firstRoot,
                  "activation leaves both native windows and roots intact");
+        for (NSUInteger attempt = 0; attempt < 40; attempt++) {
+            [controller applicationWillResignActive:nil];
+        }
+        TKPCheckEntryDiagnostics();
+        NSUInteger diagnosticCount = gEntryDiagnosticLines.count;
+        TKPCheck(diagnosticCount == 24,
+                 "repeated synthetic lifecycle events exhaust the 24-record diagnostic budget");
+        for (NSUInteger attempt = 0; attempt < 40; attempt++) {
+            [controller applicationWillResignActive:nil];
+        }
+        TKPCheck(gEntryDiagnosticLines.count == diagnosticCount,
+                 "entry diagnostic delivery stops at its process budget without delaying cleanup");
+        TKPCheck(controller.ownedScreenView == nil && controller.profilePressRecognizer == nil,
+                 "diagnostic budget exhaustion does not prevent lifecycle cleanup");
         TKPFinishFixture();
     });
 }

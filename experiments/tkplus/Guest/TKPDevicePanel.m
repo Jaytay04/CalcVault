@@ -6,6 +6,7 @@
 #import <objc/runtime.h>
 #import <stdatomic.h>
 #import <stdint.h>
+#import <stdio.h>
 #import <stdlib.h>
 #import <string.h>
 
@@ -35,6 +36,83 @@ static TKPProfileControlsStatus gLastProfileControlsStatus =
     TKPProfileControlsStatusNotInstalled;
 
 static NSURL *TKPTrustedGuestImageURL(void);
+
+typedef enum {
+    TKPEntryReasonNone = 0,
+    TKPEntryReasonModuleConstructor = 1,
+    TKPEntryReasonStartRequested = 2,
+    TKPEntryReasonStartDispatched = 3,
+    TKPEntryReasonInactive = 4,
+    TKPEntryReasonImageRejected = 5,
+    TKPEntryReasonClassRejected = 6,
+    TKPEntryReasonGetterRejected = 7,
+    TKPEntryReasonViewRejected = 8,
+    TKPEntryReasonArrayRejected = 9,
+    TKPEntryReasonNoBar = 10,
+    TKPEntryReasonAmbiguous = 11,
+    TKPEntryReasonBounds = 12,
+    TKPEntryReasonInstalled = 13,
+    TKPEntryReasonTouchAccepted = 14,
+    TKPEntryReasonTouchRejected = 15,
+    TKPEntryReasonContextRejected = 16,
+    TKPEntryReasonDeadline = 17,
+    TKPEntryReasonLifecycleCleanup = 18,
+    TKPEntryReasonGearDrawn = 19,
+} TKPEntryDiagnosticReason;
+
+typedef enum {
+    TKPEntryCounterImage = 0,
+    TKPEntryCounterClass,
+    TKPEntryCounterGetter,
+    TKPEntryCounterView,
+    TKPEntryCounterArray,
+    TKPEntryCounterNoBar,
+    TKPEntryCounterAmbiguous,
+    TKPEntryCounterBounds,
+    TKPEntryCounterInstalled,
+    TKPEntryCounterTouchAccepted,
+    TKPEntryCounterTouchRejected,
+    TKPEntryCounterContextRejected,
+    TKPEntryCounterGearDrawn,
+    TKPEntryCounterInactiveRetry,
+    TKPEntryCounterLifecycleCleanup,
+    TKPEntryCounterCount,
+} TKPEntryDiagnosticCounter;
+
+typedef enum {
+    TKPEntryEventConstructor = 1,
+    TKPEntryEventStartRequested = 2,
+    TKPEntryEventStartDispatched = 3,
+    TKPEntryEventDiscoveryBegin = 4,
+    TKPEntryEventDiscoveryChange = 5,
+    TKPEntryEventTickMilestone = 6,
+    TKPEntryEventDeadline = 7,
+    TKPEntryEventLifecycleCleanup = 8,
+    TKPEntryEventTouchResult = 9,
+    TKPEntryEventBeganResult = 10,
+    TKPEntryEventGearDrawn = 11,
+} TKPEntryDiagnosticEvent;
+
+typedef struct {
+    TKPEntryDiagnosticReason reason;
+    uint32_t counters[TKPEntryCounterCount];
+} TKPEntryResolutionDiagnostics;
+
+enum {
+    TKPEntryDiagnosticRecordLimit = 24,
+    TKPEntryDiagnosticCounterLimit = 9999,
+    TKPEntryDiagnosticLineLimit = 320,
+    TKPEntryDiagnosticVersion = 4,
+};
+
+static _Atomic(uint32_t) gTKPEntryDiagnosticRecordCount = 0;
+static _Atomic(uint32_t) gTKPEntryDiagnosticCounters[TKPEntryCounterCount];
+
+static void TKPEntryDiagnosticNote(TKPEntryResolutionDiagnostics *diagnostics,
+                                  TKPEntryDiagnosticReason reason);
+static void TKPEntryDiagnosticEmit(uint32_t event,
+                                   TKPEntryDiagnosticReason reason,
+                                   uint32_t ticks);
 
 typedef NS_ENUM(NSUInteger, TKPProfileTargetResolution) {
     TKPProfileTargetResolutionUnavailable = 0,
@@ -105,6 +183,282 @@ static BOOL TKPClassIsSubclassOfClass(Class candidate, Class ancestorClass) {
 
 static BOOL TKPCanonicalPath(const char *path, char output[PATH_MAX]) {
     return path != NULL && path[0] != '\0' && realpath(path, output) != NULL;
+}
+
+static BOOL TKPDiagnosticTrustedSinkPath(char output[PATH_MAX]) {
+    Dl_info panelImage = {0};
+    if (dladdr((const void *)(uintptr_t)TKPDevicePanelStart, &panelImage) == 0 ||
+        panelImage.dli_fname == NULL) {
+        return NO;
+    }
+
+    char canonicalPanelPath[PATH_MAX];
+    if (!TKPCanonicalPath(panelImage.dli_fname, canonicalPanelPath)) {
+        return NO;
+    }
+
+#if defined(TKP_DEVICE_PANEL_TESTING)
+    // The fixture links this source and its sink into the test executable.
+    memcpy(output, canonicalPanelPath, strlen(canonicalPanelPath) + 1);
+    return YES;
+#else
+    if (strcmp(strrchr(canonicalPanelPath, '/') != NULL
+                   ? strrchr(canonicalPanelPath, '/') + 1 : "",
+               "TKP.dylib") != 0) {
+        return NO;
+    }
+
+    char hostApplicationPath[PATH_MAX];
+    memcpy(hostApplicationPath, canonicalPanelPath, strlen(canonicalPanelPath) + 1);
+    for (NSUInteger parentIndex = 0; parentIndex < 4; parentIndex += 1) {
+        char *lastSeparator = strrchr(hostApplicationPath, '/');
+        if (lastSeparator == NULL || lastSeparator == hostApplicationPath) {
+            return NO;
+        }
+        *lastSeparator = '\0';
+    }
+
+    const char *applicationName = strrchr(hostApplicationPath, '/');
+    applicationName = applicationName == NULL ? hostApplicationPath : applicationName + 1;
+    size_t applicationNameLength = strlen(applicationName);
+    if (applicationNameLength <= 4 ||
+        strcmp(applicationName + applicationNameLength - 4, ".app") != 0) {
+        return NO;
+    }
+
+    char sinkPath[PATH_MAX];
+    int written = snprintf(sinkPath, sizeof(sinkPath),
+        "%s/Frameworks/LiveContainerShared.framework/LiveContainerShared",
+        hostApplicationPath);
+    if (written <= 0 || (size_t)written >= sizeof(sinkPath)) {
+        return NO;
+    }
+    return TKPCanonicalPath(sinkPath, output);
+#endif
+}
+
+static BOOL TKPDiagnosticSinkMethodMatches(Class sinkClass,
+                                           const char *trustedSinkPath,
+                                           IMP *implementationOut) {
+    if (implementationOut != NULL) {
+        *implementationOut = NULL;
+    }
+    if (sinkClass == Nil || class_isMetaClass(sinkClass) || trustedSinkPath == NULL) {
+        return NO;
+    }
+
+    const char *sinkClassImage = class_getImageName(sinkClass);
+    char canonicalClassImage[PATH_MAX];
+    if (!TKPCanonicalPath(sinkClassImage, canonicalClassImage) ||
+        strcmp(canonicalClassImage, trustedSinkPath) != 0) {
+        return NO;
+    }
+
+    Class sinkMetaclass = object_getClass(sinkClass);
+    if (sinkMetaclass == Nil || !class_isMetaClass(sinkMetaclass)) {
+        return NO;
+    }
+
+    SEL sinkSelector = sel_registerName("recordGuestDiagnostic:");
+    unsigned int methodCount = 0;
+    Method *methods = class_copyMethodList(sinkMetaclass, &methodCount);
+    if (methods == NULL || methodCount > TKPClassMethodCountLimit) {
+        free(methods);
+        return NO;
+    }
+
+    Method sinkMethod = NULL;
+    BOOL duplicateMethod = NO;
+    for (unsigned int index = 0; index < methodCount; index += 1) {
+        if (method_getName(methods[index]) == sinkSelector) {
+            if (sinkMethod != NULL) {
+                duplicateMethod = YES;
+                break;
+            }
+            sinkMethod = methods[index];
+        }
+    }
+    free(methods);
+    if (duplicateMethod || sinkMethod == NULL ||
+        method_getNumberOfArguments(sinkMethod) != 3) {
+        return NO;
+    }
+
+    char *returnType = method_copyReturnType(sinkMethod);
+    char *selfType = method_copyArgumentType(sinkMethod, 0);
+    char *selectorType = method_copyArgumentType(sinkMethod, 1);
+    char *lineType = method_copyArgumentType(sinkMethod, 2);
+    BOOL signatureMatches = returnType != NULL && strcmp(returnType, "v") == 0 &&
+        selfType != NULL && strcmp(selfType, "@") == 0 &&
+        selectorType != NULL && strcmp(selectorType, ":") == 0 &&
+        lineType != NULL && strcmp(lineType, "@") == 0;
+    free(returnType);
+    free(selfType);
+    free(selectorType);
+    free(lineType);
+    if (!signatureMatches) {
+        return NO;
+    }
+
+    IMP implementation = method_getImplementation(sinkMethod);
+    Dl_info implementationImage = {0};
+    char canonicalImplementationImage[PATH_MAX];
+    if (implementation == NULL ||
+        dladdr((const void *)(uintptr_t)implementation, &implementationImage) == 0 ||
+        !TKPCanonicalPath(implementationImage.dli_fname,
+                          canonicalImplementationImage) ||
+        strcmp(canonicalImplementationImage, trustedSinkPath) != 0) {
+        return NO;
+    }
+    if (implementationOut != NULL) {
+        *implementationOut = implementation;
+    }
+    return YES;
+}
+
+static uint32_t TKPDiagnosticSaturatedAdd(uint32_t current, uint32_t increment) {
+    if (current >= TKPEntryDiagnosticCounterLimit ||
+        increment >= TKPEntryDiagnosticCounterLimit - current) {
+        return TKPEntryDiagnosticCounterLimit;
+    }
+    return current + increment;
+}
+
+static void TKPEntryDiagnosticIncrement(TKPEntryDiagnosticCounter counter,
+                                        uint32_t increment) {
+    if (counter >= TKPEntryDiagnosticCounterCount || increment == 0) {
+        return;
+    }
+    uint32_t current = atomic_load_explicit(&gTKPEntryDiagnosticCounters[counter],
+                                           memory_order_relaxed);
+    for (;;) {
+        uint32_t desired = TKPDiagnosticSaturatedAdd(current, increment);
+        if (atomic_compare_exchange_weak_explicit(
+                &gTKPEntryDiagnosticCounters[counter], &current, desired,
+                memory_order_relaxed, memory_order_relaxed)) {
+            return;
+        }
+    }
+}
+
+static void TKPEntryDiagnosticNote(TKPEntryResolutionDiagnostics *diagnostics,
+                                  TKPEntryDiagnosticReason reason) {
+    if (diagnostics == NULL) {
+        return;
+    }
+    diagnostics->reason = reason;
+    TKPEntryDiagnosticCounter counter;
+    switch (reason) {
+        case TKPEntryReasonImageRejected: counter = TKPEntryCounterImage; break;
+        case TKPEntryReasonClassRejected: counter = TKPEntryCounterClass; break;
+        case TKPEntryReasonGetterRejected: counter = TKPEntryCounterGetter; break;
+        case TKPEntryReasonViewRejected: counter = TKPEntryCounterView; break;
+        case TKPEntryReasonArrayRejected: counter = TKPEntryCounterArray; break;
+        case TKPEntryReasonNoBar: counter = TKPEntryCounterNoBar; break;
+        case TKPEntryReasonAmbiguous: counter = TKPEntryCounterAmbiguous; break;
+        case TKPEntryReasonBounds: counter = TKPEntryCounterBounds; break;
+        default: return;
+    }
+    diagnostics->counters[counter] = TKPDiagnosticSaturatedAdd(
+        diagnostics->counters[counter], 1);
+}
+
+static void TKPEntryDiagnosticMerge(const TKPEntryResolutionDiagnostics *diagnostics) {
+    if (diagnostics == NULL) {
+        return;
+    }
+    for (NSUInteger index = 0; index < TKPEntryDiagnosticCounterCount; index += 1) {
+        TKPEntryDiagnosticIncrement((TKPEntryDiagnosticCounter)index,
+                                    diagnostics->counters[index]);
+    }
+}
+
+static BOOL TKPDiagnosticReserveRecord(void) {
+    uint32_t current = atomic_load_explicit(&gTKPEntryDiagnosticRecordCount,
+                                           memory_order_relaxed);
+    while (current < TKPEntryDiagnosticRecordLimit) {
+        if (atomic_compare_exchange_weak_explicit(
+                &gTKPEntryDiagnosticRecordCount, &current, current + 1,
+                memory_order_relaxed, memory_order_relaxed)) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+static void TKPEntryDiagnosticEmit(uint32_t event,
+                                   TKPEntryDiagnosticReason reason,
+                                   uint32_t ticks) {
+    if (atomic_load_explicit(&gTKPEntryDiagnosticRecordCount,
+                             memory_order_relaxed) >= TKPEntryDiagnosticRecordLimit) {
+        return;
+    }
+    char trustedSinkPath[PATH_MAX];
+    if (!TKPDiagnosticTrustedSinkPath(trustedSinkPath)) {
+        return;
+    }
+    Class sinkClass = objc_getClass("CVLPProbe");
+    IMP sinkImplementation = NULL;
+    if (!TKPDiagnosticSinkMethodMatches(sinkClass, trustedSinkPath,
+                                        &sinkImplementation)) {
+        return;
+    }
+
+    uint32_t image = atomic_load_explicit(
+        &gTKPEntryDiagnosticCounters[TKPEntryCounterImage], memory_order_relaxed);
+    uint32_t classCount = atomic_load_explicit(
+        &gTKPEntryDiagnosticCounters[TKPEntryCounterClass], memory_order_relaxed);
+    uint32_t getter = atomic_load_explicit(
+        &gTKPEntryDiagnosticCounters[TKPEntryCounterGetter], memory_order_relaxed);
+    uint32_t view = atomic_load_explicit(
+        &gTKPEntryDiagnosticCounters[TKPEntryCounterView], memory_order_relaxed);
+    uint32_t array = atomic_load_explicit(
+        &gTKPEntryDiagnosticCounters[TKPEntryCounterArray], memory_order_relaxed);
+    uint32_t noBar = atomic_load_explicit(
+        &gTKPEntryDiagnosticCounters[TKPEntryCounterNoBar], memory_order_relaxed);
+    uint32_t ambiguous = atomic_load_explicit(
+        &gTKPEntryDiagnosticCounters[TKPEntryCounterAmbiguous], memory_order_relaxed);
+    uint32_t bounds = atomic_load_explicit(
+        &gTKPEntryDiagnosticCounters[TKPEntryCounterBounds], memory_order_relaxed);
+    uint32_t installed = atomic_load_explicit(
+        &gTKPEntryDiagnosticCounters[TKPEntryCounterInstalled], memory_order_relaxed);
+    uint32_t touchAccepted = atomic_load_explicit(
+        &gTKPEntryDiagnosticCounters[TKPEntryCounterTouchAccepted], memory_order_relaxed);
+    uint32_t touchRejected = atomic_load_explicit(
+        &gTKPEntryDiagnosticCounters[TKPEntryCounterTouchRejected], memory_order_relaxed);
+    uint32_t contextRejected = atomic_load_explicit(
+        &gTKPEntryDiagnosticCounters[TKPEntryCounterContextRejected], memory_order_relaxed);
+    uint32_t gearDrawn = atomic_load_explicit(
+        &gTKPEntryDiagnosticCounters[TKPEntryCounterGearDrawn], memory_order_relaxed);
+    uint32_t inactiveRetry = atomic_load_explicit(
+        &gTKPEntryDiagnosticCounters[TKPEntryCounterInactiveRetry], memory_order_relaxed);
+    uint32_t lifecycleCleanup = atomic_load_explicit(
+        &gTKPEntryDiagnosticCounters[TKPEntryCounterLifecycleCleanup], memory_order_relaxed);
+
+    char lineBuffer[TKPEntryDiagnosticLineLimit];
+    int lineLength = snprintf(lineBuffer, sizeof(lineBuffer),
+        "CVLP_GUEST_GEOMETRY phase=tkp-entry version=%u event=%u reason=%u ticks=%u image=%u class=%u getter=%u view=%u array=%u no_bar=%u ambiguous=%u bounds=%u installed=%u touch_ok=%u touch_reject=%u context_reject=%u gear=%u inactive_retry=%u lifecycle=%u",
+        TKPEntryDiagnosticVersion, event, (uint32_t)reason, ticks, image,
+        classCount, getter, view, array, noBar, ambiguous, bounds, installed,
+        touchAccepted, touchRejected, contextRejected, gearDrawn, inactiveRetry,
+        lifecycleCleanup);
+    if (lineLength <= 0 || (size_t)lineLength >= sizeof(lineBuffer)) {
+        return;
+    }
+    NSString *line = [[NSString alloc] initWithBytes:lineBuffer
+                                              length:(NSUInteger)lineLength
+                                            encoding:NSASCIIStringEncoding];
+    if (line == nil || !TKPDiagnosticReserveRecord()) {
+        return;
+    }
+
+    typedef void (*TKPGuestDiagnosticSink)(id, SEL, NSString *);
+    @try {
+        ((TKPGuestDiagnosticSink)sinkImplementation)(sinkClass,
+            sel_registerName("recordGuestDiagnostic:"), line);
+    } @catch (NSException *exception) {
+        (void)exception;
+    }
 }
 
 static BOOL TKPClassImageMatchesTrustedGuest(Class candidate, NSURL *trustedImageURL) {
@@ -264,13 +618,15 @@ static BOOL TKPResolveButtonsProfileTarget(UIView *tabBar,
                                           Class tabBarBaseClass,
                                           NSURL *trustedImageURL,
                                           UIWindow *window,
-                                          UIView **targetOut) {
+                                          UIView **targetOut,
+                                          TKPEntryResolutionDiagnostics *diagnostics) {
     if (targetOut != NULL) {
         *targetOut = nil;
     }
     // Do not change disabled native views to make the gesture available.
     if (tabBar == nil || window == nil || !tabBar.isUserInteractionEnabled ||
         !TKPViewHasVisibleGeometry(tabBar, window)) {
+        TKPEntryDiagnosticNote(diagnostics, TKPEntryReasonViewRejected);
         return NO;
     }
 
@@ -278,6 +634,7 @@ static BOOL TKPResolveButtonsProfileTarget(UIView *tabBar,
     Class actualClass = object_getClass(tabBar);
     if (!TKPFindTrustedTabButtonsGetter(actualClass, tabBarBaseClass,
                                         trustedImageURL, &getterImplementation)) {
+        TKPEntryDiagnosticNote(diagnostics, TKPEntryReasonGetterRejected);
         return NO;
     }
 
@@ -290,6 +647,7 @@ static BOOL TKPResolveButtonsProfileTarget(UIView *tabBar,
             sel_registerName(TKPTabButtonsGetterName));
         Class buttonsClass = object_getClass(buttonsObject);
         if (!TKPClassIsSubclassOfClass(buttonsClass, NSArray.class)) {
+            TKPEntryDiagnosticNote(diagnostics, TKPEntryReasonArrayRejected);
             return NO;
         }
 
@@ -297,16 +655,19 @@ static BOOL TKPResolveButtonsProfileTarget(UIView *tabBar,
         buttonCount = buttons.count;
         if (buttonCount < TKPTabButtonsMinimumCount ||
             buttonCount > TKPTabButtonsMaximumCount) {
+            TKPEntryDiagnosticNote(diagnostics, TKPEntryReasonArrayRejected);
             return NO;
         }
         selectedButton = [buttons objectAtIndex:TKPProfileButtonIndex];
     } @catch (NSException *exception) {
         (void)exception;
+        TKPEntryDiagnosticNote(diagnostics, TKPEntryReasonArrayRejected);
         return NO;
     }
 
     Class selectedButtonClass = object_getClass(selectedButton);
     if (!TKPClassIsSubclassOfClass(selectedButtonClass, UIView.class)) {
+        TKPEntryDiagnosticNote(diagnostics, TKPEntryReasonViewRejected);
         return NO;
     }
 
@@ -314,6 +675,7 @@ static BOOL TKPResolveButtonsProfileTarget(UIView *tabBar,
     if (!target.isUserInteractionEnabled || target.window != window ||
         !TKPViewIsDescendantOfView(target, tabBar) ||
         !TKPViewHasVisibleGeometry(target, window)) {
+        TKPEntryDiagnosticNote(diagnostics, TKPEntryReasonViewRejected);
         return NO;
     }
     if (targetOut != NULL) {
@@ -328,6 +690,7 @@ typedef struct {
     __unsafe_unretained NSURL *trustedImageURL;
     __unsafe_unretained NSMutableArray<UIView *> *tabBars;
     NSUInteger *discoveredTabBarCount;
+    TKPEntryResolutionDiagnostics *diagnostics;
     NSUInteger visitedViewCount;
     BOOL boundsExceeded;
 } TKPTabBarScan;
@@ -354,12 +717,14 @@ static void TKPScanTabBars(UIView *view, NSUInteger depth, TKPTabBarScan *scan) 
         UIView *profileTarget = nil;
         if (TKPResolveButtonsProfileTarget(view, scan->tabBarBaseClass,
                                            scan->trustedImageURL, scan->window,
-                                           &profileTarget)) {
+                                           &profileTarget, scan->diagnostics)) {
             [scan->tabBars addObject:view];
             if (scan->tabBars.count > 1) {
                 return;
             }
         }
+    } else if (TKPClassIsSubclassOfClass(actualClass, scan->tabBarBaseClass)) {
+        TKPEntryDiagnosticNote(scan->diagnostics, TKPEntryReasonClassRejected);
     }
 
     NSArray<UIView *> *subviews = view.subviews;
@@ -382,7 +747,8 @@ static BOOL TKPWindowIsVisibleGuestCandidate(UIWindow *window, UIWindowScene *sc
 }
 
 static TKPProfileTargetResolution
-TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow **windowOut) {
+TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow **windowOut,
+                              TKPEntryResolutionDiagnostics *diagnostics) {
     if (tabBarOut != NULL) {
         *tabBarOut = nil;
     }
@@ -395,16 +761,19 @@ TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow *
 
     UIApplication *application = UIApplication.sharedApplication;
     if (application.applicationState != UIApplicationStateActive) {
+        TKPEntryDiagnosticNote(diagnostics, TKPEntryReasonInactive);
         return TKPProfileTargetResolutionUnavailable;
     }
 
     NSURL *trustedImageURL = TKPTrustedGuestImageURL();
     if (trustedImageURL == nil) {
+        TKPEntryDiagnosticNote(diagnostics, TKPEntryReasonImageRejected);
         return TKPProfileTargetResolutionUnavailable;
     }
 
     Class tabBarBaseClass = objc_getClass(TKPTabBarClassName);
     if (!TKPClassImageMatchesTrustedGuest(tabBarBaseClass, trustedImageURL)) {
+        TKPEntryDiagnosticNote(diagnostics, TKPEntryReasonClassRejected);
         return TKPProfileTargetResolutionUnavailable;
     }
 
@@ -432,15 +801,18 @@ TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow *
                 .trustedImageURL = trustedImageURL,
                 .tabBars = tabBars,
                 .discoveredTabBarCount = &discoveredTabBarCount,
+                .diagnostics = diagnostics,
                 .visitedViewCount = visitedViewCount,
                 .boundsExceeded = NO,
             };
             TKPScanTabBars(rootView, 0, &scan);
             visitedViewCount = scan.visitedViewCount;
             if (scan.boundsExceeded) {
+                TKPEntryDiagnosticNote(diagnostics, TKPEntryReasonBounds);
                 return TKPProfileTargetResolutionBoundsExceeded;
             }
             if (tabBars.count > 1) {
+                TKPEntryDiagnosticNote(diagnostics, TKPEntryReasonAmbiguous);
                 return TKPProfileTargetResolutionAmbiguous;
             }
             if (tabBars.count == tabBarCountBeforeWindow + 1) {
@@ -450,13 +822,16 @@ TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow *
     }
 
     if (tabBars.count != 1 || tabBarWindow == nil) {
+        if (diagnostics == NULL || diagnostics->reason == TKPEntryReasonNone) {
+            TKPEntryDiagnosticNote(diagnostics, TKPEntryReasonNoBar);
+        }
         return TKPProfileTargetResolutionNotFound;
     }
 
     UIView *tabBar = tabBars.firstObject;
     UIView *target = nil;
     if (!TKPResolveButtonsProfileTarget(tabBar, tabBarBaseClass, trustedImageURL,
-                                        tabBarWindow, &target)) {
+                                        tabBarWindow, &target, diagnostics)) {
         return TKPProfileTargetResolutionNotFound;
     }
     if (tabBarOut != NULL) {
@@ -467,6 +842,9 @@ TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow *
     }
     if (windowOut != NULL) {
         *windowOut = tabBarWindow;
+    }
+    if (diagnostics != NULL) {
+        diagnostics->reason = TKPEntryReasonNone;
     }
     return TKPProfileTargetResolutionUnique;
 }
@@ -489,6 +867,9 @@ TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow *
 @property (nonatomic) NSTimeInterval discoveryDeadline;
 @property (nonatomic) uint64_t lifecycleEpoch;
 @property (nonatomic) BOOL observersInstalled;
+@property (nonatomic) uint32_t diagnosticTickCount;
+@property (nonatomic) uint32_t diagnosticLastDiscoveryReason;
+@property (nonatomic) uint32_t diagnosticMilestoneMask;
 
 - (void)profileTabLongPressed:(UILongPressGestureRecognizer *)recognizer;
 - (void)showGearScreen;
@@ -513,6 +894,9 @@ TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow *
 
 - (void)start {
     NSAssert([NSThread isMainThread], @"Device panel startup must run on the main thread.");
+    TKPEntryDiagnosticEmit(TKPEntryEventStartDispatched,
+                           TKPEntryReasonStartDispatched,
+                           self.diagnosticTickCount);
     if (!self.observersInstalled) {
         NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
         [center addObserver:self selector:@selector(applicationWillResignActive:)
@@ -533,8 +917,14 @@ TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow *
 }
 
 - (void)beginBoundedDiscovery {
-    if (![NSThread isMainThread] || self.discoveryTimer != nil ||
-        UIApplication.sharedApplication.applicationState != UIApplicationStateActive) {
+    if (![NSThread isMainThread] || self.discoveryTimer != nil) {
+        return;
+    }
+    if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive) {
+        TKPEntryDiagnosticIncrement(TKPEntryCounterInactiveRetry, 1);
+        TKPEntryDiagnosticEmit(TKPEntryEventDiscoveryBegin,
+                               TKPEntryReasonInactive,
+                               self.diagnosticTickCount);
         return;
     }
 
@@ -548,6 +938,12 @@ TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow *
         self.lifecycleEpoch = 1;
     }
     self.discoveryDeadline = NSProcessInfo.processInfo.systemUptime + TKPDiscoveryLimit;
+    self.diagnosticTickCount = 0;
+    self.diagnosticLastDiscoveryReason = TKPEntryReasonNone;
+    self.diagnosticMilestoneMask = 0;
+    TKPEntryDiagnosticEmit(TKPEntryEventDiscoveryBegin,
+                           TKPEntryReasonNone,
+                           self.diagnosticTickCount);
     NSTimer *timer = [NSTimer timerWithTimeInterval:TKPDiscoveryInterval
                                             target:self
                                           selector:@selector(discoveryTick:)
@@ -574,10 +970,28 @@ TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow *
     }
     if (NSProcessInfo.processInfo.systemUptime >= self.discoveryDeadline) {
         [self stopDiscovery];
+        TKPEntryDiagnosticEmit(TKPEntryEventDeadline,
+                               TKPEntryReasonDeadline,
+                               self.diagnosticTickCount);
         return;
+    }
+    if (self.diagnosticTickCount < TKPEntryDiagnosticCounterLimit) {
+        self.diagnosticTickCount += 1;
     }
     if ([self reconcileVisibleGuestTab]) {
         [self stopDiscovery];
+    }
+    uint32_t milestones[] = {1, 4, 16, 64};
+    for (NSUInteger index = 0; index < sizeof(milestones) / sizeof(milestones[0]);
+         index += 1) {
+        uint32_t mask = 1u << index;
+        if (self.diagnosticTickCount == milestones[index] &&
+            (self.diagnosticMilestoneMask & mask) == 0) {
+            self.diagnosticMilestoneMask |= mask;
+            TKPEntryDiagnosticEmit(TKPEntryEventTickMilestone,
+                                   (TKPEntryDiagnosticReason)self.diagnosticLastDiscoveryReason,
+                                   self.diagnosticTickCount);
+        }
     }
 }
 
@@ -585,17 +999,34 @@ TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow *
     NSAssert([NSThread isMainThread], @"Guest tab discovery must run on the main thread.");
     if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive) {
         [self detachProfileGestureAndOverlay];
+        TKPEntryDiagnosticIncrement(TKPEntryCounterInactiveRetry, 1);
+        TKPEntryDiagnosticEmit(TKPEntryEventDiscoveryChange,
+                               TKPEntryReasonInactive,
+                               self.diagnosticTickCount);
         return NO;
     }
 
     UIView *tabBar = nil;
     UIView *candidate = nil;
     UIWindow *window = nil;
+    TKPEntryResolutionDiagnostics diagnostics = {0};
     TKPProfileTargetResolution resolution =
-        TKPResolveUniqueProfileTarget(&tabBar, &candidate, &window);
+        TKPResolveUniqueProfileTarget(&tabBar, &candidate, &window, &diagnostics);
+    TKPEntryDiagnosticMerge(&diagnostics);
     if (resolution != TKPProfileTargetResolutionUnique || tabBar == nil ||
         candidate == nil || window == nil) {
+        TKPEntryDiagnosticReason reason = diagnostics.reason;
+        if (reason == TKPEntryReasonNone) {
+            reason = resolution == TKPProfileTargetResolutionBoundsExceeded
+                ? TKPEntryReasonBounds
+                : TKPEntryReasonNoBar;
+        }
         [self detachProfileGestureAndOverlay];
+        if (self.diagnosticLastDiscoveryReason != (uint32_t)reason) {
+            self.diagnosticLastDiscoveryReason = (uint32_t)reason;
+            TKPEntryDiagnosticEmit(TKPEntryEventDiscoveryChange, reason,
+                                   self.diagnosticTickCount);
+        }
         return NO;
     }
 
@@ -603,6 +1034,7 @@ TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow *
         self.profilePressRecognizer.view == tabBar) {
         self.profileTabView = candidate;
         self.hostScene = window.windowScene;
+        self.diagnosticLastDiscoveryReason = TKPEntryReasonInstalled;
         return YES;
     }
 
@@ -623,6 +1055,11 @@ TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow *
     recognizer.delegate = self;
     self.profilePressRecognizer = recognizer;
     [tabBar addGestureRecognizer:recognizer];
+    self.diagnosticLastDiscoveryReason = TKPEntryReasonInstalled;
+    TKPEntryDiagnosticIncrement(TKPEntryCounterInstalled, 1);
+    TKPEntryDiagnosticEmit(TKPEntryEventDiscoveryChange,
+                           TKPEntryReasonInstalled,
+                           self.diagnosticTickCount);
     return YES;
 }
 
@@ -643,7 +1080,8 @@ TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow *
     UIView *resolvedTabBar = nil;
     UIView *resolvedCandidate = nil;
     UIWindow *resolvedWindow = nil;
-    if (TKPResolveUniqueProfileTarget(&resolvedTabBar, &resolvedCandidate, &resolvedWindow) !=
+    if (TKPResolveUniqueProfileTarget(&resolvedTabBar, &resolvedCandidate, &resolvedWindow,
+                                      NULL) !=
             TKPProfileTargetResolutionUnique ||
         resolvedTabBar != tabBar || resolvedWindow != window || resolvedCandidate == nil) {
         return NO;
@@ -664,6 +1102,10 @@ TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow *
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
     shouldReceiveTouch:(UITouch *)touch {
     if (gestureRecognizer != self.profilePressRecognizer) {
+        TKPEntryDiagnosticIncrement(TKPEntryCounterTouchRejected, 1);
+        TKPEntryDiagnosticEmit(TKPEntryEventTouchResult,
+                               TKPEntryReasonTouchRejected,
+                               self.diagnosticTickCount);
         return NO;
     }
 
@@ -673,6 +1115,11 @@ TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow *
 - (BOOL)acceptProfilePressTouchInView:(UIView *)touchedView {
     self.acceptedProfilePressTarget = nil;
     if (![self hasCurrentInteractionContext]) {
+        TKPEntryDiagnosticIncrement(TKPEntryCounterContextRejected, 1);
+        TKPEntryDiagnosticIncrement(TKPEntryCounterTouchRejected, 1);
+        TKPEntryDiagnosticEmit(TKPEntryEventTouchResult,
+                               TKPEntryReasonContextRejected,
+                               self.diagnosticTickCount);
         return NO;
     }
 
@@ -682,6 +1129,15 @@ TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow *
         TKPViewHasVisibleGeometry(touchedView, self.hostWindow);
     if (acceptsTouch) {
         self.acceptedProfilePressTarget = target;
+        TKPEntryDiagnosticIncrement(TKPEntryCounterTouchAccepted, 1);
+        TKPEntryDiagnosticEmit(TKPEntryEventTouchResult,
+                               TKPEntryReasonTouchAccepted,
+                               self.diagnosticTickCount);
+    } else {
+        TKPEntryDiagnosticIncrement(TKPEntryCounterTouchRejected, 1);
+        TKPEntryDiagnosticEmit(TKPEntryEventTouchResult,
+                               TKPEntryReasonTouchRejected,
+                               self.diagnosticTickCount);
     }
     return acceptsTouch;
 }
@@ -693,6 +1149,12 @@ TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow *
 
     if (recognizer.view != self.tabBarView) {
         self.acceptedProfilePressTarget = nil;
+        if (recognizer.state == UIGestureRecognizerStateBegan) {
+            TKPEntryDiagnosticIncrement(TKPEntryCounterContextRejected, 1);
+            TKPEntryDiagnosticEmit(TKPEntryEventBeganResult,
+                                   TKPEntryReasonContextRejected,
+                                   self.diagnosticTickCount);
+        }
         return;
     }
     if (recognizer.state != UIGestureRecognizerStateBegan) {
@@ -712,8 +1174,15 @@ TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow *
         if (!hasCurrentContext) {
             [self detachProfileGestureAndOverlay];
         }
+        TKPEntryDiagnosticIncrement(TKPEntryCounterContextRejected, 1);
+        TKPEntryDiagnosticEmit(TKPEntryEventBeganResult,
+                               TKPEntryReasonContextRejected,
+                               self.diagnosticTickCount);
         return;
     }
+    TKPEntryDiagnosticEmit(TKPEntryEventBeganResult,
+                           TKPEntryReasonTouchAccepted,
+                           self.diagnosticTickCount);
     [self showGearScreen];
 }
 
@@ -780,6 +1249,10 @@ TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow *
     ]];
     self.gearButton = gearButton;
     [self addCloseButtonToOverlay:overlay];
+    TKPEntryDiagnosticIncrement(TKPEntryCounterGearDrawn, 1);
+    TKPEntryDiagnosticEmit(TKPEntryEventGearDrawn,
+                           TKPEntryReasonGearDrawn,
+                           self.diagnosticTickCount);
 }
 
 - (void)addCloseButtonToOverlay:(UIView *)overlay {
@@ -990,6 +1463,10 @@ TKPResolveUniqueProfileTarget(UIView **tabBarOut, UIView **targetOut, UIWindow *
     self.discoveryDeadline = 0.0;
     [self stopDiscovery];
     [self detachProfileGestureAndOverlay];
+    TKPEntryDiagnosticIncrement(TKPEntryCounterLifecycleCleanup, 1);
+    TKPEntryDiagnosticEmit(TKPEntryEventLifecycleCleanup,
+                           TKPEntryReasonLifecycleCleanup,
+                           self.diagnosticTickCount);
 }
 
 - (void)applicationWillResignActive:(NSNotification *)notification {
@@ -1096,6 +1573,9 @@ static NSURL *TKPTrustedGuestImageURL(void) {
 }
 
 void TKPDevicePanelStart(void) {
+    TKPEntryDiagnosticEmit(TKPEntryEventStartRequested,
+                           TKPEntryReasonStartRequested,
+                           0);
     uint64_t startEpoch = atomic_fetch_add_explicit(&gDevicePanelStartEpoch, 1,
                                                     memory_order_relaxed) + 1;
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -1107,5 +1587,10 @@ void TKPDevicePanelStart(void) {
 }
 
 __attribute__((constructor)) static void TKPDevicePanelConstructor(void) {
-    TKPDevicePanelStart();
+    @autoreleasepool {
+        TKPEntryDiagnosticEmit(TKPEntryEventConstructor,
+                               TKPEntryReasonModuleConstructor,
+                               0);
+        TKPDevicePanelStart();
+    }
 }

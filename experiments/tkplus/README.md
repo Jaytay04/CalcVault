@@ -86,3 +86,9 @@ private packaging remains local and never supplies a proprietary IPA to CI.
 Source and synthetic test
 results must be distinguished from native compatibility and signed-phone tests.
 Never turn an unsupported selector into a broad hook to make a test pass.
+
+Owner test3 result: Profile hold still fails. The diagnostic follow-up preserves
+binding and lifecycle policy and sends only bounded fixed-label/numeric entry
+observations through the existing guest report. It does not add a floating
+entry, a generic callback bridge or filesystem authority. Phone cause and entry
+success remain unverified.

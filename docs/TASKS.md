@@ -1,5 +1,20 @@
 # CalcVault task ledger
 
+## Profile entry diagnostic follow up 2026-10-02
+
+Owner phone result for profile-settings-test3: FAIL; holding the bottom Profile
+tab still does not open settings. The synthetic UIKit PASS did not establish
+native entry compatibility. Investigate startup, image/getter guards, scene
+readiness and touch routing without changing target selection or weakening
+guards. Earlier guest reports suggest a missed startup-readiness interval, but
+the cause is not established. Prepare bounded fixed-label/numeric diagnostics
+through the existing guest report; no account, media, path or signing data.
+Preserve existing packages. Native Vault downloads remain unwired.
+
+Diagnostic source and synthetic sink/cap fixture implemented. Local 13 package
+and six reference tests PASS. Independent source review and Apple execution are
+pending; no next private package or repaired phone entry is claimed yet.
+
 ## Profile gesture repair 2026-10-02
 
 Corrected module/UIKit run 37091324940 and source run 37091324817 PASS at

@@ -1,5 +1,22 @@
 # CalcVault test report
 
+## Profile entry diagnostic follow up 2026-10-02
+
+Owner phone result for profile-settings-test3: FAIL. Bottom Profile hold still
+does not open settings. Prior Apple execution proved only the independently
+authored synthetic fixture, not actual TikTok touch delivery or containment.
+
+The module starts discovery only while the app is active and cancels discovery
+on inactivity. Earlier guest geometry reports show activation notifications
+before visible windows and a startup inactive transition. This suggests a
+missed-readiness interval; it is not a confirmed root cause. Module loading,
+image/getter guards and touch routing remain alternative explanations. The
+next candidate is diagnostic-only, with no binding/lifecycle policy change.
+
+Local 13 package and six reference checks PASS. The synthetic sink fixture adds
+fixed-marker/ASCII checks, exact 24-record budget exhaustion and continued
+cleanup after exhaustion. Actual Apple compile/simulator execution is pending.
+
 ## Profile gesture device failure 2026-10-02
 
 Corrected [module/UIKit run 37091324940](https://github.com/Jaytay04/CalcVault/actions/runs/37091324940)

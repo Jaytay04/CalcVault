@@ -198,3 +198,59 @@ TTKTabBar directly declares the `buttons` getter with type encoding `@16@0:8`
 replacement validates runtime metadata and image ownership, never that raw
 address. The getter body was not inspected; the original installer's use of
 its result and runtime array/view checks establish the narrow UI protocol.
+
+## Profile entry diagnostic follow up
+
+The owner reports that profile-settings-test3 still does not respond to the
+bottom Profile hold. Its synthetic UIKit PASS does not establish compatibility
+with native startup or real touches. Earlier guest geometry reports show
+activation notifications before visible windows and a startup inactive
+transition. The module starts discovery only while active and cancels on
+inactivity, without a window-readiness retry. A missed readiness interval is a
+hypothesis; loading, canonical image guards, getter validation and touch routing
+remain possible causes.
+
+The next candidate is diagnostic-only. It preserves target selection, discovery
+timing, lifecycle cleanup, ambiguity rejection and opt-in policy. Diagnostics
+use fixed labels and bounded numeric counters, not paths, runtime class names,
+account models, URLs, media or signing data. They use the existing guest report
+method rather than a new filesystem channel or host capability.
+
+Static metadata in the pinned host package establishes that CVLPProbe is defined
+in the containing app's LiveContainerShared framework, not the LiveProcess main
+executable. Its metaclass declares recordGuestDiagnostic: with encoding
+`v24@0:8@16`: void return, self, selector and one object argument. The producer
+must validate that exact class-method ABI and both class/implementation image
+ownership before sending a sanitized line. Static package metadata is not proof
+that the runtime sink will resolve or that a phone report will contain a line.
+
+The fixed marker is `CVLP_GUEST_GEOMETRY phase=tkp-entry version=4`. Emission
+has a process-wide budget of 24 records and a 320-byte formatting buffer.
+Counters saturate at 9,999. Discovery emits changes, selected tick milestones
+(1, 4, 16 and 64) and its existing terminal event, rather than every 0.25-second
+tick. No new timer or discovery retry is introduced. Exhaustion stops diagnostic
+delivery, not lifecycle cleanup. The testing macro substitutes only the synthetic
+fixture executable's sink image and is absent from the phone module.
+
+| Event code | Meaning |
+| --- | --- |
+| 1 | Module constructor |
+| 2 | Startup requested |
+| 3 | Startup dispatched on the main queue |
+| 4 | Discovery start or inactive refusal |
+| 5 | Discovery outcome changed |
+| 6 | Existing discovery tick milestone |
+| 7 | Existing discovery deadline |
+| 8 | Lifecycle cleanup completed |
+| 9 | Touch accepted or rejected |
+| 10 | Began handler accepted or rejected |
+| 11 | Own gear screen drawn |
+
+Reason codes are: 0 none, 1 constructor, 2 startup requested, 3 main-queue
+startup, 4 inactive, 5 image rejection, 6 class rejection, 7 getter rejection,
+8 view rejection, 9 array rejection, 10 no eligible bar, 11 ambiguity,
+12 traversal bounds, 13 recognizer installed, 14 touch accepted, 15 touch
+rejected, 16 interaction-context rejection, 17 deadline, 18 lifecycle cleanup
+and 19 gear drawn. Counter fields summarize only these guarded UI decisions;
+they do not identify any underlying content. A reason is an observed branch,
+not a diagnosis of its upstream cause.
