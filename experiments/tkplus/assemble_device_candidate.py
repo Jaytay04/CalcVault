@@ -1,4 +1,4 @@
-"""Local-only assembly of the first independent control-panel testing IPA.
+"""Local-only assembly of the independent profile-settings testing IPA.
 
 Public CI supplies only the independently authored TKP.dylib. This adapter
 preserves the reviewed private host and TikTok code/resources, excludes the
@@ -177,8 +177,9 @@ def assemble(source, addon, output, addon_sha256):
             rewritten = redirect_weak_load(main)
             expected = {}
             omitted = []
-            receipt = {'schema': 1, 'candidate': 'TKPlusIndependent-test1',
-                       'scope': 'own control panel and opt-in local profile eligibility only',
+            receipt = {'schema': 1, 'candidate': 'TKPlusIndependent-profile-settings-test2',
+                       'scope': 'profile-tab long press, gear entry and opt-in local profile eligibility only',
+                       'settings_entry': 'bottom Profile tab long press, then gear',
                        'downloads_connected': False, 'provider_anonymity_verified': False,
                        'private_source_sha256': SOURCE_SHA256, 'independent_module_sha256': addon_sha256,
                        'main_before_sha256': MAIN_SHA256,

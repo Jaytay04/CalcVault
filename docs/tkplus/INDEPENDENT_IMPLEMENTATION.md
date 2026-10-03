@@ -28,14 +28,14 @@ dependency are omitted. The containing app's separate framework copy remains.
 |---|---|---|
 | Guest original-media selection | Bounded candidate lists, exact approved host matching, HTTPS-only URLs, no credentials/fragments, no thumbnail fallback or quality guessing. | CDN host policy, selected private-model adapters, downloader and real surface coverage. |
 | Guest profile eligibility controls | Explicit opt-in installation on two exact runtime selectors with method ownership, ABI and image checks. Default behavior forwards originals. Synthetic macOS Apple compilation, ten fixture modes and standalone iPhoneOS object compilation pass. | Actual TikTok47 class/ABI/image eligibility and provider anonymity. |
-| Independent device panel | Non-key, outside-touch-passthrough TK+ window; user-initiated enable/disable; fixed module-relative canonical image guard; bounded startup discovery and inactive-state hiding. | Phone interaction and multi-scene reactivation. This uses the established app-main guest process, not an ordinary App Store extension compatibility claim. |
+| Independent device panel | Profile-tab long press, separate gear screen and opt-in settings using owned views in the existing guest window; fixed module-relative canonical image guard and bounded discovery. No extra UIWindow or native-controller presentation. | Actual tab-class mapping, phone interaction and remote-scene compatibility. The previous floating-window candidate blackened the guest on the owner's phone. |
 | Portable transfer lease | Bounded versioned records, host-issued opaque ID/generation, ordered chunks, exact completion size and irreversible revocation. | IPC transport, OS isolation, media decoding, protected staging, confirmation and encrypted commit. |
 | Incremental stream receiver | Fixed one-frame buffer; fragmented/coalesced input; encoded-byte and record budgets; validated tentative output; finish plus explicit host-observed EOF; fail-closed sink failure, overlap and reentrancy. | Filesystem outbox, actual media validation, protected staging and session-authorized import. |
 
-The first device candidate wires only the independent TK+ panel and local
+The current device candidate wires only independent Profile-tab settings and local
 profile eligibility controls into the existing Build24 TikTok47 host. There is
 no native Save button or guest-to-Vault download wiring yet. New panel execution
-and actual target eligibility require the owner's phone test; neither source
+and actual target eligibility require the owner's phone test; neither synthetic UIKit
 tests nor package verification establish anonymous profile viewing.
 
 ## Media delivery contract
@@ -125,5 +125,7 @@ produces a private testing IPA with complete member hash/CRC readback and
 preserved host/data identity. Private-package fingerprint and size are recorded
 only in its private receipt and ledger. This
 is a testing derivative requiring SideStore re-signing, not a host rebuild or
-a phone-tested feature-complete release. The floating TK+ panel and exact target
-eligibility remain owner-test gates; native media delivery is still unwired.
+a feature-complete release. The owner reports the first floating TK+ panel
+blackened the guest. Its replacement uses Profile-tab long press, a gear entry
+and own settings views. Actual entry and target eligibility remain owner-test
+gates; native media delivery is still unwired.

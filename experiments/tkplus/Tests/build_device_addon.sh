@@ -40,7 +40,7 @@ module = (output / 'TKP.dylib').read_bytes()
 verify_addon(module)
 receipt = {'schema': 1, 'source_commit': os.environ.get('GITHUB_SHA', 'local'),
            'platform': 'iOS', 'architecture': 'arm64', 'minimum_os': '18.0',
-           'scope': 'independent panel and opt-in local profile eligibility controls',
+           'scope': 'profile-tab long press, gear entry and opt-in local profile eligibility settings',
            'module_sha256': hashlib.sha256(module).hexdigest(), 'module_bytes': len(module),
            'private_input_used': False, 'device_execution': 'NOT RUN'}
 (output / 'source-build.json').write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n')

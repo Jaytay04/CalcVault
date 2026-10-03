@@ -1,9 +1,10 @@
 #import <UIKit/UIKit.h>
 
-#import <QuartzCore/QuartzCore.h>
 #import <dlfcn.h>
 #import <dispatch/dispatch.h>
 #import <limits.h>
+#import <objc/runtime.h>
+#import <stdatomic.h>
 #import <stdint.h>
 #import <stdlib.h>
 #import <string.h>
@@ -14,142 +15,252 @@ __attribute__((visibility("default"))) void TKPDevicePanelStart(void);
 
 static const NSTimeInterval TKPDiscoveryInterval = 0.25;
 static const NSTimeInterval TKPDiscoveryLimit = 30.0;
-static const NSTimeInterval TKPSheetDismissalFallback = 0.5;
-static const NSUInteger TKPViewControllerDepthLimit = 32;
+static const NSTimeInterval TKPProfilePressDuration = 0.78;
+static const NSUInteger TKPViewDepthLimit = 32;
+static const NSUInteger TKPViewCountLimit = 4096;
+static const char * const TKPProfileTabClassName = "TTKProfileTabBaseButton";
+static const char * const TKPTabBarClassName = "TTKTabBar";
 static const char * const TKPLocalOnlyCaveat =
     "Local only: this suppresses two profile-view eligibility checks in this guest. "
     "Other reporting paths may still operate. This does not guarantee anonymous viewing.";
 
-static NSURL *TKPTrustedGuestImageURL(void);
-
+static _Atomic(uint64_t) gDevicePanelStartEpoch = 0;
 static TKPProfileControlsStatus gLastProfileControlsStatus =
     TKPProfileControlsStatusNotInstalled;
 
-@interface TKPPassthroughWindow : UIWindow
-@property (nonatomic, weak) UIButton *controlButton;
-@end
+static NSURL *TKPTrustedGuestImageURL(void);
 
-@implementation TKPPassthroughWindow
+typedef NS_ENUM(NSUInteger, TKPProfileTargetResolution) {
+    TKPProfileTargetResolutionUnavailable = 0,
+    TKPProfileTargetResolutionNotFound,
+    TKPProfileTargetResolutionUnique,
+    TKPProfileTargetResolutionAmbiguous,
+    TKPProfileTargetResolutionBoundsExceeded,
+};
 
-- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    UIView *hitView = [super hitTest:point withEvent:event];
-    UIButton *button = self.controlButton;
-    if (button != nil && (hitView == button || [hitView isDescendantOfView:button])) {
-        return hitView;
+static BOOL TKPRectHasArea(CGRect rect) {
+    return !CGRectIsNull(rect) && !CGRectIsEmpty(rect) && !CGRectIsInfinite(rect) &&
+        CGRectGetWidth(rect) > 0.0 && CGRectGetHeight(rect) > 0.0;
+}
+
+static BOOL TKPViewHasVisibleGeometry(UIView *view, UIWindow *window) {
+    if (view == nil || window == nil || view.window != window || window.hidden ||
+        window.alpha <= 0.01 || !TKPRectHasArea(window.bounds)) {
+        return NO;
     }
-    return nil;
+
+    BOOL reachedWindow = NO;
+    for (UIView *ancestor = view; ancestor != nil; ancestor = ancestor.superview) {
+        if (ancestor.hidden || ancestor.alpha <= 0.01) {
+            return NO;
+        }
+        if (ancestor != window && ancestor.window != window) {
+            return NO;
+        }
+        if (ancestor.clipsToBounds) {
+            CGRect descendantRect = [view convertRect:view.bounds toView:ancestor];
+            if (!TKPRectHasArea(CGRectIntersection(descendantRect, ancestor.bounds))) {
+                return NO;
+            }
+        }
+        if (ancestor == window) {
+            reachedWindow = YES;
+            break;
+        }
+    }
+    if (!reachedWindow || !TKPRectHasArea(view.bounds)) {
+        return NO;
+    }
+
+    CGRect windowRect = [view convertRect:view.bounds toView:window];
+    return TKPRectHasArea(CGRectIntersection(windowRect, window.bounds));
 }
 
-@end
-
-static BOOL TKPViewIsVisibleInWindow(UIView *view, UIWindow *window) {
-    return view != nil && view.window == window && !view.hidden && view.alpha > 0.01;
-}
-
-static BOOL TKPHasForegroundActiveScene(void) {
-    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
-        if ([scene isKindOfClass:[UIWindowScene class]] &&
-            scene.activationState == UISceneActivationStateForegroundActive) {
+static BOOL TKPClassIsUIViewSubclass(Class candidate) {
+    for (Class current = candidate; current != Nil; current = class_getSuperclass(current)) {
+        if (current == UIView.class) {
             return YES;
         }
     }
     return NO;
 }
 
-static UIViewController *TKPVisibleController(UIViewController *controller,
-                                               UIWindow *window,
-                                               NSUInteger depth) {
-    if (controller == nil || depth >= TKPViewControllerDepthLimit ||
-        controller.isBeingDismissed) {
-        return nil;
-    }
-
-    UIViewController *presented = controller.presentedViewController;
-    if (presented != nil && !presented.isBeingDismissed) {
-        UIViewController *visible = TKPVisibleController(presented, window, depth + 1);
-        if (visible != nil) {
-            return visible;
-        }
-    }
-
-    for (UIViewController *child in controller.childViewControllers) {
-        UIView *childView = child.viewIfLoaded;
-        if (!TKPViewIsVisibleInWindow(childView, window)) {
-            continue;
-        }
-        UIViewController *visible = TKPVisibleController(child, window, depth + 1);
-        if (visible != nil) {
-            return visible;
-        }
-    }
-
-    return TKPViewIsVisibleInWindow(controller.viewIfLoaded, window) ? controller : nil;
+static BOOL TKPCanonicalPath(const char *path, char output[PATH_MAX]) {
+    return path != NULL && path[0] != '\0' && realpath(path, output) != NULL;
 }
 
-static UIWindow *TKPFindForegroundGuestWindow(UIWindowScene **sceneOut,
-                                               UIViewController **presenterOut) {
-    UIApplication *application = UIApplication.sharedApplication;
-    if (application.applicationState != UIApplicationStateActive) {
-        return nil;
+static BOOL TKPClassImageMatchesTrustedGuest(Class candidate, NSURL *trustedImageURL) {
+    if (candidate == Nil || class_isMetaClass(candidate) || trustedImageURL == nil ||
+        !TKPClassIsUIViewSubclass(candidate)) {
+        return NO;
     }
 
-    UIWindow *fallbackWindow = nil;
-    UIWindowScene *fallbackScene = nil;
-    UIViewController *fallbackPresenter = nil;
+    const char *imagePath = class_getImageName(candidate);
+    const char *trustedPath = trustedImageURL.fileSystemRepresentation;
+    char canonicalImagePath[PATH_MAX];
+    char canonicalTrustedPath[PATH_MAX];
+    return TKPCanonicalPath(imagePath, canonicalImagePath) &&
+        TKPCanonicalPath(trustedPath, canonicalTrustedPath) &&
+        strcmp(canonicalImagePath, canonicalTrustedPath) == 0;
+}
+
+typedef struct {
+    __unsafe_unretained UIWindow *window;
+    Class profileTabClass;
+    Class tabBarClass;
+    __unsafe_unretained NSMutableArray<UIView *> *candidates;
+    NSUInteger visitedViewCount;
+    BOOL boundsExceeded;
+} TKPProfileTargetScan;
+
+static void TKPScanProfileTabViews(UIView *view,
+                                  UIView *nearestTabBar,
+                                  NSUInteger depth,
+                                  TKPProfileTargetScan *scan) {
+    if (scan->boundsExceeded || view == nil) {
+        return;
+    }
+    if (depth > TKPViewDepthLimit || ++scan->visitedViewCount > TKPViewCountLimit) {
+        scan->boundsExceeded = YES;
+        return;
+    }
+    if (!TKPViewHasVisibleGeometry(view, scan->window)) {
+        return;
+    }
+
+    if (object_getClass(view) == scan->tabBarClass) {
+        nearestTabBar = view;
+    }
+    if (nearestTabBar != nil && object_getClass(view) == scan->profileTabClass &&
+        [view isKindOfClass:scan->profileTabClass] && view.isUserInteractionEnabled) {
+        [scan->candidates addObject:view];
+        if (scan->candidates.count > 1) {
+            return;
+        }
+    }
+
+    NSArray<UIView *> *subviews = view.subviews;
+    for (UIView *subview in subviews) {
+        TKPScanProfileTabViews(subview, nearestTabBar, depth + 1, scan);
+        if (scan->boundsExceeded || scan->candidates.count > 1) {
+            return;
+        }
+    }
+}
+
+static BOOL TKPWindowIsVisibleGuestCandidate(UIWindow *window, UIWindowScene *scene) {
+    if (window == nil || scene == nil || window.windowScene != scene || window.hidden ||
+        window.alpha <= 0.01 || window.windowLevel > UIWindowLevelNormal ||
+        window.rootViewController == nil || !TKPRectHasArea(window.bounds)) {
+        return NO;
+    }
+    UIView *rootView = window.rootViewController.viewIfLoaded;
+    return rootView != nil && TKPViewHasVisibleGeometry(rootView, window);
+}
+
+static TKPProfileTargetResolution
+TKPResolveUniqueProfileTab(UIView **candidateOut, UIWindow **windowOut) {
+    if (candidateOut != NULL) {
+        *candidateOut = nil;
+    }
+    if (windowOut != NULL) {
+        *windowOut = nil;
+    }
+
+    UIApplication *application = UIApplication.sharedApplication;
+    if (application.applicationState != UIApplicationStateActive) {
+        return TKPProfileTargetResolutionUnavailable;
+    }
+
+    NSURL *trustedImageURL = TKPTrustedGuestImageURL();
+    if (trustedImageURL == nil) {
+        return TKPProfileTargetResolutionUnavailable;
+    }
+
+    Class profileTabClass = NSClassFromString(
+        [NSString stringWithUTF8String:TKPProfileTabClassName]);
+    Class tabBarClass = NSClassFromString(
+        [NSString stringWithUTF8String:TKPTabBarClassName]);
+    if (!TKPClassImageMatchesTrustedGuest(profileTabClass, trustedImageURL) ||
+        !TKPClassImageMatchesTrustedGuest(tabBarClass, trustedImageURL)) {
+        return TKPProfileTargetResolutionUnavailable;
+    }
+
+    NSMutableArray<UIView *> *candidates = [NSMutableArray arrayWithCapacity:2];
+    UIWindow *candidateWindow = nil;
+    NSUInteger visitedViewCount = 0;
 
     for (UIScene *scene in application.connectedScenes) {
-        if (![scene isKindOfClass:[UIWindowScene class]] ||
+        if (![scene isKindOfClass:UIWindowScene.class] ||
             scene.activationState != UISceneActivationStateForegroundActive) {
             continue;
         }
-
         UIWindowScene *windowScene = (UIWindowScene *)scene;
         for (UIWindow *window in windowScene.windows) {
-            if (window.hidden || window.alpha <= 0.01 ||
-                window.windowLevel > UIWindowLevelNormal || window.rootViewController == nil) {
+            if (!TKPWindowIsVisibleGuestCandidate(window, windowScene)) {
                 continue;
             }
 
-            UIViewController *presenter =
-                TKPVisibleController(window.rootViewController, window, 0);
-            if (presenter == nil) {
-                continue;
+            UIView *rootView = window.rootViewController.viewIfLoaded;
+            NSUInteger candidateCountBeforeWindow = candidates.count;
+            TKPProfileTargetScan scan = {
+                .window = window,
+                .profileTabClass = profileTabClass,
+                .tabBarClass = tabBarClass,
+                .candidates = candidates,
+                .visitedViewCount = visitedViewCount,
+                .boundsExceeded = NO,
+            };
+            TKPScanProfileTabViews(rootView, nil, 0, &scan);
+            visitedViewCount = scan.visitedViewCount;
+            if (scan.boundsExceeded) {
+                return TKPProfileTargetResolutionBoundsExceeded;
             }
-            if (window.isKeyWindow) {
-                if (sceneOut != NULL) {
-                    *sceneOut = windowScene;
-                }
-                if (presenterOut != NULL) {
-                    *presenterOut = presenter;
-                }
-                return window;
+            if (candidates.count > 1) {
+                return TKPProfileTargetResolutionAmbiguous;
             }
-            if (fallbackWindow == nil) {
-                fallbackWindow = window;
-                fallbackScene = windowScene;
-                fallbackPresenter = presenter;
+            if (candidates.count == candidateCountBeforeWindow + 1) {
+                candidateWindow = window;
             }
         }
     }
 
-    if (fallbackWindow != nil) {
-        if (sceneOut != NULL) {
-            *sceneOut = fallbackScene;
-        }
-        if (presenterOut != NULL) {
-            *presenterOut = fallbackPresenter;
-        }
+    if (candidates.count != 1 || candidateWindow == nil) {
+        return TKPProfileTargetResolutionNotFound;
     }
-    return fallbackWindow;
+    if (candidateOut != NULL) {
+        *candidateOut = candidates.firstObject;
+    }
+    if (windowOut != NULL) {
+        *windowOut = candidateWindow;
+    }
+    return TKPProfileTargetResolutionUnique;
 }
 
-@interface TKPDevicePanelController : NSObject <UIAdaptivePresentationControllerDelegate>
-@property (nonatomic, strong) NSTimer *discoveryTimer;
-@property (nonatomic, strong) TKPPassthroughWindow *panelWindow;
-@property (nonatomic, weak) UIAlertController *activeSheet;
+@interface TKPDevicePanelController : NSObject <UIGestureRecognizerDelegate>
+@property (nonatomic, strong, nullable) NSTimer *discoveryTimer;
+@property (nonatomic, weak, nullable) UIWindow *hostWindow;
+@property (nonatomic, weak, nullable) UIWindowScene *hostScene;
+@property (nonatomic, weak, nullable) UIView *profileTabView;
+@property (nonatomic, strong, nullable) UILongPressGestureRecognizer *profilePressRecognizer;
+@property (nonatomic, strong, nullable) UIView *ownedScreenView;
+@property (nonatomic, strong, nullable) UIView *gearScreenView;
+@property (nonatomic, strong, nullable) UIView *settingsScreenView;
+@property (nonatomic, weak, nullable) UIButton *gearButton;
+@property (nonatomic, weak, nullable) UIButton *closeButton;
+@property (nonatomic, weak, nullable) UISwitch *suppressionSwitch;
+@property (nonatomic, weak, nullable) UILabel *statusLabel;
 @property (nonatomic) NSTimeInterval discoveryDeadline;
+@property (nonatomic) uint64_t lifecycleEpoch;
 @property (nonatomic) BOOL observersInstalled;
-@property (nonatomic) BOOL startupRetryPending;
+
+- (void)profileTabLongPressed:(UILongPressGestureRecognizer *)recognizer;
+- (void)showGearScreen;
+- (void)gearButtonTapped:(UIButton *)sender;
+- (void)closeButtonTapped:(UIButton *)sender;
+- (void)suppressionSwitchChanged:(UISwitch *)sender;
+- (BOOL)reconcileVisibleGuestTab;
+- (void)applicationWillResignActive:(NSNotification *)notification;
 @end
 
 @implementation TKPDevicePanelController
@@ -169,10 +280,14 @@ static UIWindow *TKPFindForegroundGuestWindow(UIWindowScene **sceneOut,
         NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
         [center addObserver:self selector:@selector(applicationWillResignActive:)
                        name:UIApplicationWillResignActiveNotification object:nil];
+        [center addObserver:self selector:@selector(applicationDidEnterBackground:)
+                       name:UIApplicationDidEnterBackgroundNotification object:nil];
         [center addObserver:self selector:@selector(applicationDidBecomeActive:)
                        name:UIApplicationDidBecomeActiveNotification object:nil];
         [center addObserver:self selector:@selector(sceneWillDeactivate:)
                        name:UISceneWillDeactivateNotification object:nil];
+        [center addObserver:self selector:@selector(sceneDidActivate:)
+                       name:UISceneDidActivateNotification object:nil];
         [center addObserver:self selector:@selector(sceneDidDisconnect:)
                        name:UISceneDidDisconnectNotification object:nil];
         self.observersInstalled = YES;
@@ -181,34 +296,25 @@ static UIWindow *TKPFindForegroundGuestWindow(UIWindowScene **sceneOut,
 }
 
 - (void)beginBoundedDiscovery {
-    if (![NSThread isMainThread] || self.discoveryTimer != nil) {
+    if (![NSThread isMainThread] || self.discoveryTimer != nil ||
+        UIApplication.sharedApplication.applicationState != UIApplicationStateActive) {
         return;
     }
 
-    UIWindowScene *panelScene = self.panelWindow.windowScene;
-    if (self.panelWindow != nil && panelScene != nil &&
-        UIApplication.sharedApplication.applicationState == UIApplicationStateActive &&
-        panelScene.activationState == UISceneActivationStateForegroundActive) {
-        self.panelWindow.hidden = NO;
+    if (self.profilePressRecognizer != nil && [self hasCurrentInteractionContext]) {
         return;
     }
+    [self detachProfileGestureAndOverlay];
 
-    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
-    if (self.discoveryDeadline <= now) {
-        self.discoveryDeadline = now + TKPDiscoveryLimit;
+    self.lifecycleEpoch += 1;
+    if (self.lifecycleEpoch == 0) {
+        self.lifecycleEpoch = 1;
     }
-    [self startDiscoveryTimerBeforeDeadline];
-}
-
-- (void)startDiscoveryTimerBeforeDeadline {
-    if (self.discoveryTimer != nil ||
-        NSProcessInfo.processInfo.systemUptime >= self.discoveryDeadline) {
-        return;
-    }
+    self.discoveryDeadline = NSProcessInfo.processInfo.systemUptime + TKPDiscoveryLimit;
     NSTimer *timer = [NSTimer timerWithTimeInterval:TKPDiscoveryInterval
                                             target:self
                                           selector:@selector(discoveryTick:)
-                                          userInfo:nil
+                                          userInfo:@(self.lifecycleEpoch)
                                            repeats:YES];
     self.discoveryTimer = timer;
     [NSRunLoop.mainRunLoop addTimer:timer forMode:NSRunLoopCommonModes];
@@ -221,248 +327,447 @@ static UIWindow *TKPFindForegroundGuestWindow(UIWindowScene **sceneOut,
 }
 
 - (void)discoveryTick:(NSTimer *)timer {
-    if (timer != self.discoveryTimer) {
+    if (timer != self.discoveryTimer ||
+        [timer.userInfo unsignedLongLongValue] != self.lifecycleEpoch) {
+        return;
+    }
+    if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive) {
+        [self cleanupForLifecycleTransition];
         return;
     }
     if (NSProcessInfo.processInfo.systemUptime >= self.discoveryDeadline) {
         [self stopDiscovery];
         return;
     }
-
-    UIWindowScene *scene = nil;
-    UIViewController *presenter = nil;
-    UIWindow *hostWindow = TKPFindForegroundGuestWindow(&scene, &presenter);
-    if (hostWindow == nil || scene == nil || presenter == nil) {
-        return;
-    }
-
-    if (self.panelWindow != nil) {
-        if (self.panelWindow.windowScene == scene) {
-            self.panelWindow.hidden = NO;
-        }
-        [self stopDiscovery];
-        return;
-    }
-
-    if ([self createPanelInScene:scene]) {
+    if ([self reconcileVisibleGuestTab]) {
         [self stopDiscovery];
     }
 }
 
-- (BOOL)createPanelInScene:(UIWindowScene *)scene {
-    CGRect sceneBounds = scene.coordinateSpace.bounds;
-    if (CGRectIsEmpty(sceneBounds)) {
+- (BOOL)reconcileVisibleGuestTab {
+    NSAssert([NSThread isMainThread], @"Guest tab discovery must run on the main thread.");
+    if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive) {
+        [self detachProfileGestureAndOverlay];
         return NO;
     }
 
-    TKPPassthroughWindow *window = [[TKPPassthroughWindow alloc] initWithWindowScene:scene];
-    window.frame = sceneBounds;
-    window.backgroundColor = UIColor.clearColor;
-    window.opaque = NO;
-    window.windowLevel = UIWindowLevelNormal + 1.0;
+    UIView *candidate = nil;
+    UIWindow *window = nil;
+    TKPProfileTargetResolution resolution = TKPResolveUniqueProfileTab(&candidate, &window);
+    if (resolution != TKPProfileTargetResolutionUnique || candidate == nil || window == nil) {
+        [self detachProfileGestureAndOverlay];
+        return NO;
+    }
 
-    UIViewController *rootController = [[UIViewController alloc] init];
-    rootController.view.backgroundColor = UIColor.clearColor;
-    rootController.view.opaque = NO;
+    if (self.profileTabView == candidate && self.hostWindow == window &&
+        self.profilePressRecognizer.view == candidate) {
+        self.hostScene = window.windowScene;
+        return YES;
+    }
 
-    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
-    [button setTitle:@"TK+" forState:UIControlStateNormal];
-    button.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightBold];
-    [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-    button.backgroundColor = [UIColor colorWithWhite:0.08 alpha:0.92];
-    button.layer.cornerRadius = 22.0;
-    button.layer.borderWidth = 1.0;
-    button.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.35].CGColor;
-    button.accessibilityLabel = @"TK+ controls";
-    button.accessibilityHint = @"Open local profile-view suppression controls.";
-    [button addTarget:self action:@selector(controlButtonTapped:)
-     forControlEvents:UIControlEventTouchUpInside];
+    [self detachProfileGestureAndOverlay];
+    self.hostWindow = window;
+    self.hostScene = window.windowScene;
+    self.profileTabView = candidate;
 
-    button.translatesAutoresizingMaskIntoConstraints = NO;
-    [rootController.view addSubview:button];
-    UILayoutGuide *safeArea = rootController.view.safeAreaLayoutGuide;
-    [NSLayoutConstraint activateConstraints:@[
-        [button.topAnchor constraintEqualToAnchor:safeArea.topAnchor constant:52.0],
-        [button.trailingAnchor constraintEqualToAnchor:safeArea.trailingAnchor constant:-12.0],
-        [button.widthAnchor constraintEqualToConstant:48.0],
-        [button.heightAnchor constraintEqualToConstant:44.0],
-    ]];
-
-    window.rootViewController = rootController;
-    window.controlButton = button;
-    self.panelWindow = window;
-    window.hidden = NO;
+    UILongPressGestureRecognizer *recognizer =
+        [[UILongPressGestureRecognizer alloc] initWithTarget:self
+                                                      action:@selector(profileTabLongPressed:)];
+    recognizer.minimumPressDuration = TKPProfilePressDuration;
+    recognizer.cancelsTouchesInView = NO;
+    recognizer.delaysTouchesBegan = NO;
+    recognizer.delaysTouchesEnded = NO;
+    recognizer.delegate = self;
+    self.profilePressRecognizer = recognizer;
+    [candidate addGestureRecognizer:recognizer];
     return YES;
 }
 
-- (void)controlButtonTapped:(UIButton *)sender {
+- (BOOL)hasCurrentInteractionContext {
+    UIWindow *window = self.hostWindow;
+    UIWindowScene *scene = self.hostScene;
+    UIView *candidate = self.profileTabView;
+    if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive ||
+        window == nil || scene == nil || window.windowScene != scene ||
+        scene.activationState != UISceneActivationStateForegroundActive ||
+        !TKPWindowIsVisibleGuestCandidate(window, scene) ||
+        !TKPViewHasVisibleGeometry(candidate, window) ||
+        self.profilePressRecognizer.view != candidate) {
+        return NO;
+    }
+
+    UIView *resolvedCandidate = nil;
+    UIWindow *resolvedWindow = nil;
+    return TKPResolveUniqueProfileTab(&resolvedCandidate, &resolvedWindow) ==
+            TKPProfileTargetResolutionUnique &&
+        resolvedCandidate == candidate && resolvedWindow == window;
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
+    shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer {
+    (void)otherGestureRecognizer;
+    return gestureRecognizer == self.profilePressRecognizer;
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
+       shouldReceiveTouch:(UITouch *)touch {
+    if (gestureRecognizer != self.profilePressRecognizer ||
+        ![self hasCurrentInteractionContext]) {
+        return NO;
+    }
+    UIView *target = self.profileTabView;
+    UIView *touchedView = touch.view;
+    return touchedView != nil && target != nil &&
+        (touchedView == target || [touchedView isDescendantOfView:target]) &&
+        TKPViewHasVisibleGeometry(touchedView, self.hostWindow);
+}
+
+- (void)profileTabLongPressed:(UILongPressGestureRecognizer *)recognizer {
+    if (recognizer != self.profilePressRecognizer ||
+        recognizer.state != UIGestureRecognizerStateBegan) {
+        return;
+    }
+    if (![self hasCurrentInteractionContext]) {
+        [self detachProfileGestureAndOverlay];
+        return;
+    }
+    [self showGearScreen];
+}
+
+- (void)showGearScreen {
+    if (![self hasCurrentInteractionContext]) {
+        [self detachProfileGestureAndOverlay];
+        return;
+    }
+    if (self.ownedScreenView != nil) {
+        return;
+    }
+
+    UIWindow *window = self.hostWindow;
+    UIView *overlay = [[UIView alloc] initWithFrame:window.bounds];
+    overlay.translatesAutoresizingMaskIntoConstraints = NO;
+    overlay.backgroundColor = UIColor.systemBackgroundColor;
+    overlay.opaque = YES;
+    overlay.accessibilityIdentifier = @"tkp.guest.profile-controls.overlay";
+    [window addSubview:overlay];
+    [NSLayoutConstraint activateConstraints:@[
+        [overlay.leadingAnchor constraintEqualToAnchor:window.leadingAnchor],
+        [overlay.trailingAnchor constraintEqualToAnchor:window.trailingAnchor],
+        [overlay.topAnchor constraintEqualToAnchor:window.topAnchor],
+        [overlay.bottomAnchor constraintEqualToAnchor:window.bottomAnchor],
+    ]];
+    self.ownedScreenView = overlay;
+
+    UIView *gearScreen = [[UIView alloc] initWithFrame:CGRectZero];
+    gearScreen.translatesAutoresizingMaskIntoConstraints = NO;
+    gearScreen.backgroundColor = UIColor.systemBackgroundColor;
+    gearScreen.accessibilityIdentifier = @"tkp.guest.profile-controls.gear-screen";
+    [overlay addSubview:gearScreen];
+    [NSLayoutConstraint activateConstraints:@[
+        [gearScreen.leadingAnchor constraintEqualToAnchor:overlay.leadingAnchor],
+        [gearScreen.trailingAnchor constraintEqualToAnchor:overlay.trailingAnchor],
+        [gearScreen.topAnchor constraintEqualToAnchor:overlay.topAnchor],
+        [gearScreen.bottomAnchor constraintEqualToAnchor:overlay.bottomAnchor],
+    ]];
+    self.gearScreenView = gearScreen;
+
+    UIButton *gearButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    gearButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [gearButton setImage:[UIImage systemImageNamed:@"gearshape.fill"]
+                forState:UIControlStateNormal];
+    gearButton.tintColor = UIColor.labelColor;
+    gearButton.accessibilityLabel = @"Open profile settings";
+    gearButton.accessibilityHint = @"Open local profile-view eligibility settings.";
+    gearButton.accessibilityIdentifier = @"tkp.guest.profile-controls.gear-button";
+    [gearButton addTarget:self action:@selector(gearButtonTapped:)
+         forControlEvents:UIControlEventTouchUpInside];
+    [gearScreen addSubview:gearButton];
+    [NSLayoutConstraint activateConstraints:@[
+        [gearButton.centerXAnchor constraintEqualToAnchor:gearScreen.centerXAnchor],
+        [gearButton.centerYAnchor constraintEqualToAnchor:gearScreen.centerYAnchor],
+        [gearButton.widthAnchor constraintEqualToConstant:96.0],
+        [gearButton.heightAnchor constraintEqualToConstant:96.0],
+    ]];
+    self.gearButton = gearButton;
+    [self addCloseButtonToOverlay:overlay];
+}
+
+- (void)addCloseButtonToOverlay:(UIView *)overlay {
+    UIButton *closeButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    closeButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [closeButton setImage:[UIImage systemImageNamed:@"xmark"]
+                 forState:UIControlStateNormal];
+    closeButton.tintColor = UIColor.secondaryLabelColor;
+    closeButton.backgroundColor = UIColor.secondarySystemBackgroundColor;
+    closeButton.layer.cornerRadius = 18.0;
+    closeButton.accessibilityLabel = @"Close profile settings";
+    closeButton.accessibilityIdentifier = @"tkp.guest.profile-controls.close-button";
+    [closeButton addTarget:self action:@selector(closeButtonTapped:)
+          forControlEvents:UIControlEventTouchUpInside];
+    [overlay addSubview:closeButton];
+    UILayoutGuide *safeArea = overlay.safeAreaLayoutGuide;
+    [NSLayoutConstraint activateConstraints:@[
+        [closeButton.topAnchor constraintEqualToAnchor:safeArea.topAnchor constant:8.0],
+        [closeButton.trailingAnchor constraintEqualToAnchor:safeArea.trailingAnchor constant:-16.0],
+        [closeButton.widthAnchor constraintEqualToConstant:44.0],
+        [closeButton.heightAnchor constraintEqualToConstant:44.0],
+    ]];
+    self.closeButton = closeButton;
+}
+
+- (void)gearButtonTapped:(UIButton *)sender {
     (void)sender;
-    if (self.panelWindow == nil ||
-        UIApplication.sharedApplication.applicationState != UIApplicationStateActive ||
-        self.panelWindow.windowScene.activationState != UISceneActivationStateForegroundActive) {
-        self.panelWindow.hidden = YES;
+    if (![self hasCurrentInteractionContext] || self.ownedScreenView == nil ||
+        self.gearScreenView.superview != self.ownedScreenView) {
+        [self detachProfileGestureAndOverlay];
         return;
     }
-
-    UIViewController *presenter = nil;
-    UIWindow *hostWindow = TKPFindForegroundGuestWindow(NULL, &presenter);
-    if (hostWindow == nil || presenter == nil || !presenter.isViewLoaded ||
-        presenter.viewIfLoaded.window != hostWindow) {
-        return;
-    }
-
-    self.panelWindow.hidden = YES;
-    NSString *diagnostic = TKPProfileControlsDiagnostic(gLastProfileControlsStatus);
-    NSString *message = [NSString stringWithFormat:@"%@\n\n%s", diagnostic,
-                         TKPLocalOnlyCaveat];
-    UIAlertController *sheet = [UIAlertController
-        alertControllerWithTitle:@"TK+ Profile Controls"
-                         message:message
-                  preferredStyle:UIAlertControllerStyleActionSheet];
-
-    __weak __typeof__(self) weakSelf = self;
-    __weak UIAlertController *weakSheet = sheet;
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Enable local suppression"
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(__unused UIAlertAction *action) {
-        [weakSelf enableProfileSuppression];
-        [weakSelf restorePanelAfterSheet:weakSheet];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Disable local suppression"
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(__unused UIAlertAction *action) {
-        gLastProfileControlsStatus = TKPProfileControlsSetSuppressionEnabled(NO);
-        [weakSelf restorePanelAfterSheet:weakSheet];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel"
-                                              style:UIAlertActionStyleCancel
-                                            handler:^(__unused UIAlertAction *action) {
-        [weakSelf restorePanelAfterSheet:weakSheet];
-    }]];
-
-    UIPopoverPresentationController *popover = sheet.popoverPresentationController;
-    if (popover != nil) {
-        popover.sourceView = presenter.viewIfLoaded;
-        popover.sourceRect = CGRectMake(CGRectGetMidX(presenter.viewIfLoaded.bounds),
-                                        CGRectGetMidY(presenter.viewIfLoaded.bounds), 1.0, 1.0);
-        popover.permittedArrowDirections = UIPopoverArrowDirectionAny;
-    }
-    self.activeSheet = sheet;
-    sheet.presentationController.delegate = self;
-    [presenter presentViewController:sheet animated:YES completion:^{
-        sheet.presentationController.delegate = weakSelf;
-    }];
+    [self showSettingsScreen];
 }
 
-- (void)enableProfileSuppression {
-    NSURL *trustedImageURL = TKPTrustedGuestImageURL();
-    if (trustedImageURL == nil) {
-        gLastProfileControlsStatus = TKPProfileControlsStatusInvalidImageURL;
+- (void)showSettingsScreen {
+    if (![self hasCurrentInteractionContext] || self.ownedScreenView == nil) {
+        [self detachProfileGestureAndOverlay];
+        return;
+    }
+    [self.gearScreenView removeFromSuperview];
+    self.gearScreenView = nil;
+    self.gearButton = nil;
+
+    UIView *settingsScreen = [[UIView alloc] initWithFrame:CGRectZero];
+    settingsScreen.translatesAutoresizingMaskIntoConstraints = NO;
+    settingsScreen.backgroundColor = UIColor.systemBackgroundColor;
+    settingsScreen.accessibilityIdentifier = @"tkp.guest.profile-controls.settings-screen";
+    [self.ownedScreenView insertSubview:settingsScreen atIndex:0];
+    [NSLayoutConstraint activateConstraints:@[
+        [settingsScreen.leadingAnchor constraintEqualToAnchor:self.ownedScreenView.leadingAnchor],
+        [settingsScreen.trailingAnchor constraintEqualToAnchor:self.ownedScreenView.trailingAnchor],
+        [settingsScreen.topAnchor constraintEqualToAnchor:self.ownedScreenView.topAnchor],
+        [settingsScreen.bottomAnchor constraintEqualToAnchor:self.ownedScreenView.bottomAnchor],
+    ]];
+    self.settingsScreenView = settingsScreen;
+
+    UIScrollView *scrollView = [[UIScrollView alloc] initWithFrame:CGRectZero];
+    scrollView.translatesAutoresizingMaskIntoConstraints = NO;
+    scrollView.alwaysBounceVertical = YES;
+    [settingsScreen addSubview:scrollView];
+    UILayoutGuide *safeArea = settingsScreen.safeAreaLayoutGuide;
+    [NSLayoutConstraint activateConstraints:@[
+        [scrollView.leadingAnchor constraintEqualToAnchor:safeArea.leadingAnchor constant:24.0],
+        [scrollView.trailingAnchor constraintEqualToAnchor:safeArea.trailingAnchor constant:-24.0],
+        [scrollView.topAnchor constraintEqualToAnchor:safeArea.topAnchor constant:72.0],
+        [scrollView.bottomAnchor constraintEqualToAnchor:safeArea.bottomAnchor constant:-16.0],
+    ]];
+
+    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    titleLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleLargeTitle];
+    titleLabel.adjustsFontForContentSizeCategory = YES;
+    titleLabel.text = @"Profile settings";
+
+    UILabel *subtitleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    subtitleLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+    subtitleLabel.adjustsFontForContentSizeCategory = YES;
+    subtitleLabel.numberOfLines = 0;
+    subtitleLabel.textColor = UIColor.secondaryLabelColor;
+    subtitleLabel.text = @"Local controls for profile-view eligibility.";
+
+    UILabel *switchTitleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    switchTitleLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+    switchTitleLabel.adjustsFontForContentSizeCategory = YES;
+    switchTitleLabel.numberOfLines = 0;
+    switchTitleLabel.text = @"Suppress profile-view eligibility checks";
+
+    UISwitch *suppressionSwitch = [[UISwitch alloc] initWithFrame:CGRectZero];
+    suppressionSwitch.on = TKPProfileControlsSuppressionEnabled();
+    suppressionSwitch.accessibilityLabel = @"Suppress profile-view eligibility checks";
+    suppressionSwitch.accessibilityIdentifier = @"tkp.guest.profile-controls.suppression-switch";
+    [suppressionSwitch addTarget:self action:@selector(suppressionSwitchChanged:)
+                forControlEvents:UIControlEventValueChanged];
+    self.suppressionSwitch = suppressionSwitch;
+
+    UIStackView *switchRow = [[UIStackView alloc] initWithArrangedSubviews:@[
+        switchTitleLabel, suppressionSwitch
+    ]];
+    switchRow.axis = UILayoutConstraintAxisHorizontal;
+    switchRow.alignment = UIStackViewAlignmentCenter;
+    switchRow.distribution = UIStackViewDistributionFill;
+    switchRow.spacing = 16.0;
+
+    UILabel *statusLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    statusLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
+    statusLabel.adjustsFontForContentSizeCategory = YES;
+    statusLabel.numberOfLines = 0;
+    statusLabel.textColor = UIColor.secondaryLabelColor;
+    statusLabel.accessibilityIdentifier = @"tkp.guest.profile-controls.status";
+    statusLabel.text = TKPProfileControlsDiagnostic(gLastProfileControlsStatus);
+    self.statusLabel = statusLabel;
+
+    UILabel *caveatLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    caveatLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+    caveatLabel.adjustsFontForContentSizeCategory = YES;
+    caveatLabel.numberOfLines = 0;
+    caveatLabel.textColor = UIColor.secondaryLabelColor;
+    caveatLabel.text = [NSString stringWithUTF8String:TKPLocalOnlyCaveat];
+
+    UIStackView *contentStack = [[UIStackView alloc] initWithArrangedSubviews:@[
+        titleLabel, subtitleLabel, switchRow, statusLabel, caveatLabel
+    ]];
+    contentStack.translatesAutoresizingMaskIntoConstraints = NO;
+    contentStack.axis = UILayoutConstraintAxisVertical;
+    contentStack.alignment = UIStackViewAlignmentFill;
+    contentStack.distribution = UIStackViewDistributionFill;
+    contentStack.spacing = 22.0;
+    [scrollView addSubview:contentStack];
+    UILayoutGuide *contentGuide = scrollView.contentLayoutGuide;
+    UILayoutGuide *frameGuide = scrollView.frameLayoutGuide;
+    [NSLayoutConstraint activateConstraints:@[
+        [contentStack.leadingAnchor constraintEqualToAnchor:contentGuide.leadingAnchor],
+        [contentStack.trailingAnchor constraintEqualToAnchor:contentGuide.trailingAnchor],
+        [contentStack.topAnchor constraintEqualToAnchor:contentGuide.topAnchor],
+        [contentStack.bottomAnchor constraintEqualToAnchor:contentGuide.bottomAnchor],
+        [contentStack.widthAnchor constraintEqualToAnchor:frameGuide.widthAnchor],
+    ]];
+}
+
+- (void)closeButtonTapped:(UIButton *)sender {
+    (void)sender;
+    if (![self hasCurrentInteractionContext] || self.ownedScreenView == nil) {
+        [self detachProfileGestureAndOverlay];
+        return;
+    }
+    [self removeOwnedOverlay];
+}
+
+- (void)suppressionSwitchChanged:(UISwitch *)sender {
+    if (sender != self.suppressionSwitch ||
+        ![self hasCurrentInteractionContext] ||
+        self.settingsScreenView.superview != self.ownedScreenView) {
+        [self detachProfileGestureAndOverlay];
         return;
     }
 
-    TKPProfileControlsStatus status = TKPProfileControlsInstall(trustedImageURL);
-    if (status == TKPProfileControlsStatusInstalled ||
-        status == TKPProfileControlsStatusAlreadyInstalled) {
-        status = TKPProfileControlsSetSuppressionEnabled(YES);
-    }
-    gLastProfileControlsStatus = status;
-}
-
-- (void)restorePanelAfterSheet:(UIAlertController *)sheet {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
-                                 (int64_t)(TKPSheetDismissalFallback * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{
-        if (self.activeSheet == sheet) {
-            self.activeSheet = nil;
+    if (sender.isOn) {
+        NSURL *trustedImageURL = TKPTrustedGuestImageURL();
+        if (trustedImageURL == nil) {
+            gLastProfileControlsStatus = TKPProfileControlsStatusInvalidImageURL;
+        } else {
+            TKPProfileControlsStatus status = TKPProfileControlsInstall(trustedImageURL);
+            if (status == TKPProfileControlsStatusInstalled ||
+                status == TKPProfileControlsStatusAlreadyInstalled) {
+                status = TKPProfileControlsSetSuppressionEnabled(YES);
+            }
+            gLastProfileControlsStatus = status;
         }
-        [self showPanelIfForeground];
-    });
+    } else {
+        gLastProfileControlsStatus = TKPProfileControlsSetSuppressionEnabled(NO);
+    }
+
+    sender.on = TKPProfileControlsSuppressionEnabled();
+    self.statusLabel.text = TKPProfileControlsDiagnostic(gLastProfileControlsStatus);
 }
 
-- (void)presentationControllerDidDismiss:(UIPresentationController *)presentationController {
-    if (presentationController.presentedViewController == self.activeSheet) {
-        self.activeSheet = nil;
-        [self showPanelIfForeground];
-    }
+- (void)removeOwnedOverlay {
+    [self.ownedScreenView removeFromSuperview];
+    self.ownedScreenView = nil;
+    self.gearScreenView = nil;
+    self.settingsScreenView = nil;
+    self.gearButton = nil;
+    self.closeButton = nil;
+    self.suppressionSwitch = nil;
+    self.statusLabel = nil;
 }
 
-- (void)showPanelIfForeground {
-    UIWindowScene *scene = self.panelWindow.windowScene;
-    if (self.panelWindow != nil && scene != nil &&
-        UIApplication.sharedApplication.applicationState == UIApplicationStateActive &&
-        scene.activationState == UISceneActivationStateForegroundActive) {
-        self.panelWindow.hidden = NO;
+- (void)detachProfileGestureAndOverlay {
+    [self removeOwnedOverlay];
+    UIView *candidate = self.profileTabView;
+    UILongPressGestureRecognizer *recognizer = self.profilePressRecognizer;
+    if (candidate != nil && recognizer != nil && recognizer.view == candidate) {
+        [candidate removeGestureRecognizer:recognizer];
     }
+    self.profilePressRecognizer = nil;
+    self.profileTabView = nil;
+    self.hostWindow = nil;
+    self.hostScene = nil;
+}
+
+- (void)cleanupForLifecycleTransition {
+    self.lifecycleEpoch += 1;
+    if (self.lifecycleEpoch == 0) {
+        self.lifecycleEpoch = 1;
+    }
+    self.discoveryDeadline = 0.0;
+    [self stopDiscovery];
+    [self detachProfileGestureAndOverlay];
 }
 
 - (void)applicationWillResignActive:(NSNotification *)notification {
     (void)notification;
-    BOOL canRetryStartup = self.panelWindow == nil &&
-        UIApplication.sharedApplication.applicationState == UIApplicationStateActive &&
-        TKPHasForegroundActiveScene() &&
-        NSProcessInfo.processInfo.systemUptime < self.discoveryDeadline;
-    [self stopDiscovery];
-    self.panelWindow.hidden = YES;
-    UIAlertController *sheet = self.activeSheet;
-    if (sheet.presentingViewController != nil) {
-        [sheet dismissViewControllerAnimated:NO completion:nil];
-    }
-    self.activeSheet = nil;
-    if (canRetryStartup) {
-        [self scheduleBoundedStartupRetry];
-    }
+    [self cleanupForLifecycleTransition];
 }
 
-- (void)scheduleBoundedStartupRetry {
-    if (self.startupRetryPending || self.discoveryDeadline <= 0.0) {
-        return;
-    }
-    self.startupRetryPending = YES;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{
-        self.startupRetryPending = NO;
-        if (self.panelWindow != nil ||
-            UIApplication.sharedApplication.applicationState != UIApplicationStateActive ||
-            !TKPHasForegroundActiveScene() ||
-            NSProcessInfo.processInfo.systemUptime >= self.discoveryDeadline) {
-            return;
-        }
-        [self startDiscoveryTimerBeforeDeadline];
-    });
+- (void)applicationDidEnterBackground:(NSNotification *)notification {
+    (void)notification;
+    [self cleanupForLifecycleTransition];
 }
 
 - (void)applicationDidBecomeActive:(NSNotification *)notification {
     (void)notification;
+    uint64_t callbackEpoch = self.lifecycleEpoch;
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (UIApplication.sharedApplication.applicationState == UIApplicationStateActive &&
-            self.panelWindow != nil && self.panelWindow.windowScene.activationState ==
-            UISceneActivationStateForegroundActive) {
-            self.panelWindow.hidden = NO;
-        } else {
+        if (self.lifecycleEpoch == callbackEpoch &&
+            UIApplication.sharedApplication.applicationState == UIApplicationStateActive) {
             [self beginBoundedDiscovery];
         }
     });
 }
 
 - (void)sceneWillDeactivate:(NSNotification *)notification {
-    if (self.panelWindow != nil && notification.object == self.panelWindow.windowScene) {
-        [self applicationWillResignActive:notification];
+    UIScene *scene = [notification.object isKindOfClass:UIScene.class]
+        ? (UIScene *)notification.object : nil;
+    if (scene == nil || self.hostScene == nil || scene == self.hostScene) {
+        [self cleanupForLifecycleTransition];
     }
 }
 
+- (void)sceneDidActivate:(NSNotification *)notification {
+    (void)notification;
+    uint64_t callbackEpoch = self.lifecycleEpoch;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (self.lifecycleEpoch == callbackEpoch &&
+            UIApplication.sharedApplication.applicationState == UIApplicationStateActive) {
+            [self beginBoundedDiscovery];
+        }
+    });
+}
+
 - (void)sceneDidDisconnect:(NSNotification *)notification {
-    if (self.panelWindow != nil && notification.object == self.panelWindow.windowScene) {
-        [self stopDiscovery];
-        self.panelWindow.hidden = YES;
-        self.panelWindow = nil;
-        [self beginBoundedDiscovery];
+    UIScene *scene = [notification.object isKindOfClass:UIScene.class]
+        ? (UIScene *)notification.object : nil;
+    if (scene == nil || self.hostScene == nil || scene == self.hostScene) {
+        [self cleanupForLifecycleTransition];
     }
+}
+
+- (void)dealloc {
+    [NSNotificationCenter.defaultCenter removeObserver:self];
+    [self.discoveryTimer invalidate];
 }
 
 @end
 
 static NSURL *TKPTrustedGuestImageURL(void) {
+#if defined(TKP_DEVICE_PANEL_TESTING)
+    NSString *testExecutablePath = NSBundle.mainBundle.executablePath;
+    const char *testExecutableFilePath = testExecutablePath.fileSystemRepresentation;
+    char canonicalTestExecutablePath[PATH_MAX];
+    if (!TKPCanonicalPath(testExecutableFilePath, canonicalTestExecutablePath)) {
+        return nil;
+    }
+    NSString *canonicalPath = [[NSFileManager defaultManager]
+        stringWithFileSystemRepresentation:canonicalTestExecutablePath
+                                   length:strlen(canonicalTestExecutablePath)];
+    return canonicalPath == nil ? nil : [NSURL fileURLWithPath:canonicalPath isDirectory:NO];
+#else
     Dl_info panelImage = {0};
     if (dladdr((const void *)(uintptr_t)TKPDevicePanelStart, &panelImage) == 0 ||
         panelImage.dli_fname == NULL) {
@@ -470,7 +775,7 @@ static NSURL *TKPTrustedGuestImageURL(void) {
     }
 
     char canonicalPanelPath[PATH_MAX];
-    if (realpath(panelImage.dli_fname, canonicalPanelPath) == NULL) {
+    if (!TKPCanonicalPath(panelImage.dli_fname, canonicalPanelPath)) {
         return nil;
     }
     NSString *panelPath = [[NSFileManager defaultManager]
@@ -488,31 +793,27 @@ static NSURL *TKPTrustedGuestImageURL(void) {
         stringByAppendingPathComponent:@"MusicallyCore.framework/MusicallyCore"];
     char canonicalGuestPath[PATH_MAX];
     const char *guestFileSystemPath = fixedGuestPath.fileSystemRepresentation;
-    if (guestFileSystemPath == NULL || realpath(guestFileSystemPath, canonicalGuestPath) == NULL) {
+    if (!TKPCanonicalPath(guestFileSystemPath, canonicalGuestPath)) {
         return nil;
     }
-
     NSString *trustedPath = [[NSFileManager defaultManager]
         stringWithFileSystemRepresentation:canonicalGuestPath
                                    length:strlen(canonicalGuestPath)];
-    if (trustedPath == nil) {
-        return nil;
-    }
-    return [NSURL fileURLWithPath:trustedPath isDirectory:NO];
+    return trustedPath == nil ? nil : [NSURL fileURLWithPath:trustedPath isDirectory:NO];
+#endif
 }
 
 void TKPDevicePanelStart(void) {
-    if ([NSThread isMainThread]) {
+    uint64_t startEpoch = atomic_fetch_add_explicit(&gDevicePanelStartEpoch, 1,
+                                                    memory_order_relaxed) + 1;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (atomic_load_explicit(&gDevicePanelStartEpoch, memory_order_relaxed) != startEpoch) {
+            return;
+        }
         [[TKPDevicePanelController sharedController] start];
-    } else {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [[TKPDevicePanelController sharedController] start];
-        });
-    }
+    });
 }
 
 __attribute__((constructor)) static void TKPDevicePanelConstructor(void) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        TKPDevicePanelStart();
-    });
+    TKPDevicePanelStart();
 }

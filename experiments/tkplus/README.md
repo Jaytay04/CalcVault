@@ -18,8 +18,9 @@ and its mandatory host-side validation; no filesystem transport is implemented y
   exact approved-host policy. It performs no network or filesystem operations.
 - `Guest/TKPProfileControls.h/.m`: explicit runtime/ABI/image-checked eligibility
   hooks, off by default. It is not an anonymity guarantee.
-- `Guest/TKPDevicePanel.m`: independent TK+ controls, explicit user opt-in and
-  inactive-state hiding; no native Vault download action yet.
+- `Guest/TKPDevicePanel.m`: Profile-tab long-press entry, separate gear screen
+  and explicit opt-in settings in the existing guest window; no native Vault
+  download action yet.
 - `assemble_device_candidate.py`: pinned, no-overwrite private overlay assembly,
   whole original add-on exclusion and complete member hash/CRC readback.
 - `Core/TKPTransfer.h/.c`: portable bounded transfer lease and record validation.
@@ -73,10 +74,14 @@ available only after GitHub recognizes the workflow on the default branch.
 
 ## Integration status
 
-The first device slice connects only the TK+ panel and local profile eligibility
+The current device slice connects only Profile-tab settings and local profile eligibility
 controls. Guest model selection, downloading, IPC and host media
 decode/confirmation/encrypted import are not yet connected. The separate
-`tkplus-device-addon.yml` workflow links only the independent ARM64 iOS18 dylib;
+`tkplus-device-addon.yml` workflow links the independent ARM64 iOS18 dylib and
+runs a separate synthetic iOS simulator settings fixture. That fixture invokes
+controller actions; it does not establish physical gesture recognition or the
+actual TikTok tab mapping. Its compile-only image substitution is excluded from
+the device module. No extra window or native-controller presentation is used;
 private packaging remains local and never supplies a proprietary IPA to CI.
 Source and synthetic test
 results must be distinguished from native compatibility and signed-phone tests.

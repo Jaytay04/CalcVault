@@ -11,6 +11,8 @@ on:
       - experiments/tkplus/assemble_device_candidate.py
       - experiments/tkplus/Tests/build_device_addon.sh
       - experiments/tkplus/Tests/test_device_candidate.py
+      - experiments/tkplus/Tests/TKPProfileSettingsUIFixture*
+      - experiments/tkplus/Tests/test_profile_settings_ui.sh
       - .github/workflows/tkplus-device-addon.yml
 
 permissions:
@@ -19,7 +21,7 @@ permissions:
 jobs:
   independent-device-module:
     runs-on: macos-15
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - name: Select pinned Apple toolchain
@@ -32,10 +34,12 @@ jobs:
           python3 -m unittest discover -s experiments/tkplus/Tests -p test_device_candidate.py -v
       - name: Link and verify independent iPhoneOS module
         run: bash experiments/tkplus/Tests/build_device_addon.sh "$RUNNER_TEMP/tkp-device-module"
+      - name: Run synthetic profile settings UI on iOS simulator
+        run: bash experiments/tkplus/Tests/test_profile_settings_ui.sh "$RUNNER_TEMP/tkp-settings-ui-fixture"
       - name: Upload only independently authored module and build evidence
         uses: actions/upload-artifact@v4
         with:
-          name: tkplus-independent-device-module-test1
+          name: tkplus-independent-device-module-profile-settings-test2
           path: ${{ runner.temp }}/tkp-device-module/
           if-no-files-found: error
           retention-days: 7
