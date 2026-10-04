@@ -31,6 +31,19 @@ Do not claim that the app, its data footprint, or website use is undetectable. A
 
 ## 2. Non-negotiable security and product rules
 
+### Approved independent TKPlus research exception
+
+On 2026-10-02 the owner explicitly approved a narrow native-runtime-hook
+exception for independently authored selected-media downloads intended for
+Vault and opt-in profile-view eligibility controls in the existing guest.
+Authoritative new source and execution notes are in the outer Calculator
+project at `experiments/tkplus/` and `docs/tkplus/INDEPENDENT_IMPLEMENTATION.md`.
+No third-party tweak code is copied. This does not authorize licensing bypass,
+telemetry, destructive cleaners, region spoofing, anti-inspection hooks,
+private provider endpoints, credentials/cookies or guest access to Vault keys.
+Products, App IDs, bookmarks, signing-resource policy and lifecycle guards
+remain unchanged. The general exclusions below continue outside this scope.
+
 The vault's confidentiality must come from cryptographic keys and authenticated encryption, not from a hidden view or an `isUnlocked` Boolean. A plain or salted SHA-256 hash of a short calculator PIN is not an adequate vault design. Use an independent high-entropy key, a password-hardening function for the actual vault passphrase, and a protected biometric convenience path. Libsodium documents Argon2id password derivation and authenticated streaming encryption; use those implementations rather than inventing replacements. [S08, S09]
 
 The browser session store is a **separate protection boundary**. A persistent `WKWebsiteDataStore` may keep website state on disk. Hiding or destroying a web view does not make that store part of the encrypted vault. The UI and documentation must distinguish persistent browser convenience from encrypted file storage. [S05, S06]
@@ -285,6 +298,20 @@ Functional tests involving an account are manual and owner-operated. Automated C
 **Gate G5:** All three tabs have truthful per-feature status. No website state or JavaScript obtains vault access. Persistent/ephemeral behavior and local data reset are tested separately. A blocked login remains a documented limitation, not a claimed success.
 
 ## 10. Lifecycle privacy and locking
+
+### Approved native verification handoff
+
+On 2026-10-03 the owner approved an explicit native verification handoff of at
+most two minutes, subject to an earlier OS background deadline. Vault locking,
+key release and private-work cancellation remain immediate. A capable guest
+runtime may retain only concealed in-memory UI, with fresh host authentication
+and credential inventory checks before resume. Explicit Lock, protected-data
+loss, expiry or runtime failure terminates it. The owner accepted that iOS
+protected-data loss is not guaranteed to coincide immediately with physical
+device lock. No credentials, codes, cookies or authentication fields may be
+captured, copied or logged. No new App IDs, products, entitlements or provider
+authentication bypasses are approved. An unverified native pause capability must
+remain unavailable; synthetic runtime diagnostics are not proof of media stop.
 
 A SwiftUI screen swap scheduled later on the main queue is not the whole privacy strategy. Install an opaque calculator-style cover synchronously through UIKit lifecycle hooks before the system can capture the background representation. Cover presented private sheets and any app-owned windows as well as the main view. Apple's background-UI guidance is the relevant API reference; validate timing on a physical phone. [S13]
 

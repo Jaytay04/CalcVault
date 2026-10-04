@@ -13,6 +13,23 @@ public protocol NativeGuestRuntime: AnyObject {
     func revoke()
 }
 
+/// A runtime that can briefly suspend and later resume a verified guest while
+/// the host performs a bounded, user-requested verification flow. A successful
+/// suspension callback must confirm that guest content and active media are
+/// actually quiescent; accepting a suspension request alone is insufficient.
+@MainActor
+public protocol NativeGuestVerificationRuntime: NativeGuestRuntime {
+    func suspendForVerification(completion: @escaping @MainActor (Bool) -> Void)
+    func resumeAfterVerification(completion: @escaping @MainActor (Bool) -> Void)
+}
+
+/// A host-owned lease that bounds how long a suspended runtime may be retained.
+@MainActor
+public protocol NativeGuestHandoffLease: AnyObject {
+    var isValid: Bool { get }
+    func end()
+}
+
 /// Allowlisted preparation failures only. Never carry an underlying error,
 /// filesystem path, entitlement value or credential into the UI report.
 public enum NativeGuestPreparationFailure: String, Error, Sendable {
@@ -41,6 +58,7 @@ public final class NativeGuestCoordinator: ObservableObject {
         case checking
         case presenting
         case running
+        case holding
         case blocked
         case ended
     }
@@ -62,6 +80,8 @@ public final class NativeGuestCoordinator: ObservableObject {
     private let checkLegacyCredentialAbsence: @Sendable (Bool) async throws -> Void
     private let runtimeFactory: (@MainActor () throws -> any NativeGuestRuntime)?
     private let authorizationFactory: (@MainActor () -> any NativeGuestCredentialAuthorization)?
+    private let handoffLeaseFactory: (@MainActor (@escaping @MainActor () -> Void) -> (any NativeGuestHandoffLease)?)?
+    private let handoffDuration: Duration
     private struct ActiveAuthorization {
         let request: CheckRequest
         let promptToken: UUID
@@ -79,19 +99,57 @@ public final class NativeGuestCoordinator: ObservableObject {
     private var runtimeStartPending = false
     private var runtimeRevoked = false
     private var launchFailure: String?
+    private struct VerificationHandoff {
+        let token: UUID
+        let originatingSession: SessionContext
+        let runtime: any NativeGuestVerificationRuntime
+        let lease: any NativeGuestHandoffLease
+        let deadline: ContinuousClock.Instant
+        var suspensionAcknowledged = false
+        var resumePending = false
+    }
+    private var verificationHandoff: VerificationHandoff?
+    private var handoffDeadlineTask: Task<Void, Never>?
+    private var verificationOperationID: UUID?
 
     public init(
         lifecycle: SessionLifecycleCoordinator,
         check: @escaping @Sendable (Bool) async throws -> Void,
         runtimeFactory: (@MainActor () throws -> any NativeGuestRuntime)?,
-        authorizationFactory: (@MainActor () -> any NativeGuestCredentialAuthorization)? = nil
+        authorizationFactory: (@MainActor () -> any NativeGuestCredentialAuthorization)? = nil,
+        leaseFactory: (@MainActor (@escaping @MainActor () -> Void) -> (any NativeGuestHandoffLease)?)? = nil
     ) {
         self.lifecycle = lifecycle
         self.checkLegacyCredentialAbsence = check
         self.runtimeFactory = runtimeFactory
         self.authorizationFactory = authorizationFactory
+        self.handoffLeaseFactory = leaseFactory
+        self.handoffDuration = .seconds(120)
         self.state = runtimeFactory == nil ? .unavailable : .idle
 
+        observeLifecycle()
+    }
+
+    internal init(
+        lifecycle: SessionLifecycleCoordinator,
+        check: @escaping @Sendable (Bool) async throws -> Void,
+        runtimeFactory: (@MainActor () throws -> any NativeGuestRuntime)?,
+        authorizationFactory: (@MainActor () -> any NativeGuestCredentialAuthorization)? = nil,
+        leaseFactory: (@MainActor (@escaping @MainActor () -> Void) -> (any NativeGuestHandoffLease)?)? = nil,
+        handoffDuration: Duration
+    ) {
+        self.lifecycle = lifecycle
+        self.checkLegacyCredentialAbsence = check
+        self.runtimeFactory = runtimeFactory
+        self.authorizationFactory = authorizationFactory
+        self.handoffLeaseFactory = leaseFactory
+        self.handoffDuration = min(handoffDuration, .seconds(120))
+        self.state = runtimeFactory == nil ? .unavailable : .idle
+
+        observeLifecycle()
+    }
+
+    private func observeLifecycle() {
         lifecycleObservation = lifecycle.$state
             .dropFirst()
             .sink { [weak self] _ in
@@ -113,7 +171,49 @@ public final class NativeGuestCoordinator: ObservableObject {
               isValid(presentationRequest.session) else {
             return nil
         }
-        return runtime?.viewController
+        return runtime?.viewController ?? verificationHandoff?.runtime.viewController
+    }
+
+    /// Presentation hint only. `start` independently enforces every launch gate.
+    /// A failed credential check can be retried; a consumed runtime cannot.
+    public var canRequestLaunch: Bool {
+        runtimeFactory != nil && !runtimeAttemptConsumed && activeRequest == nil
+            && (state == .idle || state == .blocked) && validSessionContext() != nil
+    }
+
+    /// True only while an active guest, verification capability and a lease
+    /// factory are available to begin the bounded handoff.
+    public var canBeginVerificationHandoff: Bool {
+        state == .running
+            && showingGuest
+            && !runtimeRevoked
+            && presentationRequest.map { isValid($0.session) } == true
+            && runtime is any NativeGuestVerificationRuntime
+            && handoffLeaseFactory != nil
+    }
+
+    /// Internal mount point retained while the guest is hidden during a hold.
+    /// It never grants interaction or public presentation authority.
+    internal var mountedViewController: UIViewController? {
+        guard !runtimeRevoked,
+              (showingGuest && presentationRequest.map { isValid($0.session) } == true)
+                || verificationHandoff != nil else { return nil }
+        return runtime?.viewController ?? verificationHandoff?.runtime.viewController
+    }
+
+    /// Resume is offered only after suspension acknowledgement and while the
+    /// bounded lease, deadline, and a fresh private session all remain valid.
+    public var canResumeVerification: Bool {
+        guard let handoff = verificationHandoff,
+              handoff.suspensionAcknowledged,
+              !handoff.resumePending,
+              activeRequest == nil,
+              state == .holding || state == .blocked,
+              handoff.lease.isValid,
+              ContinuousClock().now < handoff.deadline,
+              let session = validSessionContext(),
+              session != handoff.originatingSession else { return false }
+        return true
     }
 
     /// Runtime summaries are surfaced only for an authorized live presentation.
@@ -140,6 +240,10 @@ public final class NativeGuestCoordinator: ObservableObject {
             return "Native guest is ready."
         case .running:
             return "Native guest is running."
+        case .holding:
+            return verificationHandoff?.suspensionAcknowledged == true
+                ? "Native guest is held for verification."
+                : "Native guest verification handoff is pending."
         case .blocked:
             return "Native guest could not be started."
         case .ended:
@@ -147,20 +251,32 @@ public final class NativeGuestCoordinator: ObservableObject {
         }
     }
 
-    /// Starts a fresh check only for an active private session. A runtime can
-    /// be attempted once per coordinator instance, including across lock/unlock.
+    /// Starts a fresh check only for an active private session. Runtime creation
+    /// remains one-shot; a bounded held runtime can only enter its resume path.
     @discardableResult
     public func start(biometricEnabled: Bool) -> Task<Void, Never>? {
-        guard runtimeFactory != nil, !runtimeAttemptConsumed else {
-            if runtimeFactory == nil {
-                state = .unavailable
-            }
+        guard runtimeFactory != nil else {
+            state = .unavailable
             return nil
         }
 
         guard activeRequest == nil else { return nil }
         guard let session = validSessionContext() else {
             state = .blocked
+            return nil
+        }
+
+        if let handoff = verificationHandoff {
+            guard !handoff.resumePending,
+                  state == .holding || state == .blocked else { return nil }
+            guard handoff.suspensionAcknowledged else { return nil }
+            guard handoff.lease.isValid,
+                  ContinuousClock().now < handoff.deadline else {
+                endVerificationHandoff(reason: "lease-expired")
+                return nil
+            }
+            guard session != handoff.originatingSession else { return nil }
+        } else if runtimeAttemptConsumed {
             return nil
         }
 
@@ -207,12 +323,125 @@ public final class NativeGuestCoordinator: ObservableObject {
         return task
     }
 
+    /// Hides the current presentation before asking the runtime to suspend.
+    /// The runtime is retained only by a unique, expiring handoff token.
+    @discardableResult
+    public func beginVerificationHandoff() -> Bool {
+        guard state == .running, showingGuest, !runtimeRevoked,
+              presentationRequest.map({ isValid($0.session) }) == true else { return false }
+        guard let runtime = runtime as? any NativeGuestVerificationRuntime,
+              let leaseFactory = handoffLeaseFactory else {
+            launchFailure = "stage=verification-handoff; reason=unsupported"
+            return false
+        }
+
+        let token = UUID()
+        var leaseInvalidatedDuringCreation = false
+        guard let lease = leaseFactory({ [weak self] in
+            leaseInvalidatedDuringCreation = true
+            self?.handoffLeaseDidEnd(token)
+        }) else {
+            launchFailure = "stage=verification-handoff; reason=lease-unavailable"
+            return false
+        }
+        guard lease.isValid, !leaseInvalidatedDuringCreation else {
+            lease.end()
+            launchFailure = "stage=verification-handoff; reason=lease-unavailable"
+            return false
+        }
+
+        guard let originatingSession = presentationRequest?.session else {
+            lease.end()
+            return false
+        }
+
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: handoffDuration)
+        let handoff = VerificationHandoff(
+            token: token,
+            originatingSession: originatingSession,
+            runtime: runtime,
+            lease: lease,
+            deadline: deadline
+        )
+
+        // Remove presentation authority before the adapter can begin work.
+        showingGuest = false
+        presentationRequest = nil
+        runtimeStartPending = false
+        runtimeStartAttempted = true
+        self.runtime = nil
+        verificationHandoff = handoff
+        runtimeRevoked = false
+        launchFailure = nil
+        state = .holding
+        handoffDeadlineTask = Task { @MainActor [weak self] in
+            do {
+                try await clock.sleep(until: deadline)
+            } catch {
+                return
+            }
+            guard self?.verificationHandoff?.token == token else { return }
+            self?.endVerificationHandoff(reason: "lease-expired")
+        }
+
+        runtime.suspendForVerification { [weak self] suspended in
+            self?.verificationSuspended(token: token, suspended: suspended)
+        }
+        return true
+    }
+
+    /// Hard termination for an explicit lock or protected lifecycle boundary.
+    /// This is idempotent and never extends the active handoff deadline.
+    public func endVerificationHandoff() {
+        if verificationHandoff != nil {
+            endVerificationHandoff(reason: "ended")
+            return
+        }
+
+        activeCheckTask?.cancel()
+        activeCheckTask = nil
+        activeRequest = nil
+        if let request = activeAuthorization?.request { endAuthorization(request) }
+        endRuntimePresentation()
+    }
+
     /// Call after the full-screen host has attached the authorized controller.
     /// Repeated calls never start the runtime twice.
     public func surfaceReady() {
         guard state == .presenting,
               showingGuest,
               !runtimeRevoked else { return }
+
+        if let handoff = verificationHandoff {
+            guard handoff.suspensionAcknowledged,
+                  !handoff.resumePending,
+                  handoff.lease.isValid,
+                  ContinuousClock().now < handoff.deadline,
+                  let presentationRequest = self.presentationRequest,
+                  presentationRequest.session != handoff.originatingSession,
+                  isValid(presentationRequest.session) else {
+                if let handoff = verificationHandoff,
+                   (!handoff.lease.isValid || ContinuousClock().now >= handoff.deadline) {
+                    endVerificationHandoff(reason: "lease-expired")
+                }
+                return
+            }
+
+            let operationID = UUID()
+            verificationOperationID = operationID
+            self.verificationHandoff?.resumePending = true
+            handoff.runtime.resumeAfterVerification { [weak self] resumed in
+                self?.verificationResumed(
+                    token: handoff.token,
+                    operationID: operationID,
+                    request: presentationRequest,
+                    resumed: resumed
+                )
+            }
+            return
+        }
+
         guard !runtimeStartAttempted else { return }
         guard let runtime,
               let presentationRequest,
@@ -230,7 +459,7 @@ public final class NativeGuestCoordinator: ObservableObject {
 
     private func canRunCheck(_ request: CheckRequest) -> Bool {
         activeRequest == request
-            && !runtimeAttemptConsumed
+            && (!runtimeAttemptConsumed || verificationHandoff != nil)
             && runtimeFactory != nil
             && isValid(request.session)
     }
@@ -283,12 +512,29 @@ public final class NativeGuestCoordinator: ObservableObject {
         activeCheckTask = nil
 
         guard isValid(request.session) else {
-            state = .idle
+            state = verificationHandoff == nil ? .idle : .holding
             return
         }
         if let failure {
             launchFailure = failure
             state = .blocked
+            return
+        }
+
+        if let handoff = verificationHandoff {
+            guard handoff.suspensionAcknowledged,
+                  handoff.lease.isValid,
+                  ContinuousClock().now < handoff.deadline,
+                  request.session != handoff.originatingSession else {
+                endVerificationHandoff(reason: "lease-expired")
+                return
+            }
+
+            runtimeRevoked = false
+            runtimeStartPending = false
+            presentationRequest = request
+            showingGuest = true
+            state = .presenting
             return
         }
 
@@ -335,7 +581,9 @@ public final class NativeGuestCoordinator: ObservableObject {
         endAuthorization(request)
         activeRequest = nil
         activeCheckTask = nil
-        state = runtimeFactory == nil ? .unavailable : .idle
+        state = verificationHandoff != nil
+            ? .holding
+            : (runtimeFactory == nil ? .unavailable : .idle)
     }
 
     private func runtimeDidStart(_ request: CheckRequest, started: Bool) {
@@ -361,6 +609,99 @@ public final class NativeGuestCoordinator: ObservableObject {
         }
     }
 
+    private func verificationSuspended(token: UUID, suspended: Bool) {
+        guard verificationHandoff?.token == token else { return }
+        guard let handoff = verificationHandoff else { return }
+        guard handoff.lease.isValid, ContinuousClock().now < handoff.deadline else {
+            endVerificationHandoff(reason: "lease-expired")
+            return
+        }
+        guard !handoff.suspensionAcknowledged else { return }
+        guard suspended else {
+            endVerificationHandoff(reason: "suspension-rejected")
+            return
+        }
+
+        verificationHandoff?.suspensionAcknowledged = true
+        state = .holding
+    }
+
+    private func verificationResumed(
+        token: UUID,
+        operationID: UUID,
+        request: CheckRequest,
+        resumed: Bool
+    ) {
+        guard let handoff = verificationHandoff, handoff.token == token else { return }
+        guard verificationOperationID == operationID,
+              handoff.resumePending,
+              presentationRequest == request,
+              showingGuest,
+              state == .presenting,
+              request.session != handoff.originatingSession,
+              isValid(request.session) else {
+            // If a resume finishes after the host session changed, the runtime's
+            // actual state is uncertain. Revoke the bounded hold fail-closed.
+            endVerificationHandoff(reason: "stale-resume")
+            return
+        }
+        guard handoff.lease.isValid, ContinuousClock().now < handoff.deadline else {
+            endVerificationHandoff(reason: "lease-expired")
+            return
+        }
+        guard resumed else {
+            endVerificationHandoff(reason: "resume-rejected")
+            return
+        }
+
+        verificationHandoff = nil
+        verificationOperationID = nil
+        handoffDeadlineTask?.cancel()
+        handoffDeadlineTask = nil
+        runtime = handoff.runtime
+        runtimeRevoked = false
+        runtimeStartPending = false
+        runtimeStartAttempted = true
+        launchFailure = nil
+        handoff.lease.end()
+        state = .running
+    }
+
+    private func handoffLeaseDidEnd(_ token: UUID) {
+        guard verificationHandoff?.token == token else { return }
+        endVerificationHandoff(reason: "lease-expired")
+    }
+
+    private func endVerificationHandoff(reason: String) {
+        guard let handoff = verificationHandoff else { return }
+
+        // Revoke authority and invalidate every callback before calling any
+        // injected cleanup code, which may synchronously notify the coordinator.
+        verificationHandoff = nil
+        verificationOperationID = nil
+        handoffDeadlineTask?.cancel()
+        handoffDeadlineTask = nil
+        showingGuest = false
+        presentationRequest = nil
+        runtimeStartPending = false
+        runtime = nil
+
+        activeCheckTask?.cancel()
+        activeCheckTask = nil
+        activeRequest = nil
+        if let request = activeAuthorization?.request { endAuthorization(request) }
+
+        runtimeRevoked = true
+        handoff.lease.end()
+        handoff.runtime.revoke()
+        if reason == "ended" {
+            launchFailure = nil
+        } else {
+            launchFailure = "stage=verification-handoff; reason=" + reason
+        }
+        state = .ended
+    }
+
     private func endRuntimePresentation() {
         showingGuest = false
         presentationRequest = nil
@@ -373,6 +714,29 @@ public final class NativeGuestCoordinator: ObservableObject {
     }
 
     private func invalidateForLifecycleTransition() {
+        if let handoff = verificationHandoff {
+            // A handoff is the only exception to ordinary lifecycle revocation.
+            // Lifecycle transitions still synchronously hide the controller,
+            // cancel boundary work, and invalidate presentation/resume tokens.
+            if handoff.resumePending {
+                endVerificationHandoff(reason: "stale-resume")
+                return
+            }
+
+            showingGuest = false
+            presentationRequest = nil
+            runtimeStartPending = false
+            verificationOperationID = nil
+
+            if let request = activeAuthorization?.request { endAuthorization(request) }
+            activeCheckTask?.cancel()
+            activeCheckTask = nil
+            activeRequest = nil
+            state = .holding
+
+            return
+        }
+
         // Hide access before invoking the adapter's revoke implementation.
         showingGuest = false
         presentationRequest = nil

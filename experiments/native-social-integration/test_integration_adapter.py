@@ -111,6 +111,75 @@ return @"Synthetic Keychain fixture setup is inconclusive; device probe stopped 
         for control in ('BOTH_CONTROLS', 'APP_ID_CONTROL', 'HOST_ONLY_CONTROL'):
             self.assertIn('CV_INTEGRATION_PREP_' + control, probe)
 
+    def test_social_shortcut_is_manual_profile_gated_and_uses_checked_launch(self):
+        app_root = ROOT.parent.parent / 'CalcVault' / 'App'
+        ui = (app_root / 'CalcVaultIntegratedHost.swift').read_text()
+        shortcut = ui.split('struct NativeGuestSocialLaunchButton: View {', 1)[1].split(
+            'struct NativeGuestIntegrationSection: View {', 1)[0]
+        self.assertIn('@ObservedObject var model: NativeGuestCoordinator', shortcut)
+        self.assertIn('NativeGuestIntegrationProfile.current', shortcut)
+        self.assertIn('if profile?.representsTikTokGuest == true', shortcut)
+        self.assertIn('model.canResumeVerification ? "Resume TikTok verification" : "TikTok (native)"', shortcut)
+        self.assertIn('action: start', shortcut)
+        self.assertIn('.disabled(!model.canRequestLaunch && !model.canResumeVerification)', shortcut)
+        for forbidden in ('onAppear', '.task', 'runtimeFactory', 'authenticate(', 'surfaceReady('):
+            self.assertNotIn(forbidden, shortcut)
+        private_ui = (app_root / 'ContentView.swift').read_text()
+        action = private_ui.split('NativeGuestSocialLaunchButton(model: coordinator.nativeGuest) {', 1)[1].split('}', 1)[0]
+        self.assertLess(action.index('selectedArea = .security'), action.index('coordinator.startNativeGuest()'))
+        self.assertIn('if coordinator.nativeGuestAvailable', private_ui)
+        self.assertIn('"TikTok (browser)" : service.displayName', private_ui)
+        self.assertIn('isWorkspaceActive: selectedArea == .social', private_ui)
+        self.assertIn('SocialDownloadView(request: request)', private_ui)
+
+    def test_launch_availability_is_a_hint_and_does_not_replace_runtime_gates(self):
+        app_root = ROOT.parent.parent / 'CalcVault' / 'App'
+        source = (app_root / 'NativeGuestCoordinator.swift').read_text()
+        hint = source.split('public var canRequestLaunch: Bool {', 1)[1].split('\n    }', 1)[0]
+        for gate in ('runtimeFactory != nil', '!runtimeAttemptConsumed', 'activeRequest == nil',
+                     'state == .idle', 'state == .blocked', 'validSessionContext() != nil'):
+            self.assertIn(gate, hint)
+        start = source.split('public func start(biometricEnabled: Bool)', 1)[1].split(
+            'public func surfaceReady()', 1)[0]
+        for gate in ('guard runtimeFactory != nil', 'else if runtimeAttemptConsumed',
+                     'guard handoff.suspensionAcknowledged', 'handoff.lease.isValid',
+                     'ContinuousClock().now < handoff.deadline',
+                     'guard activeRequest == nil', 'guard let session = validSessionContext()',
+                     'try await self.checkCredentials('):
+            self.assertIn(gate, start)
+        self.assertNotIn('canRequestLaunch', start)
+        ui = (app_root / 'CalcVaultIntegratedHost.swift').read_text()
+        self.assertIn('.disabled(profile == nil || (!model.canRequestLaunch && !model.canResumeVerification))', ui)
+
+    def test_native_handoff_requires_capability_and_protected_loss_is_terminal(self):
+        app_root = ROOT.parent.parent / 'CalcVault' / 'App'
+        app = (ROOT / 'IntegrationApp.swift').read_text()
+        self.assertIn('IntegrationRuntime: NativeGuestRuntime', app)
+        self.assertNotIn('IntegrationRuntime: NativeGuestVerificationRuntime', app)
+        ui = (app_root / 'CalcVaultIntegratedHost.swift').read_text()
+        hard_boundary = ui.split('@objc private func protectedDataUnavailable()', 1)[1].split(
+            'public func beginVerificationHandoff()', 1)[0]
+        self.assertLess(hard_boundary.index('shield.coverImmediately()'),
+                        hard_boundary.index('endVerificationHandoff()'))
+        self.assertIn('coordinator.applicationDidEnterBackground()', hard_boundary)
+        self.assertIn('.opacity(guest.showingGuest ? 1 : 0)', ui)
+        self.assertIn('.allowsHitTesting(guest.showingGuest)', ui)
+        self.assertIn('.accessibilityHidden(!guest.showingGuest)', ui)
+        self.assertIn('if guest.canBeginVerificationHandoff', ui)
+        host = (app_root / 'AppCoordinator.swift').read_text()
+        explicit_lock = host.split('public func lock()', 1)[1].split(
+            'public func lockForNativeVerificationHandoff()', 1)[0]
+        self.assertIn('nativeGuest.endVerificationHandoff()', explicit_lock)
+        cleanup = host.split('private func lockPrivateWorkspace()', 1)[1].split(
+            'private func finishAuthentication', 1)[0]
+        for gate in ('clearPendingAuthentication()', 'lifecycle.lock()', 'clearRootKey()',
+                     'synchronizeLifecycleState()'):
+            self.assertIn(gate, cleanup)
+        lease = (app_root / 'NativeGuestBackgroundLease.swift').read_text()
+        for gate in ('isProtectedDataAvailable', 'beginBackgroundTask', 'identifier != .invalid',
+                     'endBackgroundTask', 'expiration()'):
+            self.assertIn(gate, lease)
+
 
 if __name__ == '__main__':
     unittest.main()

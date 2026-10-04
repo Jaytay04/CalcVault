@@ -105,7 +105,8 @@ public final class AppCoordinator: ObservableObject {
             }.value
         },
         runtimeFactory: nativeRuntimeFactory,
-        authorizationFactory: { NativeGuestBiometricAuthorization() }
+        authorizationFactory: { NativeGuestBiometricAuthorization() },
+        leaseFactory: { expiration in NativeGuestBackgroundLease(expiration: expiration) }
     )
 
     public func startNativeGuest() {
@@ -931,6 +932,17 @@ public final class AppCoordinator: ObservableObject {
     }
 
     public func lock() {
+        if nativeGuestAvailable { nativeGuest.endVerificationHandoff() }
+        lockPrivateWorkspace()
+    }
+
+    /// The only lock path permitted to retain the bounded, concealed guest.
+    /// No Vault key, authentication attempt or private operation is retained.
+    public func lockForNativeVerificationHandoff() {
+        lockPrivateWorkspace()
+    }
+
+    private func lockPrivateWorkspace() {
         navigationChangeMessage = nil
         clearPendingAuthentication()
         lifecycle.lock()

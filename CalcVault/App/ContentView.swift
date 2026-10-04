@@ -215,6 +215,7 @@ private struct PrivateAreaView: View {
     @State private var selectedService: SocialService = .tikTok
     @State private var showsEntryChange = false
     @State private var socialDownloadRequest: SocialDownloadRequest?
+    private let nativeProfile = NativeGuestIntegrationProfile.current
 
     private enum PrivateArea {
         case files
@@ -297,8 +298,17 @@ private struct PrivateAreaView: View {
             Menu {
                 Button("Files", systemImage: "archivebox") { selectedArea = .files }
                 Section("Social") {
+                    if coordinator.nativeGuestAvailable {
+                        NativeGuestSocialLaunchButton(model: coordinator.nativeGuest) {
+                            // Leave the browser workspace so its media is suspended.
+                            // Keep launch progress and any failure in Security.
+                            selectedArea = .security
+                            coordinator.startNativeGuest()
+                        }
+                    }
                     ForEach(SocialService.allCases) { service in
-                        Button(service.displayName) {
+                        Button(service == .tikTok && nativeProfile?.representsTikTokGuest == true
+                               ? "TikTok (browser)" : service.displayName) {
                             selectedService = service
                             selectedArea = .social
                         }

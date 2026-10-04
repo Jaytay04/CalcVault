@@ -9,11 +9,13 @@ final class NativeGuestCoordinatorTests: XCTestCase {
         let checker = SuspendedGuestChecker()
         let coordinator = makeCoordinator(lifecycle: lifecycle, checker: checker, runtime: FakeGuestRuntime())
 
+        XCTAssertFalse(coordinator.canRequestLaunch)
         XCTAssertNil(coordinator.start(biometricEnabled: true))
         XCTAssertEqual(coordinator.state, .blocked)
 
         lifecycle.beginAuthentication()
         XCTAssertEqual(coordinator.state, .idle)
+        XCTAssertFalse(coordinator.canRequestLaunch)
         XCTAssertNil(coordinator.start(biometricEnabled: false))
         XCTAssertEqual(coordinator.state, .blocked)
 
@@ -28,8 +30,10 @@ final class NativeGuestCoordinatorTests: XCTestCase {
         let runtime = FakeGuestRuntime()
         let coordinator = makeCoordinator(lifecycle: lifecycle, checker: checker, runtime: runtime)
 
+        XCTAssertTrue(coordinator.canRequestLaunch)
         let task = try XCTUnwrap(coordinator.start(biometricEnabled: true))
         XCTAssertEqual(coordinator.state, .checking)
+        XCTAssertFalse(coordinator.canRequestLaunch)
         await checker.waitForCall(1)
         XCTAssertEqual(runtime.factoryCount, 0)
 
@@ -39,6 +43,7 @@ final class NativeGuestCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(runtime.factoryCount, 1)
         XCTAssertEqual(coordinator.state, .presenting)
+        XCTAssertFalse(coordinator.canRequestLaunch)
         XCTAssertTrue(coordinator.showingGuest)
         XCTAssertNotNil(coordinator.viewController)
     }
@@ -174,11 +179,13 @@ final class NativeGuestCoordinatorTests: XCTestCase {
         coordinator.surfaceReady()
         runtime.completeStart(true)
         XCTAssertEqual(coordinator.state, .running)
+        XCTAssertFalse(coordinator.canRequestLaunch)
         XCTAssertNotNil(coordinator.viewController)
 
         lifecycle.lock()
 
         XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.canRequestLaunch)
         XCTAssertFalse(coordinator.showingGuest)
         XCTAssertNil(coordinator.viewController)
         XCTAssertEqual(runtime.revokeCount, 2)
@@ -252,6 +259,7 @@ final class NativeGuestCoordinatorTests: XCTestCase {
 
         try await completeCheck(coordinator, checker: checker)
         XCTAssertEqual(coordinator.state, .blocked)
+        XCTAssertFalse(coordinator.canRequestLaunch)
         XCTAssertFalse(coordinator.showingGuest)
 
         lifecycle.lock()
@@ -310,6 +318,7 @@ final class NativeGuestCoordinatorTests: XCTestCase {
         )
 
         XCTAssertEqual(coordinator.state, .unavailable)
+        XCTAssertFalse(coordinator.canRequestLaunch)
         XCTAssertNil(coordinator.start(biometricEnabled: false))
         XCTAssertFalse(coordinator.showingGuest)
         let callCount = await checker.callCount
@@ -333,13 +342,16 @@ final class NativeGuestCoordinatorTests: XCTestCase {
         XCTAssertFalse(coordinator.summary.contains("sensitive"))
         XCTAssertTrue(coordinator.summary.contains("stage=credential-boundary; unclassified"))
         XCTAssertEqual(runtime.factoryCount, 0)
+        XCTAssertTrue(coordinator.canRequestLaunch)
 
         let retryTask = try XCTUnwrap(coordinator.start(biometricEnabled: true))
+        XCTAssertFalse(coordinator.canRequestLaunch)
         await checker.waitForCall(2)
         let retryResolved = await checker.succeed(2)
         XCTAssertTrue(retryResolved)
         await retryTask.value
         XCTAssertEqual(coordinator.state, .presenting)
+        XCTAssertFalse(coordinator.canRequestLaunch)
         XCTAssertEqual(runtime.factoryCount, 1)
         XCTAssertFalse(coordinator.summary.contains("stage=credential-boundary"))
     }
@@ -436,6 +448,370 @@ final class NativeGuestCoordinatorTests: XCTestCase {
         XCTAssertEqual(runtime.revokeCount, 1)
     }
 
+    func testHandoffCanBeginOnlyForRunningVerificationCapableRuntime() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeVerificationGuestRuntime()
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeHandoffCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+
+        XCTAssertFalse(coordinator.canBeginVerificationHandoff)
+        XCTAssertFalse(coordinator.beginVerificationHandoff())
+        try await completeCheck(coordinator, checker: checker)
+        XCTAssertEqual(coordinator.state, .presenting)
+        XCTAssertFalse(coordinator.beginVerificationHandoff())
+        coordinator.surfaceReady()
+        runtime.completeStart(true)
+        XCTAssertEqual(coordinator.state, .running)
+        XCTAssertTrue(coordinator.canBeginVerificationHandoff)
+        XCTAssertTrue(coordinator.beginVerificationHandoff())
+        XCTAssertEqual(runtime.suspendCount, 1)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertNil(coordinator.viewController)
+        XCTAssertNotNil(coordinator.mountedViewController)
+        XCTAssertFalse(coordinator.canResumeVerification)
+        XCTAssertTrue(coordinator.summary.contains("handoff is pending"))
+        runtime.completeSuspend(true)
+        XCTAssertTrue(coordinator.summary.contains("held for verification"))
+    }
+
+    func testUnsupportedRuntimeAndMissingLeaseFailVisiblyWithoutHolding() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeGuestRuntime()
+        let coordinator = makeCoordinator(lifecycle: lifecycle, checker: checker, runtime: runtime)
+        try await completeCheck(coordinator, checker: checker)
+        coordinator.surfaceReady()
+        runtime.completeStart(true)
+
+        XCTAssertFalse(coordinator.canBeginVerificationHandoff)
+        XCTAssertFalse(coordinator.beginVerificationHandoff())
+        XCTAssertEqual(coordinator.state, .running)
+        XCTAssertTrue(coordinator.showingGuest)
+        XCTAssertTrue(coordinator.summary.contains("stage=verification-handoff; reason=unsupported"))
+    }
+
+    func testLifecycleLockRetainsOnlyHiddenAcknowledgedHandoff() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeVerificationGuestRuntime()
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeHandoffCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startVerificationGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginVerificationHandoff())
+        runtime.completeSuspend(true)
+
+        lifecycle.lock()
+        XCTAssertEqual(coordinator.state, .holding)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertNil(coordinator.viewController)
+        XCTAssertNotNil(coordinator.mountedViewController)
+        XCTAssertEqual(runtime.revokeCount, 0)
+        XCTAssertEqual(lease.endCount, 0)
+        XCTAssertFalse(coordinator.canResumeVerification)
+        XCTAssertNil(coordinator.start(biometricEnabled: false))
+        let callCount = await checker.callCount
+        XCTAssertEqual(callCount, 1)
+
+        _ = try unlock(lifecycle)
+        XCTAssertTrue(coordinator.canResumeVerification)
+    }
+
+    func testResumeRequiresFreshCredentialCheckAndDoesNotRestartRuntime() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeVerificationGuestRuntime()
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeHandoffCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startVerificationGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginVerificationHandoff())
+        runtime.completeSuspend(true)
+        lifecycle.lock()
+        _ = try unlock(lifecycle)
+        XCTAssertTrue(coordinator.canResumeVerification)
+
+        let resumeCheck = try XCTUnwrap(coordinator.start(biometricEnabled: true))
+        await checker.waitForCall(2)
+        XCTAssertEqual(runtime.factoryCount, 1)
+        XCTAssertEqual(runtime.startCount, 1)
+        XCTAssertEqual(runtime.resumeCount, 0)
+        let checkSucceeded = await checker.succeed(2)
+        XCTAssertTrue(checkSucceeded)
+        await resumeCheck.value
+        XCTAssertEqual(coordinator.state, .presenting)
+        XCTAssertEqual(runtime.resumeCount, 0)
+        XCTAssertTrue(coordinator.showingGuest)
+        XCTAssertNil(coordinator.start(biometricEnabled: false))
+        runtime.completeSuspend(false)
+        XCTAssertEqual(coordinator.state, .presenting)
+        XCTAssertEqual(runtime.revokeCount, 0)
+
+        coordinator.surfaceReady()
+        coordinator.surfaceReady()
+        XCTAssertEqual(runtime.resumeCount, 1)
+        XCTAssertEqual(runtime.startCount, 1)
+        XCTAssertTrue(runtime.isSuspended)
+        runtime.completeResume(true)
+        XCTAssertEqual(coordinator.state, .running)
+        XCTAssertFalse(runtime.isSuspended)
+        XCTAssertEqual(lease.endCount, 1)
+        XCTAssertFalse(coordinator.canResumeVerification)
+    }
+
+    func testLeaseExpiryRevokesHeldRuntimeAndInvalidatesCallbacks() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeVerificationGuestRuntime()
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeHandoffCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startVerificationGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginVerificationHandoff())
+        lease.expire()
+
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertNil(coordinator.mountedViewController)
+        XCTAssertNil(coordinator.viewController)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertEqual(lease.endCount, 1)
+        runtime.completeSuspend(true)
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertEqual(runtime.revokeCount, 1)
+    }
+
+    func testSuspensionFailureRevokesWithoutEnteringResumeState() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeVerificationGuestRuntime()
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeHandoffCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startVerificationGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginVerificationHandoff())
+
+        runtime.completeSuspend(false)
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.canResumeVerification)
+        XCTAssertNil(coordinator.mountedViewController)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertEqual(lease.endCount, 1)
+    }
+
+    func testSynchronouslyExpiredFactoryLeaseIsEndedWithoutStartingHandoff() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeVerificationGuestRuntime()
+        let lease = FakeGuestHandoffLease(expiresDuringInstall: true)
+        let coordinator = makeHandoffCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startVerificationGuest(coordinator, checker: checker, runtime: runtime)
+
+        XCTAssertFalse(coordinator.beginVerificationHandoff())
+        XCTAssertEqual(coordinator.state, .running)
+        XCTAssertTrue(coordinator.showingGuest)
+        XCTAssertEqual(runtime.suspendCount, 0)
+        XCTAssertEqual(runtime.revokeCount, 0)
+        XCTAssertEqual(lease.endCount, 1)
+        XCTAssertTrue(coordinator.summary.contains("reason=lease-unavailable"))
+    }
+
+    func testMonotonicDeadlineExpiresUnacknowledgedPause() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeVerificationGuestRuntime()
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeHandoffCoordinator(
+            lifecycle: lifecycle,
+            checker: checker,
+            runtime: runtime,
+            lease: lease,
+            handoffDuration: .milliseconds(20)
+        )
+        try await startVerificationGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginVerificationHandoff())
+
+        try await Task.sleep(nanoseconds: 60_000_000)
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.canResumeVerification)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        runtime.completeSuspend(true)
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertNil(coordinator.viewController)
+    }
+
+    func testDuplicateLifecycleEventsDoNotExtendHandoffDeadline() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeVerificationGuestRuntime()
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeHandoffCoordinator(
+            lifecycle: lifecycle,
+            checker: checker,
+            runtime: runtime,
+            lease: lease,
+            handoffDuration: .milliseconds(100)
+        )
+        try await startVerificationGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginVerificationHandoff())
+        runtime.completeSuspend(true)
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+        lifecycle.lock()
+        _ = try unlock(lifecycle)
+        XCTAssertEqual(runtime.suspendCount, 1)
+        XCTAssertTrue(coordinator.canResumeVerification)
+
+        try await Task.sleep(nanoseconds: 80_000_000)
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertEqual(lease.endCount, 1)
+    }
+
+    func testExplicitProtectedEndTerminatesHandoffBeforeLifecycleLock() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeVerificationGuestRuntime()
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeHandoffCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startVerificationGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginVerificationHandoff())
+        runtime.completeSuspend(true)
+
+        coordinator.endVerificationHandoff()
+        lifecycle.lock()
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertNil(coordinator.mountedViewController)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertEqual(lease.endCount, 1)
+        runtime.completeSuspend(true)
+        XCTAssertEqual(coordinator.state, .ended)
+    }
+
+    func testLateResumeCallbackAfterLeaseExpiryCannotRestorePresentation() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeVerificationGuestRuntime()
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeHandoffCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startVerificationGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginVerificationHandoff())
+        runtime.completeSuspend(true)
+        lifecycle.lock()
+        _ = try unlock(lifecycle)
+        let task = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await checker.waitForCall(2)
+        let checkSucceeded = await checker.succeed(2)
+        XCTAssertTrue(checkSucceeded)
+        await task.value
+        coordinator.surfaceReady()
+        XCTAssertEqual(runtime.resumeCount, 1)
+
+        lease.expire()
+        runtime.completeResume(true)
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertNil(coordinator.viewController)
+        XCTAssertNil(coordinator.mountedViewController)
+        XCTAssertEqual(runtime.revokeCount, 1)
+    }
+
+    func testLifecycleLockDuringPendingResumeHardRevokesAndRejectsLateCallback() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeVerificationGuestRuntime()
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeHandoffCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startVerificationGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginVerificationHandoff())
+        runtime.completeSuspend(true)
+        lifecycle.lock()
+        _ = try unlock(lifecycle)
+        let task = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await checker.waitForCall(2)
+        let checkSucceeded = await checker.succeed(2)
+        XCTAssertTrue(checkSucceeded)
+        await task.value
+        coordinator.surfaceReady()
+        XCTAssertEqual(runtime.resumeCount, 1)
+
+        lifecycle.lock()
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertNil(coordinator.mountedViewController)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertEqual(lease.endCount, 1)
+        runtime.completeResume(true)
+        _ = try unlock(lifecycle)
+        XCTAssertFalse(coordinator.canResumeVerification)
+        XCTAssertNil(coordinator.start(biometricEnabled: false))
+        XCTAssertEqual(coordinator.state, .ended)
+    }
+
+    func testCancelledAndStaleResumeChecksCannotPresentGuest() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeVerificationGuestRuntime()
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeHandoffCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startVerificationGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginVerificationHandoff())
+        runtime.completeSuspend(true)
+        lifecycle.lock()
+        _ = try unlock(lifecycle)
+
+        let cancelled = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await checker.waitForCall(2)
+        cancelled.cancel()
+        let cancelledCheckSucceeded = await checker.succeed(2)
+        XCTAssertTrue(cancelledCheckSucceeded)
+        await cancelled.value
+        XCTAssertEqual(coordinator.state, .holding)
+        XCTAssertNil(coordinator.viewController)
+
+        lifecycle.lock()
+        _ = try unlock(lifecycle)
+        let stale = try XCTUnwrap(coordinator.start(biometricEnabled: true))
+        await checker.waitForCall(3)
+        lifecycle.lock()
+        _ = try unlock(lifecycle)
+        let staleCheckSucceeded = await checker.succeed(3)
+        XCTAssertTrue(staleCheckSucceeded)
+        await stale.value
+        XCTAssertEqual(coordinator.state, .holding)
+        XCTAssertNil(coordinator.viewController)
+        XCTAssertEqual(runtime.factoryCount, 1)
+        XCTAssertEqual(runtime.startCount, 1)
+    }
+
     private func completeCheck(
         _ coordinator: NativeGuestCoordinator,
         checker: SuspendedGuestChecker
@@ -462,6 +838,46 @@ final class NativeGuestCoordinatorTests: XCTestCase {
                 return runtime
             }
         )
+    }
+
+    private func makeHandoffCoordinator(
+        lifecycle: SessionLifecycleCoordinator,
+        checker: SuspendedGuestChecker,
+        runtime: FakeVerificationGuestRuntime,
+        lease: FakeGuestHandoffLease,
+        handoffDuration: Duration = .seconds(120)
+    ) -> NativeGuestCoordinator {
+        NativeGuestCoordinator(
+            lifecycle: lifecycle,
+            check: { biometricEnabled in
+                try await checker.check(biometricEnabled: biometricEnabled)
+            },
+            runtimeFactory: {
+                runtime.noteFactoryInvocation()
+                return runtime
+            },
+            leaseFactory: { onEnd in
+                lease.install(onEnd: onEnd)
+                return lease
+            },
+            handoffDuration: handoffDuration
+        )
+    }
+
+    private func startVerificationGuest(
+        _ coordinator: NativeGuestCoordinator,
+        checker: SuspendedGuestChecker,
+        runtime: FakeVerificationGuestRuntime
+    ) async throws {
+        let task = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await checker.waitForCall(1)
+        let checkSucceeded = await checker.succeed(1)
+        XCTAssertTrue(checkSucceeded)
+        await task.value
+        coordinator.surfaceReady()
+        XCTAssertEqual(runtime.startCount, 1)
+        runtime.completeStart(true)
+        XCTAssertEqual(coordinator.state, .running)
     }
 
     private func unlock(_ lifecycle: SessionLifecycleCoordinator) throws -> UUID {
@@ -494,6 +910,87 @@ private final class FakeGuestRuntime: NativeGuestRuntime {
 
     func completeStart(_ started: Bool) {
         completion?(started)
+    }
+}
+
+@MainActor
+private final class FakeVerificationGuestRuntime: NativeGuestVerificationRuntime {
+    let viewController = UIViewController()
+    let summary = "Verification guest is ready."
+    private(set) var factoryCount = 0
+    private(set) var startCount = 0
+    private(set) var suspendCount = 0
+    private(set) var resumeCount = 0
+    private(set) var revokeCount = 0
+    private(set) var isSuspended = false
+    private var startCompletion: (@MainActor (Bool) -> Void)?
+    private var suspendCompletion: (@MainActor (Bool) -> Void)?
+    private var resumeCompletion: (@MainActor (Bool) -> Void)?
+
+    func noteFactoryInvocation() {
+        factoryCount += 1
+    }
+
+    func start(completion: @escaping @MainActor (Bool) -> Void) {
+        startCount += 1
+        startCompletion = completion
+    }
+
+    func suspendForVerification(completion: @escaping @MainActor (Bool) -> Void) {
+        suspendCount += 1
+        isSuspended = true
+        suspendCompletion = completion
+    }
+
+    func resumeAfterVerification(completion: @escaping @MainActor (Bool) -> Void) {
+        resumeCount += 1
+        resumeCompletion = completion
+    }
+
+    func revoke() {
+        revokeCount += 1
+        isSuspended = true
+    }
+
+    func completeStart(_ started: Bool) {
+        startCompletion?(started)
+    }
+
+    func completeSuspend(_ suspended: Bool) {
+        suspendCompletion?(suspended)
+    }
+
+    func completeResume(_ resumed: Bool) {
+        if resumed { isSuspended = false }
+        resumeCompletion?(resumed)
+    }
+}
+
+@MainActor
+private final class FakeGuestHandoffLease: NativeGuestHandoffLease {
+    private(set) var isValid = true
+    private(set) var endCount = 0
+    private var onEnd: (@MainActor () -> Void)?
+    private let expiresDuringInstall: Bool
+
+    init(expiresDuringInstall: Bool = false) {
+        self.expiresDuringInstall = expiresDuringInstall
+    }
+
+    func install(onEnd: @escaping @MainActor () -> Void) {
+        self.onEnd = onEnd
+        if expiresDuringInstall { expire() }
+    }
+
+    func expire() {
+        guard isValid else { return }
+        isValid = false
+        onEnd?()
+    }
+
+    func end() {
+        endCount += 1
+        isValid = false
     }
 }
 
