@@ -34,8 +34,13 @@ def main() -> None:
 - (void)cancelExtensionRequestWithIdentifier:(NSUUID *)identifier;
 @end
 
+@interface NSExtension (CVLPVerificationSignal)
+- (void)_kill:(int)signal;
+@end
+
 @interface AppSceneViewController()
 @property(nonatomic) BOOL cvlpRevoked;
+@property(nonatomic) BOOL cvlpSyntheticTargetVerified;
 @property(nonatomic) BOOL cvlpBeginCompleted;
 @property(nonatomic) int cvlpObservedPID;
 @property(nonatomic) BOOL cvlpAliveBeforeRevoke;
@@ -47,10 +52,12 @@ def main() -> None:
 @property(nonatomic) CVLPLivenessSample cvlpProcessGroupPresenceSample;
 @property(nonatomic) NSUInteger cvlpPreRevokeAttemptCount;
 - (void)cvlpRevoke;
+- (BOOL)cvlpRequestVerificationSignal:(int)signal;
 @property int resizeDebounceToken;''')
     replace_once(scene, '#import "UIKitPrivate+MultitaskSupport.h"',
                  '''#import "UIKitPrivate+MultitaskSupport.h"
 #import "../LiveContainer/CVLPLiveness.h"
+#import <signal.h>
 
 static void CVLPLogLivenessSample(NSString *phase, CVLPLivenessSample sample) {
     NSLog(@"CVLP_LIVENESS phase=%@ pid=%d attempted=%d result=%d errno=%d class=%s pgid=%d pgidErrno=%d pgidClass=%s",
@@ -124,7 +131,19 @@ static void CVLPLogLivenessSample(NSString *phase, CVLPLivenessSample sample) {
             handleCompletion();
         });
     }];''')
-    replace_once(scene, '- (void)setUpAppPresenter {', '''- (void)cvlpRevoke {
+    replace_once(scene, '- (void)setUpAppPresenter {', '''- (BOOL)cvlpRequestVerificationSignal:(int)signal {
+    NSAssert(NSThread.isMainThread, @"Verification signal probe must run on main");
+    if (signal != SIGSTOP && signal != SIGCONT) return NO;
+    if (self.cvlpRevoked || !self.cvlpSyntheticTargetVerified || !self.cvlpBeginCompleted ||
+        self.cvlpObservedPID <= 0 || !self.identifier || !self.extension || !self.presenter ||
+        !self.viewIfLoaded || !self.view.window) return NO;
+    if (![self.extension respondsToSelector:@selector(_kill:)]) return NO;
+    [self.extension _kill:signal];
+    NSLog(@"CVLP_VERIFICATION_SIGNAL_REQUEST_SUBMITTED signal=%d; suspension and media stop unproved", signal);
+    return YES;
+}
+
+- (void)cvlpRevoke {
     NSAssert(NSThread.isMainThread, @"Guest revocation must run on main");
     self.cvlpRevoked = YES;
     self.view.hidden = YES;

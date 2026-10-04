@@ -1,6 +1,13 @@
 #import "CVLPGuestSession.h"
 #import "CVLPLiveness.h"
 #import "../MultitaskSupport/AppSceneViewController.h"
+#import <signal.h>
+#if __has_include("CVLPFrameworkGuest.h")
+#import "CVLPFrameworkGuest.h"
+#define CVLP_HAS_FRAMEWORK_GUEST_VALIDATOR 1
+#else
+#define CVLP_HAS_FRAMEWORK_GUEST_VALIDATOR 0
+#endif
 
 @interface AppSceneViewController (CVLPLifecycle)
 @property(nonatomic, readonly) BOOL cvlpBeginCompleted;
@@ -13,6 +20,8 @@
 @property(nonatomic, readonly) CVLPLivenessSample cvlpLatestPreRevokeLivenessSample;
 @property(nonatomic, readonly) CVLPLivenessSample cvlpProcessGroupPresenceSample;
 @property(nonatomic, readonly) NSUInteger cvlpPreRevokeAttemptCount;
+@property(nonatomic) BOOL cvlpSyntheticTargetVerified;
+- (BOOL)cvlpRequestVerificationSignal:(int)signal;
 - (void)cvlpRevoke;
 @end
 
@@ -29,7 +38,33 @@
 @property(nonatomic) CVLPLivenessSample postcheckLivenessSample;
 @property(nonatomic) BOOL hasPostcheckLivenessSample;
 @property(nonatomic) BOOL processGroupShutdownLogged;
+@property(nonatomic, copy) NSString *targetBundleIdentifier;
+@property(nonatomic, copy) NSString *targetDataUUID;
+@property(nonatomic) BOOL verificationSignalProbeUsed;
+@property(nonatomic) BOOL verificationSignalStopSubmitted;
+@property(nonatomic) BOOL verificationSignalContinueAttempted;
+@property(nonatomic) BOOL verificationSignalContinueSubmitted;
+@property(nonatomic) BOOL syntheticTargetIdentityVerified;
+- (BOOL)syntheticTargetIdentityIsVerified;
+- (BOOL)verificationSignalRequestIsReady;
 @end
+
+static NSString *CVLPSyntheticBundleIdentifier(void) {
+    return [@"org.example.synthetic" stringByAppendingString:@"nativeguest.app"];
+}
+
+static BOOL CVLPFrameworkDescriptorTargetsSyntheticGuest(void) {
+#if CVLP_HAS_FRAMEWORK_GUEST_VALIDATOR
+    NSURL *guestURL = CVLPFrameworkGuestURL(NSBundle.mainBundle.bundleURL);
+    if (!guestURL) return NO;
+    NSString *descriptorPath = [NSBundle.mainBundle.bundleURL.path
+        stringByAppendingPathComponent:@"CVLPFrameworkGuest.plist"];
+    NSDictionary *descriptor = CVLPGuestPropertyList(descriptorPath, 64 * 1024);
+    return [descriptor[@"bundleIdentifier"] isEqualToString:CVLPSyntheticBundleIdentifier()];
+#else
+    return NO;
+#endif
+}
 
 static void CVLPLogLivenessSample(NSString *phase, CVLPLivenessSample sample) {
     NSLog(@"CVLP_LIVENESS phase=%@ pid=%d attempted=%d result=%d errno=%d class=%s pgid=%d pgidErrno=%d pgidClass=%s",
@@ -69,9 +104,14 @@ static NSString *CVLPDescribeLivenessSample(CVLPLivenessSample sample) {
     self.started = YES;
     self.completion = completion;
     self.launchResult = @"extension request pending";
+    NSString *bundleIdentifier = @"org.example.syntheticnativeguest.app";
+    NSString *dataUUID = @"synthetic-liveprocess-device";
+    self.targetBundleIdentifier = bundleIdentifier;
+    self.targetDataUUID = dataUUID;
+    self.syntheticTargetIdentityVerified = [self syntheticTargetIdentityIsVerified];
     AppSceneViewController *scene = [[AppSceneViewController alloc]
-        initWithBundleId:@"org.example.syntheticnativeguest.app"
-               dataUUID:@"synthetic-liveprocess-device"
+        initWithBundleId:bundleIdentifier
+               dataUUID:dataUUID
                delegate:self];
     self.sceneController = scene;
     if (!scene) {
@@ -79,11 +119,61 @@ static NSString *CVLPDescribeLivenessSample(CVLPLivenessSample sample) {
         [self deliverCompletion:NO];
         return;
     }
+    scene.cvlpSyntheticTargetVerified = self.syntheticTargetIdentityVerified;
     [self.hostController addChildViewController:scene];
     scene.view.frame = self.hostController.view.bounds;
     scene.view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.hostController.view addSubview:scene.view];
     [scene didMoveToParentViewController:self.hostController];
+}
+
+- (BOOL)syntheticTargetIdentityIsVerified {
+    BOOL frameworkGuestMode = [NSBundle.mainBundle.infoDictionary[@"CVLPFrameworkGuestMode"] boolValue];
+    if (frameworkGuestMode) {
+        NSString *frameworkSelector = [@"cvlp-immutable-" stringByAppendingString:@"framework"];
+        NSString *frameworkDataUUID = [@"native-framework-" stringByAppendingString:@"research"];
+        return [self.targetBundleIdentifier isEqualToString:frameworkSelector] &&
+            [self.targetDataUUID isEqualToString:frameworkDataUUID] &&
+            CVLPFrameworkDescriptorTargetsSyntheticGuest();
+    }
+    NSURL *frameworkDescriptorURL = [NSBundle.mainBundle.bundleURL URLByAppendingPathComponent:@"CVLPFrameworkGuest.plist"];
+    if ([NSFileManager.defaultManager fileExistsAtPath:frameworkDescriptorURL.path]) return NO;
+    NSString *syntheticDataUUID = [@"synthetic-liveprocess-" stringByAppendingString:@"device"];
+    return [self.targetBundleIdentifier isEqualToString:CVLPSyntheticBundleIdentifier()] &&
+        [self.targetDataUUID isEqualToString:syntheticDataUUID];
+}
+
+- (BOOL)verificationSignalRequestIsReady {
+    NSAssert(NSThread.isMainThread, @"Verification signal probe must run on main");
+    return self.started && !self.revoked && self.sceneController &&
+        self.sceneController.cvlpBeginCompleted && self.sceneController.cvlpObservedPID > 0 &&
+        self.sceneController.cvlpObservedPID == self.observedPID &&
+        self.sceneController.cvlpSyntheticTargetVerified && [self syntheticTargetIdentityIsVerified] &&
+        [self.sceneController respondsToSelector:@selector(cvlpRequestVerificationSignal:)];
+}
+
+- (BOOL)isVerificationSignalProbeAvailable {
+    return [self verificationSignalRequestIsReady] && !self.verificationSignalProbeUsed;
+}
+
+- (BOOL)requestVerificationSignal:(int)signal {
+    NSAssert(NSThread.isMainThread, @"Verification signal probe must run on main");
+    if (signal == SIGSTOP) {
+        if (!self.isVerificationSignalProbeAvailable) return NO;
+        self.verificationSignalProbeUsed = YES;
+        if (![self.sceneController cvlpRequestVerificationSignal:signal]) return NO;
+        self.verificationSignalStopSubmitted = YES;
+        return YES;
+    }
+    if (signal == SIGCONT) {
+        if (!self.verificationSignalStopSubmitted || self.verificationSignalContinueAttempted ||
+            ![self verificationSignalRequestIsReady]) return NO;
+        self.verificationSignalContinueAttempted = YES;
+        BOOL submitted = [self.sceneController cvlpRequestVerificationSignal:signal];
+        self.verificationSignalContinueSubmitted = submitted;
+        return submitted;
+    }
+    return NO;
 }
 
 - (void)deliverCompletion:(BOOL)success {
@@ -148,6 +238,12 @@ static NSString *CVLPDescribeLivenessSample(CVLPLivenessSample sample) {
         CVLPDescribeLivenessSample(self.sceneController.cvlpLatestPreRevokeLivenessSample) : @"not sampled";
     NSString *postcheck = self.hasPostcheckLivenessSample ?
         CVLPDescribeLivenessSample(self.postcheckLivenessSample) : @"not sampled";
+    NSString *signalProbe = self.verificationSignalStopSubmitted ?
+        [NSString stringWithFormat:@"; verification signal requests: SIGSTOP submitted, SIGCONT %@; signal request submitted; suspension and media stop unproved",
+            self.verificationSignalContinueSubmitted ? @"submitted" : @"not submitted"] :
+        @"; verification signal probe not run";
+    NSString *syntheticTarget = self.syntheticTargetIdentityVerified ?
+        @"; synthetic signal target verified" : @"; signal probe unavailable: target is not the exact synthetic descriptor";
     BOOL groupShutdownObserved = self.sceneController && self.hasPostcheckLivenessSample &&
         CVLPProcessGroupShutdownObserved(self.revoked, self.sceneController.cvlpBeginCompleted,
             self.sceneController.cvlpProcessGroupPresenceSample, self.postcheckLivenessSample);
@@ -156,6 +252,7 @@ static NSString *CVLPDescribeLivenessSample(CVLPLivenessSample sample) {
         launchSample, firstSample, latestSample,
         (unsigned long)self.sceneController.cvlpPreRevokeAttemptCount, postcheck,
         groupShutdownObserved ? @"observed" : @"unproved"];
+    diagnostics = [[diagnostics stringByAppendingString:syntheticTarget] stringByAppendingString:signalProbe];
     if (!self.started) return [@"Synthetic guest: not started; settled" stringByAppendingString:diagnostics];
     NSString *request = self.sceneController.cvlpBeginCompleted ? @"completed" : @"pending";
     NSString *process = self.exitObserved ? @"exit observed (ESRCH)" :

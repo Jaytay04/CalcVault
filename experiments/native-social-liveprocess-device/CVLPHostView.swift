@@ -1,4 +1,5 @@
 import LocalAuthentication
+import Darwin
 
 @MainActor
 final class CVLPLifecycleModel: NSObject, ObservableObject {
@@ -6,6 +7,9 @@ final class CVLPLifecycleModel: NSObject, ObservableObject {
     @Published var showingGuest = false
     @Published var locked = false
     @Published var attempted = false
+    @Published private(set) var verificationSignalProbeAttempted = false
+    @Published private(set) var verificationSignalProbeRunning = false
+    @Published private(set) var verificationSignalProbeStatus = "Start the test tone in the guest, then tap once; suspension and media stop are unproved."
     let guest = CVLPGuestSession()
     private var gate = CVLPLifecycleGate()
     private var context: LAContext?
@@ -14,6 +18,10 @@ final class CVLPLifecycleModel: NSObject, ObservableObject {
     private var observations: [String] = []
     private var inactiveTransition = false
     private var surfaceToken: UInt64?
+    private var launchedToken: UInt64?
+    private var verificationSignalProbeGeneration: UInt64 = 0
+    private var verificationSignalContinueWorkItem: DispatchWorkItem?
+    private let verificationSignalProbeDuration: TimeInterval = 2.0
 
     override init() {
         super.init()
@@ -78,12 +86,14 @@ final class CVLPLifecycleModel: NSObject, ObservableObject {
         }
         UserDefaults.lcShared().set(0, forKey: "LCMultitaskMode")
         surfaceToken = token
+        launchedToken = token
         showingGuest = true
     }
 
     func surfaceReady() {
         guard let token = surfaceToken else { return }
         surfaceToken = nil
+        launchedToken = token
         guard gate.accepts(token: token), !inactiveTransition, UIApplication.shared.applicationState == .active else {
             observe("Stale surface attachment REJECTED."); refresh(); return
         }
@@ -133,11 +143,90 @@ final class CVLPLifecycleModel: NSObject, ObservableObject {
 #endif
     }
 
+    func startVerificationSignalProbe() {
+        guard !verificationSignalProbeAttempted else { return }
+        verificationSignalProbeAttempted = true
+        guard Bundle.main.object(forInfoDictionaryKey: "CVLPFrameworkGuestMode") as? Bool == true else {
+            verificationSignalProbeStatus = "Probe refused: fixed synthetic framework research mode is not enabled."
+            observe(verificationSignalProbeStatus)
+            refresh()
+            return
+        }
+        guard !inactiveTransition, UIApplication.shared.applicationState == .active,
+              !locked, showingGuest, let token = launchedToken, gate.accepts(token: token),
+              guest.verificationSignalProbeAvailable else {
+            verificationSignalProbeStatus = "Probe unsupported or refused: exact synthetic descriptor, initialized scene, PID, selector, or foreground state is missing."
+            observe(verificationSignalProbeStatus)
+            refresh()
+            return
+        }
+        guard guest.requestVerificationSignal(SIGSTOP) else {
+            verificationSignalProbeStatus = "SIGSTOP request refused by the synthetic session guard."
+            observe(verificationSignalProbeStatus)
+            refresh()
+            return
+        }
+
+        verificationSignalProbeRunning = true
+        verificationSignalProbeStatus = "SIGSTOP request submitted; SIGCONT is scheduled after 2 seconds. Observe the guest's counter/control and tone. Suspension and media stop are unproved."
+        observe(verificationSignalProbeStatus)
+        verificationSignalProbeGeneration &+= 1
+        let generation = verificationSignalProbeGeneration
+        let workItem = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                self?.finishVerificationSignalProbe(generation: generation, guestToken: token)
+            }
+        }
+        verificationSignalContinueWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + verificationSignalProbeDuration, execute: workItem)
+        refresh()
+    }
+
+    private func finishVerificationSignalProbe(generation: UInt64, guestToken: UInt64) {
+        guard verificationSignalProbeGeneration == generation,
+              verificationSignalProbeRunning,
+              launchedToken == guestToken,
+              gate.accepts(token: guestToken),
+              !inactiveTransition,
+              UIApplication.shared.applicationState == .active,
+              !locked, showingGuest else {
+            cancelVerificationSignalProbe()
+            verificationSignalProbeStatus = "Probe cancelled by lifecycle change; no late continuation request will be sent."
+            observe(verificationSignalProbeStatus)
+            lock(reason: "verification probe lost foreground or generation")
+            return
+        }
+        verificationSignalContinueWorkItem = nil
+        verificationSignalProbeRunning = false
+        if guest.requestVerificationSignal(SIGCONT) {
+            verificationSignalProbeStatus = "SIGCONT request submitted from the scheduled 2-second callback; suspension and media stop remain unproved. Use Lock to revoke the synthetic guest."
+        } else {
+            verificationSignalProbeStatus = "SIGCONT request refused; the host is revoking the guest now. Suspension and media stop are unproved."
+            observe(verificationSignalProbeStatus)
+            lock(reason: "verification continuation request refused")
+            return
+        }
+        observe(verificationSignalProbeStatus)
+        refresh()
+    }
+
+    private func cancelVerificationSignalProbe() {
+        verificationSignalProbeGeneration &+= 1
+        verificationSignalContinueWorkItem?.cancel()
+        verificationSignalContinueWorkItem = nil
+        if verificationSignalProbeRunning {
+            verificationSignalProbeRunning = false
+            verificationSignalProbeStatus = "Probe cancelled by lifecycle revocation; no continuation request will be sent."
+        }
+    }
+
     func lock(reason: String = "explicit lock") {
         cover()
+        cancelVerificationSignalProbe()
         gate.revoke()
         pending = nil
         surfaceToken = nil
+        launchedToken = nil
         context?.invalidate(); context = nil
         guest.revoke()
         showingGuest = false
@@ -188,8 +277,14 @@ final class CVLPLifecycleModel: NSObject, ObservableObject {
         observations = Array(observations.suffix(30))
     }
     func refresh() {
+        if !verificationSignalProbeAttempted && showingGuest {
+            verificationSignalProbeStatus = guest.verificationSignalProbeAvailable
+                ? "Synthetic signal probe ready. Start the guest tone and counter, then tap once; suspension and media stop are unproved."
+                : "Signal probe unavailable: exact synthetic descriptor, initialized scene, PID, or selector is missing."
+        }
         report = "Build 19 lifecycle observations (not a security certification)\n\n"
-            + observations.joined(separator: "\n") + "\n\n" + guest.summary + "\n\n" + CVLPProbe.hostSummary()
+            + observations.joined(separator: "\n") + "\n\n" + guest.summary + "\n\n"
+            + verificationSignalProbeStatus + "\n\n" + CVLPProbe.hostSummary()
         NSLog("CVLP_LIFECYCLE_STATUS %@", guest.summary)
     }
 }
@@ -292,6 +387,25 @@ struct CVLPHostView: View {
                         .background(Color.black.opacity(0.9), in: Capsule())
                         .padding(.leading, 12)
                         .padding(.top, 8)
+                    VStack(spacing: 4) {
+                        Button(model.verificationSignalProbeAttempted ? "Signal probe used" : "2-second signal probe") {
+                            model.startVerificationSignalProbe()
+                        }
+                        .font(.system(.footnote, design: .rounded).weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 44)
+                        .background(Color.black.opacity(0.9), in: Capsule())
+                        .disabled(model.verificationSignalProbeAttempted || !model.guest.verificationSignalProbeAvailable)
+                        Text(model.verificationSignalProbeStatus)
+                            .font(.system(.caption2, design: .rounded))
+                            .foregroundStyle(.white)
+                            .padding(6)
+                            .background(Color.black.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.bottom, 4)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
                 }
             } else {
                 VStack {
