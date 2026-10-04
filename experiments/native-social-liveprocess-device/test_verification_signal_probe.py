@@ -18,6 +18,11 @@ def section(source, start, end):
 
 
 class VerificationSignalProbeTests(unittest.TestCase):
+    def test_swift_uses_imported_boolean_getter_name(self):
+        self.assertIn("getter=isVerificationSignalProbeAvailable", SESSION_HEADER)
+        self.assertEqual(HOST.count("guest.isVerificationSignalProbeAvailable"), 3)
+        self.assertNotIn("guest.verificationSignalProbeAvailable", HOST)
+
     def test_signal_declarations_preserve_framework_geometry_anchors(self):
         self.assertIn("@property(nonatomic, readonly) NSUInteger cvlpPreRevokeAttemptCount;\n"
                       "- (void)cvlpRevoke;\n@end", SESSION)

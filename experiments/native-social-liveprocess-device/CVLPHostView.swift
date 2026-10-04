@@ -154,7 +154,7 @@ final class CVLPLifecycleModel: NSObject, ObservableObject {
         }
         guard !inactiveTransition, UIApplication.shared.applicationState == .active,
               !locked, showingGuest, let token = launchedToken, gate.accepts(token: token),
-              guest.verificationSignalProbeAvailable else {
+              guest.isVerificationSignalProbeAvailable else {
             verificationSignalProbeStatus = "Probe unsupported or refused: exact synthetic descriptor, initialized scene, PID, selector, or foreground state is missing."
             observe(verificationSignalProbeStatus)
             refresh()
@@ -278,7 +278,7 @@ final class CVLPLifecycleModel: NSObject, ObservableObject {
     }
     func refresh() {
         if !verificationSignalProbeAttempted && showingGuest {
-            verificationSignalProbeStatus = guest.verificationSignalProbeAvailable
+            verificationSignalProbeStatus = guest.isVerificationSignalProbeAvailable
                 ? "Synthetic signal probe ready. Start the guest tone and counter, then tap once; suspension and media stop are unproved."
                 : "Signal probe unavailable: exact synthetic descriptor, initialized scene, PID, or selector is missing."
         }
@@ -396,7 +396,7 @@ struct CVLPHostView: View {
                         .padding(.horizontal, 14)
                         .frame(minHeight: 44)
                         .background(Color.black.opacity(0.9), in: Capsule())
-                        .disabled(model.verificationSignalProbeAttempted || !model.guest.verificationSignalProbeAvailable)
+                        .disabled(model.verificationSignalProbeAttempted || !model.guest.isVerificationSignalProbeAvailable)
                         Text(model.verificationSignalProbeStatus)
                             .font(.system(.caption2, design: .rounded))
                             .foregroundStyle(.white)
