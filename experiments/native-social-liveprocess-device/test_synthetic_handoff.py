@@ -73,6 +73,10 @@ class SyntheticHandoffTests(unittest.TestCase):
         self.assertIn('handoffGate.phase == .awaitingActivation', active)
         self.assertIn('activateAfterAuthentication', active)
         self.assertNotIn('resumeAuthenticatedSyntheticGuest()', active)
+        self.assertIn('Button("Resume authenticated test") { model.continueAuthenticatedSyntheticGuest() }', HOST)
+        manual = section('func continueAuthenticatedSyntheticGuest()', 'private func resumeAuthenticatedSyntheticGuest()')
+        self.assertIn('guard canContinueAuthenticatedGuest else { return }', manual)
+        self.assertIn('resumeAuthenticatedSyntheticGuest()', manual)
 
     def test_resume_guard_and_terminal_cleanup_order(self):
         resume = section('private func resumeAuthenticatedSyntheticGuest()', 'private func cancelSyntheticHandoff()')
