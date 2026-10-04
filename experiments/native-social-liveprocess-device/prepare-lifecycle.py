@@ -39,6 +39,7 @@ def main() -> None:
 @end
 
 @interface AppSceneViewController()
+- (BOOL)cvlpRequestVerificationSignal:(int)signal;
 @property(nonatomic) BOOL cvlpRevoked;
 @property(nonatomic) BOOL cvlpSyntheticTargetVerified;
 @property(nonatomic) BOOL cvlpBeginCompleted;
@@ -52,7 +53,6 @@ def main() -> None:
 @property(nonatomic) CVLPLivenessSample cvlpProcessGroupPresenceSample;
 @property(nonatomic) NSUInteger cvlpPreRevokeAttemptCount;
 - (void)cvlpRevoke;
-- (BOOL)cvlpRequestVerificationSignal:(int)signal;
 @property int resizeDebounceToken;''')
     replace_once(scene, '#import "UIKitPrivate+MultitaskSupport.h"',
                  '''#import "UIKitPrivate+MultitaskSupport.h"

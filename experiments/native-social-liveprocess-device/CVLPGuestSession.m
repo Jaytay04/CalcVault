@@ -19,9 +19,9 @@
 @property(nonatomic, readonly) BOOL cvlpHasFirstPreRevokeLivenessSample;
 @property(nonatomic, readonly) CVLPLivenessSample cvlpLatestPreRevokeLivenessSample;
 @property(nonatomic, readonly) CVLPLivenessSample cvlpProcessGroupPresenceSample;
-@property(nonatomic, readonly) NSUInteger cvlpPreRevokeAttemptCount;
 @property(nonatomic) BOOL cvlpSyntheticTargetVerified;
 - (BOOL)cvlpRequestVerificationSignal:(int)signal;
+@property(nonatomic, readonly) NSUInteger cvlpPreRevokeAttemptCount;
 - (void)cvlpRevoke;
 @end
 

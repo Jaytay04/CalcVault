@@ -18,6 +18,12 @@ def section(source, start, end):
 
 
 class VerificationSignalProbeTests(unittest.TestCase):
+    def test_signal_declarations_preserve_framework_geometry_anchors(self):
+        self.assertIn("@property(nonatomic, readonly) NSUInteger cvlpPreRevokeAttemptCount;\n"
+                      "- (void)cvlpRevoke;\n@end", SESSION)
+        self.assertIn("@property(nonatomic) NSUInteger cvlpPreRevokeAttemptCount;\n"
+                      "- (void)cvlpRevoke;\n@property int resizeDebounceToken;", PATCHER)
+
     def test_signal_target_is_verified_without_blocking_other_framework_launches(self):
         start = section(SESSION, "- (void)startWithCompletion:", "- (void)deliverCompletion:")
         self.assertIn('NSString *bundleIdentifier = @"org.example.syntheticnativeguest.app";', start)
