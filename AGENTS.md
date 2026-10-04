@@ -3,6 +3,7 @@
 Read `docs/IMPLEMENTATION_PLAN.md` before changing the project; it is the full specification. Work only on the current phase, preserve existing work, and record evidence in `docs/TASKS.md` and `docs/TEST_REPORT.md`.
 
 - Ship one app. Keep the recovery/install-check identity as the only additional App ID; do not add extensions or more products without review.
+- Future release titles/tags, IPA filenames and download-facing descriptions must use neutral CalcVault naming and must not mention TikTok. Preserve existing releases unless the owner requests changes; technical source/evidence names may remain accurate.
 - The user-selected independent archive is authoritative. Missing, stale, unreadable, or corrupt data must fail visibly and must never create an empty replacement.
 - Plain TAR is packaging/concealment, not encryption. Never describe it as encrypted storage.
 - Never delete the only valid archive, automatically delete Photos originals, or make destructive device changes without explicit approval.

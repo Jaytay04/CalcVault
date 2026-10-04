@@ -126,6 +126,16 @@ jobs:
             -o "$RUNNER_TEMP/cvlp-lifecycle-gate-tests"
           "$RUNNER_TEMP/cvlp-lifecycle-gate-tests"
 
+      - name: Test synthetic background hold generation and deadline
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun swiftc -warnings-as-errors \
+            experiments/native-social-liveprocess-device/CVLPSyntheticHandoffGate.swift \
+            experiments/native-social-liveprocess-device/test_synthetic_handoff.swift \
+            -o "$RUNNER_TEMP/cvlp-synthetic-handoff-tests"
+          "$RUNNER_TEMP/cvlp-synthetic-handoff-tests"
+
       - name: Build synthetic guest and actual LiveProcess host
         shell: bash
         run: |
