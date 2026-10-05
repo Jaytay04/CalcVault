@@ -291,14 +291,15 @@ public final class NativeGuestCoordinator: ObservableObject {
             (UIApplication.didEnterBackgroundNotification, "host-background"),
             (UIApplication.didBecomeActiveNotification, "host-active")
         ] {
-            cooperativeHostObservations.append(NotificationCenter.default.publisher(for: name)
-                .sink { [weak self] _ in
+            let observation: AnyCancellable = NotificationCenter.default.publisher(for: name)
+                .sink { [weak self] _ -> Void in
                     if Thread.isMainThread {
-                        MainActor.assumeIsolated { self?.recordCooperativeHold(phase) }
+                        MainActor.assumeIsolated { _ = self?.recordCooperativeHold(phase) }
                     } else {
-                        Task { @MainActor [weak self] in self?.recordCooperativeHold(phase) }
+                        Task { @MainActor [weak self] in _ = self?.recordCooperativeHold(phase) }
                     }
-                })
+                }
+            cooperativeHostObservations.append(observation)
         }
         lifecycleObservation = lifecycle.$state
             .dropFirst()
