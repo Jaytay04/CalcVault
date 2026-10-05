@@ -164,6 +164,22 @@ jobs:
           if [[ "$OWNER" == true ]]; then args+=(--admission-owner-metadata); fi
           python3 experiments/native-social-integration/prepare-highlights.py "$CV_INTEGRATION_UPSTREAM" "${args[@]}"
 
+      - name: Compile opt-in media control against target SDKs
+        if: ${{ inputs.guest_cooperative_pause }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_file=experiments/native-social-liveprocess-device/CVLPCooperativePause.m
+          for sdk in iphoneos iphonesimulator; do
+            target=arm64-apple-ios15.0
+            if [[ "$sdk" == iphonesimulator ]]; then target=arm64-apple-ios15.0-simulator; fi
+            sdk_path="$(xcrun --sdk "$sdk" --show-sdk-path)"
+            xcrun --sdk "$sdk" clang -fobjc-arc -fmodules -target "$target" \
+              -isysroot "$sdk_path" -fsyntax-only "$source_file"
+            xcrun --sdk "$sdk" clang -fobjc-arc -fmodules -target "$target" \
+              -isysroot "$sdk_path" -DCVLP_COOPERATIVE_GUEST=1 -fsyntax-only "$source_file"
+          done
+
       - name: Test synthetic integration adapter
         run: |
           xcrun swiftc -swift-version 6 CalcVault/App/NativeGuestIntegrationProfile.swift \

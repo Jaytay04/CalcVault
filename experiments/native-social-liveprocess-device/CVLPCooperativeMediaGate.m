@@ -359,9 +359,9 @@ static BOOL CVLPAVAudioSessionSetActiveWithOptions(id self, SEL selector, BOOL a
     const char *objectFloatArgs[] = {@encode(id), @encode(SEL), @encode(float)};
     const char *objectFloatCMTimeArgs[] = {@encode(id), @encode(SEL), @encode(float), @encode(CMTime), @encode(CMTime)};
     const char *objectDoubleArgs[] = {@encode(id), @encode(SEL), @encode(NSTimeInterval)};
-    const char *objectErrorArgs[] = {@encode(id), @encode(SEL), @encode(NSError **)};
-    const char *objectBoolErrorArgs[] = {@encode(id), @encode(SEL), @encode(BOOL), @encode(NSError **)};
-    const char *objectBoolOptionsErrorArgs[] = {@encode(id), @encode(SEL), @encode(BOOL), @encode(NSUInteger), @encode(NSError **)};
+    const char *objectErrorArgs[] = {@encode(id), @encode(SEL), @encode(NSError * __autoreleasing *)};
+    const char *objectBoolErrorArgs[] = {@encode(id), @encode(SEL), @encode(BOOL), @encode(NSError * __autoreleasing *)};
+    const char *objectBoolOptionsErrorArgs[] = {@encode(id), @encode(SEL), @encode(BOOL), @encode(NSUInteger), @encode(NSError * __autoreleasing *)};
 
     allInstalled = [self installSelector:@selector(play) onClass:AVPlayer.class
                                   wrapper:(IMP)CVLPAVPlayerPlay returnType:@encode(void)
