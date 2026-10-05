@@ -21,6 +21,8 @@
 @property(nonatomic, readonly) CVLPLivenessSample cvlpProcessGroupPresenceSample;
 @property(nonatomic) BOOL cvlpSyntheticTargetVerified;
 - (BOOL)cvlpRequestVerificationSignal:(int)signal;
+@property(nonatomic) BOOL cvlpNativeSignalDiagnosticTargetVerified;
+- (BOOL)cvlpRequestNativeSignalDiagnostic:(int)signal;
 @property(nonatomic, readonly) NSUInteger cvlpPreRevokeAttemptCount;
 - (void)cvlpRevoke;
 @end
@@ -45,8 +47,14 @@
 @property(nonatomic) BOOL verificationSignalContinueAttempted;
 @property(nonatomic) BOOL verificationSignalContinueSubmitted;
 @property(nonatomic) BOOL syntheticTargetIdentityVerified;
+@property(nonatomic) BOOL nativeSignalDiagnosticStopAttempted;
+@property(nonatomic) BOOL nativeSignalDiagnosticStopSubmitted;
+@property(nonatomic) BOOL nativeSignalDiagnosticContinueAttempted;
+@property(nonatomic) BOOL nativeSignalDiagnosticContinueSubmitted;
 - (BOOL)syntheticTargetIdentityIsVerified;
 - (BOOL)verificationSignalRequestIsReady;
+- (BOOL)nativeSignalDiagnosticIdentityIsVerified;
+- (BOOL)nativeSignalDiagnosticRequestIsReady;
 @end
 
 static NSString *CVLPSyntheticBundleIdentifier(void) {
@@ -120,6 +128,7 @@ static NSString *CVLPDescribeLivenessSample(CVLPLivenessSample sample) {
         return;
     }
     scene.cvlpSyntheticTargetVerified = self.syntheticTargetIdentityVerified;
+    scene.cvlpNativeSignalDiagnosticTargetVerified = [self nativeSignalDiagnosticIdentityIsVerified];
     [self.hostController addChildViewController:scene];
     scene.view.frame = self.hostController.view.bounds;
     scene.view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -154,6 +163,65 @@ static NSString *CVLPDescribeLivenessSample(CVLPLivenessSample sample) {
 
 - (BOOL)isVerificationSignalProbeAvailable {
     return [self verificationSignalRequestIsReady] && !self.verificationSignalProbeUsed;
+}
+
+- (BOOL)nativeSignalDiagnosticIdentityIsVerified {
+#if CVLP_HAS_FRAMEWORK_GUEST_VALIDATOR
+    NSDictionary *host = NSBundle.mainBundle.infoDictionary;
+    id enabled = host[@"CVNativeSignalDiagnosticEnabled"];
+    if (!enabled || CFGetTypeID((__bridge CFTypeRef)enabled) != CFBooleanGetTypeID() ||
+        ![enabled boolValue] || ![host[@"CVLPFrameworkGuestMode"] boolValue] ||
+        ![host[@"CFBundleVersion"] isEqual:@"24"] ||
+        ![host[@"CVNativeIntegrationStage"] isEqual:@"private-tiktok47-integration-24"] ||
+        ![host[@"CVNativeGuestKind"] isEqual:@"tiktok47"] ||
+        ![self.targetBundleIdentifier isEqualToString:@"cvlp-immutable-framework"] ||
+        ![self.targetDataUUID isEqualToString:@"integration-native-24"]) return NO;
+    NSURL *guest = CVLPFrameworkGuestURL(NSBundle.mainBundle.bundleURL);
+    if (!guest) return NO;
+    NSDictionary *descriptor = CVLPGuestPropertyList(
+        [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"CVLPFrameworkGuest.plist"], 64 * 1024);
+    NSDictionary *info = CVLPGuestPropertyList([guest.path stringByAppendingPathComponent:@"Info.plist"], 1024 * 1024);
+    return [descriptor[@"bundleIdentifier"] isEqual:@"com.zhiliaoapp.musically"] &&
+        [descriptor[@"bundleVersion"] isEqual:@"470044"] &&
+        [descriptor[@"executable"] isEqual:@"NativeGuest"] &&
+        [info[@"CFBundleShortVersionString"] isEqual:@"47.0.0"];
+#else
+    return NO;
+#endif
+}
+
+- (BOOL)nativeSignalDiagnosticRequestIsReady {
+    NSAssert(NSThread.isMainThread, @"Native signal diagnostic must run on main");
+    return self.started && !self.revoked && self.sceneController &&
+        self.sceneController.cvlpBeginCompleted && self.sceneController.cvlpObservedPID > 0 &&
+        self.sceneController.cvlpObservedPID == self.observedPID &&
+        self.sceneController.cvlpNativeSignalDiagnosticTargetVerified &&
+        [self nativeSignalDiagnosticIdentityIsVerified] &&
+        [self.sceneController respondsToSelector:@selector(cvlpRequestNativeSignalDiagnostic:)];
+}
+
+- (BOOL)isNativeSignalDiagnosticAvailable {
+    return [self nativeSignalDiagnosticRequestIsReady] && !self.nativeSignalDiagnosticStopAttempted;
+}
+
+- (BOOL)requestNativeSignalDiagnostic:(int)signal {
+    NSAssert(NSThread.isMainThread, @"Native signal diagnostic must run on main");
+    if (signal == SIGSTOP) {
+        if (!self.isNativeSignalDiagnosticAvailable) return NO;
+        self.nativeSignalDiagnosticStopAttempted = YES;
+        BOOL submitted = [self.sceneController cvlpRequestNativeSignalDiagnostic:signal];
+        self.nativeSignalDiagnosticStopSubmitted = submitted;
+        return submitted;
+    }
+    if (signal == SIGCONT) {
+        if (!self.nativeSignalDiagnosticStopSubmitted || self.nativeSignalDiagnosticContinueAttempted ||
+            ![self nativeSignalDiagnosticRequestIsReady]) return NO;
+        self.nativeSignalDiagnosticContinueAttempted = YES;
+        BOOL submitted = [self.sceneController cvlpRequestNativeSignalDiagnostic:signal];
+        self.nativeSignalDiagnosticContinueSubmitted = submitted;
+        return submitted;
+    }
+    return NO;
 }
 
 - (BOOL)requestVerificationSignal:(int)signal {
@@ -253,6 +321,10 @@ static NSString *CVLPDescribeLivenessSample(CVLPLivenessSample sample) {
         (unsigned long)self.sceneController.cvlpPreRevokeAttemptCount, postcheck,
         groupShutdownObserved ? @"observed" : @"unproved"];
     diagnostics = [[diagnostics stringByAppendingString:syntheticTarget] stringByAppendingString:signalProbe];
+    diagnostics = [diagnostics stringByAppendingFormat:
+        @"\nNative pause diagnostic v1: STOP attempted=%d submitted=%d; CONT attempted=%d submitted=%d; suspension/media stop/resumption unproved; real verification hold disabled",
+        self.nativeSignalDiagnosticStopAttempted, self.nativeSignalDiagnosticStopSubmitted,
+        self.nativeSignalDiagnosticContinueAttempted, self.nativeSignalDiagnosticContinueSubmitted];
     if (!self.started) return [@"Synthetic guest: not started; settled" stringByAppendingString:diagnostics];
     NSString *request = self.sceneController.cvlpBeginCompleted ? @"completed" : @"pending";
     NSString *process = self.exitObserved ? @"exit observed (ESRCH)" :

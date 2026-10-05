@@ -217,7 +217,7 @@ class HighlightsAdapterTests(unittest.TestCase):
         self.assertIn('ditto "$device_host" "$output/Payload/LiveContainer.app"', script)
         self.assertNotIn('ditto "$fixture_app"', script)
         workflow = (root.parents[1] / '.github/workflows/native-social-integration.yml').read_text()
-        self.assertEqual(workflow.count('default: false'), 14)
+        self.assertEqual(workflow.count('default: false'), 16)
         self.assertEqual(workflow.count('highlights_admission_owner_metadata:'), 2)
         self.assertIn('if: inputs.highlights_diagnostics', workflow)
         entry = (root.parents[1] / '.github/workflows/native-social-liveprocess-device.yml').read_text()

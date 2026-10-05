@@ -9,6 +9,10 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, readonly) NSString *summary;
 @property(nonatomic, readonly, getter=isSettled) BOOL settled;
 @property(nonatomic, readonly, getter=isVerificationSignalProbeAvailable) BOOL verificationSignalProbeAvailable;
+/// Default-off native diagnostic. YES means a signal request can be submitted,
+/// not that the OS has acknowledged suspension or media quiescence.
+@property(nonatomic, readonly, getter=isNativeSignalDiagnosticAvailable) BOOL nativeSignalDiagnosticAvailable;
+- (BOOL)requestNativeSignalDiagnostic:(int)signal NS_SWIFT_NAME(requestNativeSignalDiagnostic(_:));
 - (void)startWithCompletion:(void (^)(BOOL success))completion NS_SWIFT_NAME(start(completion:));
 - (BOOL)requestVerificationSignal:(int)signal NS_SWIFT_NAME(requestVerificationSignal(_:));
 - (void)revoke;

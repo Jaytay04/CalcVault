@@ -11,6 +11,15 @@ logs="$work/logs"
 evidence="$work/evidence"
 output="$work/output"
 integration_build="${CV_INTEGRATION_BUILD:-23}"
+signal_diagnostic="${CV_NATIVE_SIGNAL_DIAGNOSTIC:-0}"
+case "$signal_diagnostic" in
+    0|1) ;;
+    *) echo 'CV_NATIVE_SIGNAL_DIAGNOSTIC must be exactly 0 or 1' >&2; exit 2 ;;
+esac
+if [[ "$signal_diagnostic" == 1 && "$integration_build" != 24 ]]; then
+    echo 'Native pause diagnostic requires Build 24' >&2
+    exit 2
+fi
 case "$integration_build" in
     23|24) ;;
     *) echo 'CV_INTEGRATION_BUILD must be exactly 23 or 24' >&2; exit 2 ;;
@@ -290,8 +299,10 @@ stage_and_package() {
     python3 "$device_project/package-fixture.py" "${package_args[@]}" > "$logs/package-fixture-$sdk.log"
     python3 "$device_project/package-framework-fixture.py" "$host" "$guest" "$payload" \
         > "$logs/package-framework-$sdk.log"
+    stage_args=(--build "$integration_build" --profile synthetic)
+    if [[ "$signal_diagnostic" == 1 ]]; then stage_args+=(--signal-diagnostic); fi
     python3 "$kit_project/stage-integration.py" "$host" "$kit" \
-        --build "$integration_build" --profile synthetic > "$logs/stage-integration-$sdk.log"
+        "${stage_args[@]}" > "$logs/stage-integration-$sdk.log"
     verify_and_sign "$sdk" "$host" "$entitlements"
 }
 
@@ -329,6 +340,7 @@ xcrun simctl io "$simulator" screenshot "$evidence/simulator-locked-root.png"
 mkdir -p "$output/Payload"
 ditto "$device_host" "$output/Payload/LiveContainer.app"
 artifact="CalcVault-integration-host-$integration_build.ipa"
+if [[ "$signal_diagnostic" == 1 ]]; then artifact="CalcVault-integration-host-$integration_build-pause1.ipa"; fi
 (cd "$output" && zip -qry "$artifact" Payload)
 shasum -a 256 "$output/$artifact" > "$output/$artifact.sha256"
 unzip -t "$output/$artifact" > "$evidence/ipa-zip-check.txt"

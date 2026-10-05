@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import CalcVaultKit
+import Darwin
 
 @main
 @MainActor
@@ -48,7 +49,7 @@ private final class IntegrationAppDelegate: UIResponder, UIApplicationDelegate {
 }
 
 @MainActor
-private final class IntegrationRuntime: NativeGuestRuntime {
+private final class IntegrationRuntime: NativeGuestSignalDiagnosticRuntime {
     private let session: CVLPGuestSession
     private let profile: NativeGuestIntegrationProfile
     init() throws {
@@ -74,6 +75,9 @@ private final class IntegrationRuntime: NativeGuestRuntime {
         }
     }
     func revoke() { session.revoke() }
+    var signalDiagnosticAvailable: Bool { session.isNativeSignalDiagnosticAvailable }
+    func requestSignalDiagnosticPause() -> Bool { session.requestNativeSignalDiagnostic(SIGSTOP) }
+    func requestSignalDiagnosticResume() -> Bool { session.requestNativeSignalDiagnostic(SIGCONT) }
     // Exact known fixture messages map to fixed codes; never display arbitrary
     // NSError descriptions, entitlement values or filesystem paths.
     private static func preparationFailure(_ message: String) -> NativeGuestPreparationFailure {

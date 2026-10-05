@@ -23,6 +23,16 @@ public protocol NativeGuestVerificationRuntime: NativeGuestRuntime {
     func resumeAfterVerification(completion: @escaping @MainActor (Bool) -> Void)
 }
 
+/// A diagnostic-only signal bridge. A true return value means only that the
+/// adapter submitted the operating-system request; it does not prove that the
+/// guest paused, resumed, or stopped media.
+@MainActor
+public protocol NativeGuestSignalDiagnosticRuntime: NativeGuestRuntime {
+    var signalDiagnosticAvailable: Bool { get }
+    func requestSignalDiagnosticPause() -> Bool
+    func requestSignalDiagnosticResume() -> Bool
+}
+
 /// A host-owned lease that bounds how long a suspended runtime may be retained.
 @MainActor
 public protocol NativeGuestHandoffLease: AnyObject {
@@ -82,6 +92,7 @@ public final class NativeGuestCoordinator: ObservableObject {
     private let authorizationFactory: (@MainActor () -> any NativeGuestCredentialAuthorization)?
     private let handoffLeaseFactory: (@MainActor (@escaping @MainActor () -> Void) -> (any NativeGuestHandoffLease)?)?
     private let handoffDuration: Duration
+    private let signalDiagnosticDuration: Duration
     private struct ActiveAuthorization {
         let request: CheckRequest
         let promptToken: UUID
@@ -108,9 +119,22 @@ public final class NativeGuestCoordinator: ObservableObject {
         var suspensionAcknowledged = false
         var resumePending = false
     }
+    private struct SignalDiagnosticHandoff {
+        let token: UUID
+        let originatingSession: SessionContext
+        let runtime: any NativeGuestSignalDiagnosticRuntime
+        let lease: any NativeGuestHandoffLease
+        let deadline: ContinuousClock.Instant
+        var pauseRequestSubmitted: Bool
+        var resumePending = false
+    }
     private var verificationHandoff: VerificationHandoff?
     private var handoffDeadlineTask: Task<Void, Never>?
     private var verificationOperationID: UUID?
+    private var signalDiagnosticHandoff: SignalDiagnosticHandoff?
+    private var signalDiagnosticDeadlineTask: Task<Void, Never>?
+    private var signalDiagnosticAttemptConsumed = false
+    private var signalDiagnosticReport: String?
 
     public init(
         lifecycle: SessionLifecycleCoordinator,
@@ -125,6 +149,7 @@ public final class NativeGuestCoordinator: ObservableObject {
         self.authorizationFactory = authorizationFactory
         self.handoffLeaseFactory = leaseFactory
         self.handoffDuration = .seconds(120)
+        self.signalDiagnosticDuration = .seconds(30)
         self.state = runtimeFactory == nil ? .unavailable : .idle
 
         observeLifecycle()
@@ -136,7 +161,8 @@ public final class NativeGuestCoordinator: ObservableObject {
         runtimeFactory: (@MainActor () throws -> any NativeGuestRuntime)?,
         authorizationFactory: (@MainActor () -> any NativeGuestCredentialAuthorization)? = nil,
         leaseFactory: (@MainActor (@escaping @MainActor () -> Void) -> (any NativeGuestHandoffLease)?)? = nil,
-        handoffDuration: Duration
+        handoffDuration: Duration,
+        signalDiagnosticDuration: Duration = .seconds(30)
     ) {
         self.lifecycle = lifecycle
         self.checkLegacyCredentialAbsence = check
@@ -144,6 +170,7 @@ public final class NativeGuestCoordinator: ObservableObject {
         self.authorizationFactory = authorizationFactory
         self.handoffLeaseFactory = leaseFactory
         self.handoffDuration = min(handoffDuration, .seconds(120))
+        self.signalDiagnosticDuration = Self.boundedSignalDiagnosticDuration(signalDiagnosticDuration)
         self.state = runtimeFactory == nil ? .unavailable : .idle
 
         observeLifecycle()
@@ -171,7 +198,9 @@ public final class NativeGuestCoordinator: ObservableObject {
               isValid(presentationRequest.session) else {
             return nil
         }
-        return runtime?.viewController ?? verificationHandoff?.runtime.viewController
+        return runtime?.viewController
+            ?? verificationHandoff?.runtime.viewController
+            ?? signalDiagnosticHandoff?.runtime.viewController
     }
 
     /// Presentation hint only. `start` independently enforces every launch gate.
@@ -192,13 +221,27 @@ public final class NativeGuestCoordinator: ObservableObject {
             && handoffLeaseFactory != nil
     }
 
+    /// Opt-in diagnostic affordance for runtimes that can submit a signal
+    /// request. This is deliberately separate from the verified handoff gate.
+    public var canBeginSignalDiagnostic: Bool {
+        guard state == .running, showingGuest, !runtimeRevoked,
+              !signalDiagnosticAttemptConsumed,
+              presentationRequest.map({ isValid($0.session) }) == true,
+              handoffLeaseFactory != nil,
+              let diagnosticRuntime = runtime as? any NativeGuestSignalDiagnosticRuntime else { return false }
+        return diagnosticRuntime.signalDiagnosticAvailable
+    }
+
     /// Internal mount point retained while the guest is hidden during a hold.
     /// It never grants interaction or public presentation authority.
     internal var mountedViewController: UIViewController? {
         guard !runtimeRevoked,
               (showingGuest && presentationRequest.map { isValid($0.session) } == true)
-                || verificationHandoff != nil else { return nil }
-        return runtime?.viewController ?? verificationHandoff?.runtime.viewController
+                || verificationHandoff != nil
+                || signalDiagnosticHandoff != nil else { return nil }
+        return runtime?.viewController
+            ?? verificationHandoff?.runtime.viewController
+            ?? signalDiagnosticHandoff?.runtime.viewController
     }
 
     /// Resume is offered only after suspension acknowledgement and while the
@@ -216,6 +259,27 @@ public final class NativeGuestCoordinator: ObservableObject {
         return true
     }
 
+    /// Resume uses the same credential inventory check as initial launch. The
+    /// pause signal's submission is not treated as suspension acknowledgement.
+    public var canResumeSignalDiagnostic: Bool {
+        guard let handoff = signalDiagnosticHandoff,
+              handoff.pauseRequestSubmitted,
+              !handoff.resumePending,
+              activeRequest == nil,
+              state == .holding || state == .blocked,
+              handoff.lease.isValid,
+              ContinuousClock().now < handoff.deadline,
+              let session = validSessionContext(),
+              session != handoff.originatingSession else { return false }
+        return true
+    }
+
+    public var isSignalDiagnosticHeld: Bool { signalDiagnosticHandoff != nil }
+
+    public var isSignalDiagnosticPauseRequestSubmitted: Bool {
+        signalDiagnosticHandoff?.pauseRequestSubmitted == true
+    }
+
     /// Runtime summaries are surfaced only for an authorized live presentation.
     /// After reauthentication, a retained runtime summary remains available as a
     /// diagnostic report without restoring access to its revoked controller.
@@ -225,6 +289,13 @@ public final class NativeGuestCoordinator: ObservableObject {
             if let launchFailure {
                 let diagnostic = "Native launch diagnostic v1\n\(launchFailure)"
                 return runtime.map { diagnostic + "\n\n" + $0.summary } ?? diagnostic
+            }
+            if let signalDiagnosticReport {
+                let runtimeSummary = runtime?.summary
+                    ?? verificationHandoff?.runtime.summary
+                    ?? signalDiagnosticHandoff?.runtime.summary
+                return runtimeSummary.map { signalDiagnosticReport + "\n\n" + $0 }
+                    ?? signalDiagnosticReport
             }
             if let runtime { return runtime.summary }
         }
@@ -241,6 +312,11 @@ public final class NativeGuestCoordinator: ObservableObject {
         case .running:
             return "Native guest is running."
         case .holding:
+            if let signalDiagnosticHandoff {
+                return signalDiagnosticHandoff.pauseRequestSubmitted
+                    ? "Pause signal request submitted; guest suspension and media stop are unproved."
+                    : "Signal diagnostic is pending; guest suspension and media stop are unproved."
+            }
             return verificationHandoff?.suspensionAcknowledged == true
                 ? "Native guest is held for verification."
                 : "Native guest verification handoff is pending."
@@ -266,7 +342,17 @@ public final class NativeGuestCoordinator: ObservableObject {
             return nil
         }
 
-        if let handoff = verificationHandoff {
+        if let handoff = signalDiagnosticHandoff {
+            guard !handoff.resumePending,
+                  state == .holding || state == .blocked else { return nil }
+            guard handoff.pauseRequestSubmitted,
+                  handoff.lease.isValid,
+                  ContinuousClock().now < handoff.deadline else {
+                endSignalDiagnostic(reason: "lease-expired")
+                return nil
+            }
+            guard session != handoff.originatingSession else { return nil }
+        } else if let handoff = verificationHandoff {
             guard !handoff.resumePending,
                   state == .holding || state == .blocked else { return nil }
             guard handoff.suspensionAcknowledged else { return nil }
@@ -321,6 +407,93 @@ public final class NativeGuestCoordinator: ObservableObject {
         }
         activeCheckTask = task
         return task
+    }
+
+    /// Conceals the guest, locks the private workspace at the host, and submits
+    /// one bounded diagnostic pause request. No acknowledgement is claimed.
+    @discardableResult
+    public func beginSignalDiagnostic() -> Bool {
+        guard state == .running, showingGuest, !runtimeRevoked,
+              !signalDiagnosticAttemptConsumed,
+              presentationRequest.map({ isValid($0.session) }) == true else { return false }
+        signalDiagnosticAttemptConsumed = true
+        guard let diagnosticRuntime = runtime as? any NativeGuestSignalDiagnosticRuntime,
+              diagnosticRuntime.signalDiagnosticAvailable else {
+            launchFailure = "stage=signal-diagnostic; reason=unsupported"
+            return false
+        }
+        guard let leaseFactory = handoffLeaseFactory else {
+            endRuntimePresentation()
+            launchFailure = "stage=signal-diagnostic; reason=lease-unavailable"
+            return false
+        }
+
+        let token = UUID()
+        var leaseInvalidatedDuringCreation = false
+        guard let lease = leaseFactory({ [weak self] in
+            leaseInvalidatedDuringCreation = true
+            self?.signalDiagnosticLeaseDidEnd(token)
+        }) else {
+            endRuntimePresentation()
+            launchFailure = "stage=signal-diagnostic; reason=lease-unavailable"
+            return false
+        }
+        guard lease.isValid, !leaseInvalidatedDuringCreation else {
+            lease.end()
+            endRuntimePresentation()
+            launchFailure = "stage=signal-diagnostic; reason=lease-unavailable"
+            return false
+        }
+        guard let originatingSession = presentationRequest?.session else {
+            lease.end()
+            endRuntimePresentation()
+            return false
+        }
+
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: signalDiagnosticDuration)
+        signalDiagnosticHandoff = SignalDiagnosticHandoff(
+            token: token,
+            originatingSession: originatingSession,
+            runtime: diagnosticRuntime,
+            lease: lease,
+            deadline: deadline,
+            pauseRequestSubmitted: false
+        )
+
+        // Remove all presentation authority before invoking the signal bridge.
+        showingGuest = false
+        presentationRequest = nil
+        runtimeStartPending = false
+        runtimeStartAttempted = true
+        self.runtime = nil
+        runtimeRevoked = false
+        launchFailure = nil
+        signalDiagnosticReport = nil
+        state = .holding
+        signalDiagnosticDeadlineTask = Task { @MainActor [weak self] in
+            do {
+                try await clock.sleep(until: deadline)
+            } catch {
+                return
+            }
+            guard self?.signalDiagnosticHandoff?.token == token else { return }
+            self?.endSignalDiagnostic(reason: "lease-expired")
+        }
+
+        let submitted = diagnosticRuntime.requestSignalDiagnosticPause()
+        guard let active = signalDiagnosticHandoff, active.token == token else { return false }
+        guard active.lease.isValid, ContinuousClock().now < active.deadline else {
+            endSignalDiagnostic(reason: "lease-expired")
+            return false
+        }
+        guard submitted else {
+            endSignalDiagnostic(reason: "pause-request-rejected")
+            return false
+        }
+        signalDiagnosticHandoff?.pauseRequestSubmitted = true
+        signalDiagnosticReport = "Native guest signal diagnostic\nPause request submitted. Submission is not an acknowledgement; guest suspension and media stop are unproved."
+        return true
     }
 
     /// Hides the current presentation before asking the runtime to suspend.
@@ -394,6 +567,10 @@ public final class NativeGuestCoordinator: ObservableObject {
     /// Hard termination for an explicit lock or protected lifecycle boundary.
     /// This is idempotent and never extends the active handoff deadline.
     public func endVerificationHandoff() {
+        if signalDiagnosticHandoff != nil {
+            endSignalDiagnostic(reason: "ended")
+            return
+        }
         if verificationHandoff != nil {
             endVerificationHandoff(reason: "ended")
             return
@@ -412,6 +589,58 @@ public final class NativeGuestCoordinator: ObservableObject {
         guard state == .presenting,
               showingGuest,
               !runtimeRevoked else { return }
+
+        if let handoff = signalDiagnosticHandoff {
+            guard handoff.pauseRequestSubmitted,
+                  !handoff.resumePending,
+                  handoff.lease.isValid,
+                  ContinuousClock().now < handoff.deadline,
+                  let presentationRequest = self.presentationRequest,
+                  presentationRequest.session != handoff.originatingSession,
+                  isValid(presentationRequest.session) else {
+                if let handoff = signalDiagnosticHandoff,
+                   (!handoff.lease.isValid || ContinuousClock().now >= handoff.deadline) {
+                    endSignalDiagnostic(reason: "lease-expired")
+                }
+                return
+            }
+
+            signalDiagnosticHandoff?.resumePending = true
+            let submitted = handoff.runtime.requestSignalDiagnosticResume()
+            guard let active = signalDiagnosticHandoff, active.token == handoff.token else { return }
+            guard active.resumePending,
+                  let currentRequest = self.presentationRequest,
+                  currentRequest == presentationRequest,
+                  showingGuest,
+                  state == .presenting,
+                  isValid(presentationRequest.session) else {
+                endSignalDiagnostic(reason: "stale-resume")
+                return
+            }
+            guard active.lease.isValid, ContinuousClock().now < active.deadline else {
+                endSignalDiagnostic(reason: "lease-expired")
+                return
+            }
+            guard submitted else {
+                endSignalDiagnostic(reason: "resume-request-rejected")
+                return
+            }
+
+            signalDiagnosticHandoff = nil
+            signalDiagnosticDeadlineTask?.cancel()
+            signalDiagnosticDeadlineTask = nil
+            runtime = handoff.runtime
+            runtimeRevoked = false
+            runtimeStartPending = false
+            runtimeStartAttempted = true
+            launchFailure = nil
+            signalDiagnosticReport = "Native guest signal diagnostic\nPause request submitted; suspension and media stop are unproved.\nResume request submitted; runtime resumption and visible content are unproved."
+            state = .running
+            // End the lease after committing the transfer so a synchronous
+            // lease callback can still lock/revoke the newly presented runtime.
+            handoff.lease.end()
+            return
+        }
 
         if let handoff = verificationHandoff {
             guard handoff.suspensionAcknowledged,
@@ -459,7 +688,7 @@ public final class NativeGuestCoordinator: ObservableObject {
 
     private func canRunCheck(_ request: CheckRequest) -> Bool {
         activeRequest == request
-            && (!runtimeAttemptConsumed || verificationHandoff != nil)
+            && (!runtimeAttemptConsumed || verificationHandoff != nil || signalDiagnosticHandoff != nil)
             && runtimeFactory != nil
             && isValid(request.session)
     }
@@ -512,12 +741,29 @@ public final class NativeGuestCoordinator: ObservableObject {
         activeCheckTask = nil
 
         guard isValid(request.session) else {
-            state = verificationHandoff == nil ? .idle : .holding
+            state = (verificationHandoff == nil && signalDiagnosticHandoff == nil) ? .idle : .holding
             return
         }
         if let failure {
             launchFailure = failure
             state = .blocked
+            return
+        }
+
+        if let handoff = signalDiagnosticHandoff {
+            guard handoff.pauseRequestSubmitted,
+                  handoff.lease.isValid,
+                  ContinuousClock().now < handoff.deadline,
+                  request.session != handoff.originatingSession else {
+                endSignalDiagnostic(reason: "lease-expired")
+                return
+            }
+
+            runtimeRevoked = false
+            runtimeStartPending = false
+            presentationRequest = request
+            showingGuest = true
+            state = .presenting
             return
         }
 
@@ -581,7 +827,7 @@ public final class NativeGuestCoordinator: ObservableObject {
         endAuthorization(request)
         activeRequest = nil
         activeCheckTask = nil
-        state = verificationHandoff != nil
+        state = (verificationHandoff != nil || signalDiagnosticHandoff != nil)
             ? .holding
             : (runtimeFactory == nil ? .unavailable : .idle)
     }
@@ -672,6 +918,35 @@ public final class NativeGuestCoordinator: ObservableObject {
         endVerificationHandoff(reason: "lease-expired")
     }
 
+    private func signalDiagnosticLeaseDidEnd(_ token: UUID) {
+        guard signalDiagnosticHandoff?.token == token else { return }
+        endSignalDiagnostic(reason: "lease-expired")
+    }
+
+    private func endSignalDiagnostic(reason: String) {
+        guard let handoff = signalDiagnosticHandoff else { return }
+
+        // Invalidate every public and asynchronous authority before adapter code.
+        signalDiagnosticHandoff = nil
+        signalDiagnosticDeadlineTask?.cancel()
+        signalDiagnosticDeadlineTask = nil
+        showingGuest = false
+        presentationRequest = nil
+        runtimeStartPending = false
+        runtime = nil
+        activeCheckTask?.cancel()
+        activeCheckTask = nil
+        activeRequest = nil
+        if let request = activeAuthorization?.request { endAuthorization(request) }
+        runtimeRevoked = true
+        handoff.lease.end()
+        handoff.runtime.revoke()
+        launchFailure = reason == "ended"
+            ? nil
+            : "stage=signal-diagnostic; reason=" + reason
+        state = .ended
+    }
+
     private func endVerificationHandoff(reason: String) {
         guard let handoff = verificationHandoff else { return }
 
@@ -714,6 +989,25 @@ public final class NativeGuestCoordinator: ObservableObject {
     }
 
     private func invalidateForLifecycleTransition() {
+        if let handoff = signalDiagnosticHandoff {
+            // Preserve only the manually paused, concealed diagnostic. A
+            // lifecycle change during resume makes runtime state uncertain.
+            if handoff.resumePending {
+                endSignalDiagnostic(reason: "stale-resume")
+                return
+            }
+
+            showingGuest = false
+            presentationRequest = nil
+            runtimeStartPending = false
+            if let request = activeAuthorization?.request { endAuthorization(request) }
+            activeCheckTask?.cancel()
+            activeCheckTask = nil
+            activeRequest = nil
+            state = .holding
+            return
+        }
+
         if let handoff = verificationHandoff {
             // A handoff is the only exception to ordinary lifecycle revocation.
             // Lifecycle transitions still synchronously hide the controller,
@@ -770,5 +1064,9 @@ public final class NativeGuestCoordinator: ObservableObject {
             sessionID: session.sessionID,
             generation: session.generation
         )
+    }
+
+    static func boundedSignalDiagnosticDuration(_ duration: Duration) -> Duration {
+        min(duration, .seconds(30))
     }
 }

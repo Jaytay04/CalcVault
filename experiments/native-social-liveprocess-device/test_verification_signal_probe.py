@@ -62,7 +62,10 @@ class VerificationSignalProbeTests(unittest.TestCase):
             "respondsToSelector:@selector(_kill:)",
         ):
             self.assertIn(guard, PATCHER)
-        self.assertEqual(PATCHER.count("[self.extension _kill:signal]"), 1)
+        synthetic = section(PATCHER, '- (BOOL)cvlpRequestVerificationSignal:(int)signal {',
+                            '- (BOOL)cvlpRequestNativeSignalDiagnostic:(int)signal {')
+        self.assertEqual(synthetic.count("[self.extension _kill:signal]"), 1)
+        self.assertIn('!self.cvlpSyntheticTargetVerified', synthetic)
         self.assertIn("- (void)_kill:(int)signal;", PATCHER)
         self.assertIn("suspension and media stop unproved", PATCHER)
 

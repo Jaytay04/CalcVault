@@ -42,6 +42,8 @@ def main() -> None:
 - (BOOL)cvlpRequestVerificationSignal:(int)signal;
 @property(nonatomic) BOOL cvlpRevoked;
 @property(nonatomic) BOOL cvlpSyntheticTargetVerified;
+@property(nonatomic) BOOL cvlpNativeSignalDiagnosticTargetVerified;
+- (BOOL)cvlpRequestNativeSignalDiagnostic:(int)signal;
 @property(nonatomic) BOOL cvlpBeginCompleted;
 @property(nonatomic) int cvlpObservedPID;
 @property(nonatomic) BOOL cvlpAliveBeforeRevoke;
@@ -140,6 +142,24 @@ static void CVLPLogLivenessSample(NSString *phase, CVLPLivenessSample sample) {
     if (![self.extension respondsToSelector:@selector(_kill:)]) return NO;
     [self.extension _kill:signal];
     NSLog(@"CVLP_VERIFICATION_SIGNAL_REQUEST_SUBMITTED signal=%d; suspension and media stop unproved", signal);
+    return YES;
+}
+
+- (BOOL)cvlpRequestNativeSignalDiagnostic:(int)signal {
+    NSAssert(NSThread.isMainThread, @"Native signal diagnostic must run on main");
+    if (signal != SIGSTOP && signal != SIGCONT) return NO;
+    if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive) return NO;
+    if (self.cvlpRevoked || !self.cvlpNativeSignalDiagnosticTargetVerified || !self.cvlpBeginCompleted ||
+        self.cvlpObservedPID <= 0 || self.pid != self.cvlpObservedPID ||
+        !self.identifier || !self.extension || !self.presenter ||
+        !self.viewIfLoaded || !self.view.window) return NO;
+    if (![self.extension respondsToSelector:@selector(_kill:)]) return NO;
+    @try { [self.extension _kill:signal]; }
+    @catch (NSException *exception) {
+        NSLog(@"CVLP_NATIVE_PAUSE_REQUEST_REJECTED reason=selector-exception");
+        return NO;
+    }
+    NSLog(@"CVLP_NATIVE_PAUSE_REQUEST_SUBMITTED signal=%d; suspension/media stop/resumption unproved", signal);
     return YES;
 }
 

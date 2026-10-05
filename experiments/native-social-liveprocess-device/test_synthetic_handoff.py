@@ -95,7 +95,7 @@ class SyntheticHandoffTests(unittest.TestCase):
 
     def test_no_real_runtime_enablement_and_request_only_claims(self):
         runtime = (ROOT.parent / 'native-social-integration/IntegrationApp.swift').read_text(encoding='utf-8')
-        self.assertIn('IntegrationRuntime: NativeGuestRuntime', runtime)
+        self.assertIn('IntegrationRuntime: NativeGuestSignalDiagnosticRuntime', runtime)
         self.assertNotIn('IntegrationRuntime: NativeGuestVerificationRuntime', runtime)
         self.assertIn('Suspension and media stop remain unproved', HOST)
         self.assertIn('CVLPSyntheticHandoffGate.swift', PREP)

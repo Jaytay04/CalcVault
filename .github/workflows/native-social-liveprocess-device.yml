@@ -11,6 +11,10 @@ on:
         description: 'Build the CalcVaultKit integration with synthetic guest only'
         type: boolean
         default: false
+      guest_pause_diagnostic:
+        description: 'Native pause request diagnostic; requires integration_guest and tiktok47_host'
+        type: boolean
+        default: false
       tiktok47_host:
         description: 'Build Build 24 synthetic host compatibility candidate (requires integration_guest)'
         type: boolean
@@ -53,13 +57,14 @@ jobs:
       - name: Reject integration-only options outside integration
         env:
           TIKTOK47_HOST: ${{ inputs.tiktok47_host }}
+          PAUSE: ${{ inputs.guest_pause_diagnostic }}
           VIEWING: ${{ inputs.highlights_viewing_experiment }}
           DIRECT: ${{ inputs.highlights_direct_viewing_experiment }}
           EARLY: ${{ inputs.highlights_early_viewing_experiment }}
           ADMISSION: ${{ inputs.highlights_admission_metadata }}
           OWNER: ${{ inputs.highlights_admission_owner_metadata }}
           DIAGNOSTICS: ${{ inputs.highlights_diagnostics }}
-        run: test "$TIKTOK47_HOST" != true && test "$VIEWING" != true && test "$DIAGNOSTICS" != true && test "$DIRECT" != true && test "$EARLY" != true && test "$ADMISSION" != true && test "$OWNER" != true
+        run: test "$PAUSE" != true && test "$TIKTOK47_HOST" != true && test "$VIEWING" != true && test "$DIAGNOSTICS" != true && test "$DIRECT" != true && test "$EARLY" != true && test "$ADMISSION" != true && test "$OWNER" != true
       - name: Test synthetic packaging rules
         run: python3 -m unittest discover -s experiments/native-social-liveprocess-device -p 'test_*.py' -v
       - name: Select pinned toolchain and source
@@ -555,6 +560,7 @@ jobs:
       contents: read
     uses: ./.github/workflows/native-social-integration.yml
     with:
+      guest_pause_diagnostic: ${{ inputs.guest_pause_diagnostic }}
       tiktok47_host: ${{ inputs.tiktok47_host }}
       highlights_diagnostics: ${{ inputs.highlights_diagnostics }}
       highlights_viewing_experiment: ${{ inputs.highlights_viewing_experiment }}

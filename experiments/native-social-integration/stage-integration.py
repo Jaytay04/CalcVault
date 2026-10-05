@@ -5,7 +5,9 @@ import plistlib
 import shutil
 
 
-def stage(host, kit, build=23, profile='synthetic'):
+def stage(host, kit, build=23, profile='synthetic', signal_diagnostic=False):
+    if type(signal_diagnostic) is not bool or (signal_diagnostic and build != 24):
+        raise ValueError('unsupported_signal_diagnostic')
     if type(build) is not int or build not in (23, 24):
         raise ValueError('unsupported_integration_build')
     if profile not in ('synthetic', 'tiktok47') or (build == 23 and profile != 'synthetic'):
@@ -54,6 +56,12 @@ def stage(host, kit, build=23, profile='synthetic'):
         else f'synthetic-integration-{build}'
     )
     info['CVNativeGuestKind'] = 'tiktok47' if profile == 'tiktok47' else 'synthetic'
+    # This flag does not make a synthetic host eligible for native signals.
+    # The session additionally checks the privately merged original descriptor.
+    if signal_diagnostic:
+        info['CVNativeSignalDiagnosticEnabled'] = True
+    else:
+        info.pop('CVNativeSignalDiagnosticEnabled', None)
     # The containing app is CalcVault, not the generic upstream file manager.
     # Do not expose its Documents directory or inherit broad network/background
     # exceptions. Guest extension metadata is intentionally untouched here.
@@ -72,5 +80,6 @@ if __name__ == '__main__':
     parser.add_argument('kit', type=Path)
     parser.add_argument('--build', type=int, choices=(23, 24), default=23)
     parser.add_argument('--profile', choices=('synthetic', 'tiktok47'), default='synthetic')
+    parser.add_argument('--signal-diagnostic', action='store_true')
     args = parser.parse_args()
-    stage(args.host, args.kit, build=args.build, profile=args.profile)
+    stage(args.host, args.kit, build=args.build, profile=args.profile, signal_diagnostic=args.signal_diagnostic)

@@ -812,6 +812,411 @@ final class NativeGuestCoordinatorTests: XCTestCase {
         XCTAssertEqual(runtime.startCount, 1)
     }
 
+    func testSignalDiagnosticDefaultsOffAndDoesNotClaimVerifiedCapability() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let unsupported = FakeGuestRuntime()
+        let unsupportedCoordinator = makeCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: unsupported
+        )
+        try await completeCheck(unsupportedCoordinator, checker: checker)
+        unsupportedCoordinator.surfaceReady()
+        unsupported.completeStart(true)
+        XCTAssertFalse(unsupportedCoordinator.canBeginSignalDiagnostic)
+        XCTAssertFalse(unsupportedCoordinator.canBeginVerificationHandoff)
+
+        lifecycle.lock()
+        _ = try unlock(lifecycle)
+        let signalRuntime = FakeSignalDiagnosticGuestRuntime(available: true)
+        let signalCoordinator = makeSignalDiagnosticCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: signalRuntime,
+            lease: FakeGuestHandoffLease()
+        )
+        try await startSignalDiagnosticGuest(signalCoordinator, checker: checker, runtime: signalRuntime)
+
+        XCTAssertTrue(signalCoordinator.canBeginSignalDiagnostic)
+        XCTAssertFalse(signalCoordinator.canBeginVerificationHandoff)
+        XCTAssertFalse(signalRuntime is any NativeGuestVerificationRuntime)
+    }
+
+    func testSignalDiagnosticRequiresLeaseAndRevokesIfExplicitAttemptHasNoLease() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeSignalDiagnosticGuestRuntime(available: true)
+        let noLeaseCoordinator = makeSignalDiagnosticCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: nil
+        )
+        try await startSignalDiagnosticGuest(noLeaseCoordinator, checker: checker, runtime: runtime)
+        XCTAssertFalse(noLeaseCoordinator.canBeginSignalDiagnostic)
+        XCTAssertFalse(noLeaseCoordinator.beginSignalDiagnostic())
+        XCTAssertEqual(noLeaseCoordinator.state, .ended)
+        XCTAssertFalse(noLeaseCoordinator.showingGuest)
+        XCTAssertEqual(runtime.pauseRequestCount, 0)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertTrue(noLeaseCoordinator.summary.contains("lease-unavailable"))
+    }
+
+    func testSignalDiagnosticConcealsBeforeRequestAndReportsOnlySubmission() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeSignalDiagnosticGuestRuntime(available: true)
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeSignalDiagnosticCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startSignalDiagnosticGuest(coordinator, checker: checker, runtime: runtime)
+
+        runtime.onPauseRequest = { [weak coordinator] in
+            XCTAssertFalse(coordinator?.showingGuest ?? true)
+            XCTAssertNil(coordinator?.viewController)
+            XCTAssertNotNil(coordinator?.mountedViewController)
+            XCTAssertTrue(coordinator?.summary.contains("Signal diagnostic is pending") ?? false)
+            XCTAssertFalse(coordinator?.summary.contains("Pause request submitted") ?? true)
+            XCTAssertFalse(coordinator?.isSignalDiagnosticPauseRequestSubmitted ?? true)
+        }
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+        XCTAssertEqual(runtime.pauseRequestCount, 1)
+        XCTAssertEqual(coordinator.state, .holding)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertNil(coordinator.viewController)
+        XCTAssertNotNil(coordinator.mountedViewController)
+        XCTAssertFalse(coordinator.canResumeSignalDiagnostic)
+        XCTAssertTrue(coordinator.isSignalDiagnosticPauseRequestSubmitted)
+        XCTAssertFalse(coordinator.canBeginVerificationHandoff)
+        XCTAssertTrue(coordinator.summary.contains("Pause request submitted"))
+        XCTAssertTrue(coordinator.summary.contains("suspension and media stop are unproved"))
+    }
+
+    func testSignalDiagnosticPauseRejectionRevokesAndConsumesAttempt() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeSignalDiagnosticGuestRuntime(available: true)
+        runtime.pauseSubmission = false
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeSignalDiagnosticCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startSignalDiagnosticGuest(coordinator, checker: checker, runtime: runtime)
+
+        XCTAssertFalse(coordinator.beginSignalDiagnostic())
+        XCTAssertEqual(runtime.pauseRequestCount, 1)
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertNil(coordinator.mountedViewController)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertEqual(lease.endCount, 1)
+        XCTAssertFalse(coordinator.canBeginSignalDiagnostic)
+        XCTAssertTrue(coordinator.summary.contains("pause-request-rejected"))
+    }
+
+    func testSignalDiagnosticDurationIsClampedTo30SecondsAndExpiryRevokes() async throws {
+        XCTAssertEqual(
+            NativeGuestCoordinator.boundedSignalDiagnosticDuration(.seconds(90)), .seconds(30)
+        )
+        XCTAssertEqual(
+            NativeGuestCoordinator.boundedSignalDiagnosticDuration(.seconds(12)), .seconds(12)
+        )
+
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeSignalDiagnosticGuestRuntime(available: true)
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeSignalDiagnosticCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease,
+            signalDiagnosticDuration: .milliseconds(20)
+        )
+        try await startSignalDiagnosticGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+
+        try await Task.sleep(nanoseconds: 70_000_000)
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertNil(coordinator.mountedViewController)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertEqual(runtime.resumeRequestCount, 0)
+        XCTAssertEqual(lease.endCount, 1)
+    }
+
+    func testSignalDiagnosticCancellationNeverSubmitsResumeAndStaysConcealed() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeSignalDiagnosticGuestRuntime(available: true)
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeSignalDiagnosticCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startSignalDiagnosticGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+        lifecycle.lock()
+        _ = try unlock(lifecycle)
+
+        let cancelledCheck = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await checker.waitForCall(2)
+        cancelledCheck.cancel()
+        let lateCheckSucceeded = await checker.succeed(2)
+        XCTAssertTrue(lateCheckSucceeded)
+        await cancelledCheck.value
+
+        XCTAssertEqual(coordinator.state, .holding)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertNil(coordinator.viewController)
+        XCTAssertNotNil(coordinator.mountedViewController)
+        XCTAssertEqual(runtime.resumeRequestCount, 0)
+        XCTAssertTrue(coordinator.canResumeSignalDiagnostic)
+        coordinator.endVerificationHandoff()
+        XCTAssertEqual(runtime.resumeRequestCount, 0)
+        XCTAssertEqual(coordinator.state, .ended)
+    }
+
+    func testSignalDiagnosticRejectsLeaseThatExpiresDuringCreation() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeSignalDiagnosticGuestRuntime(available: true)
+        let lease = FakeGuestHandoffLease(expiresDuringInstall: true)
+        let coordinator = makeSignalDiagnosticCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startSignalDiagnosticGuest(coordinator, checker: checker, runtime: runtime)
+
+        XCTAssertFalse(coordinator.beginSignalDiagnostic())
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertNil(coordinator.mountedViewController)
+        XCTAssertEqual(runtime.pauseRequestCount, 0)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertEqual(lease.endCount, 1)
+    }
+
+    func testSignalDiagnosticLeaseExpiryDuringPauseBridgeRevokesReentrantly() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeSignalDiagnosticGuestRuntime(available: true)
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeSignalDiagnosticCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startSignalDiagnosticGuest(coordinator, checker: checker, runtime: runtime)
+        runtime.onPauseRequest = { lease.expire() }
+
+        XCTAssertFalse(coordinator.beginSignalDiagnostic())
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertNil(coordinator.mountedViewController)
+        XCTAssertEqual(runtime.pauseRequestCount, 1)
+        XCTAssertEqual(runtime.resumeRequestCount, 0)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertEqual(lease.endCount, 1)
+    }
+
+    func testSignalDiagnosticNeedsFreshSessionAndSuccessfulCredentialCheckForManualResume() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeSignalDiagnosticGuestRuntime(available: true)
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeSignalDiagnosticCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startSignalDiagnosticGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+        XCTAssertNil(coordinator.start(biometricEnabled: false))
+        XCTAssertEqual(runtime.resumeRequestCount, 0)
+
+        lifecycle.lock()
+        _ = try unlock(lifecycle)
+        XCTAssertTrue(coordinator.canResumeSignalDiagnostic)
+        let resumeCheck = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await checker.waitForCall(2)
+        XCTAssertEqual(coordinator.state, .checking)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertEqual(runtime.resumeRequestCount, 0)
+
+        let failedCheck = await checker.fail(2)
+        XCTAssertTrue(failedCheck)
+        await resumeCheck.value
+        XCTAssertEqual(coordinator.state, .blocked)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertEqual(runtime.resumeRequestCount, 0)
+        XCTAssertTrue(coordinator.canResumeSignalDiagnostic)
+
+        let retry = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await checker.waitForCall(3)
+        let retrySucceeded = await checker.succeed(3)
+        XCTAssertTrue(retrySucceeded)
+        await retry.value
+        XCTAssertEqual(coordinator.state, .presenting)
+        XCTAssertTrue(coordinator.showingGuest)
+        XCTAssertEqual(runtime.resumeRequestCount, 0)
+
+        coordinator.surfaceReady()
+        coordinator.surfaceReady()
+        XCTAssertEqual(runtime.resumeRequestCount, 1)
+        XCTAssertEqual(coordinator.state, .running)
+        XCTAssertEqual(runtime.startCount, 1)
+        XCTAssertEqual(lease.endCount, 1)
+        XCTAssertFalse(coordinator.canBeginSignalDiagnostic)
+        XCTAssertFalse(coordinator.canResumeSignalDiagnostic)
+        XCTAssertFalse(coordinator.beginSignalDiagnostic())
+        XCTAssertEqual(runtime.pauseRequestCount, 1)
+        XCTAssertTrue(coordinator.summary.contains("Resume request submitted"))
+        XCTAssertTrue(coordinator.summary.contains("visible content are unproved"))
+    }
+
+    func testSignalDiagnosticNeverAutoResumesAndExplicitLockRevokes() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeSignalDiagnosticGuestRuntime(available: true)
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeSignalDiagnosticCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startSignalDiagnosticGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+
+        lifecycle.applicationDidEnterBackground()
+        lifecycle.applicationDidBecomeActive()
+        _ = try unlock(lifecycle)
+        XCTAssertEqual(coordinator.state, .holding)
+        XCTAssertEqual(runtime.resumeRequestCount, 0)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertTrue(coordinator.canResumeSignalDiagnostic)
+
+        coordinator.endVerificationHandoff()
+        lifecycle.lock()
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertNil(coordinator.mountedViewController)
+        XCTAssertEqual(runtime.resumeRequestCount, 0)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertEqual(lease.endCount, 1)
+    }
+
+    func testSignalDiagnosticResumeRejectionRevokesGuest() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeSignalDiagnosticGuestRuntime(available: true)
+        runtime.resumeSubmission = false
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeSignalDiagnosticCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startSignalDiagnosticGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+        lifecycle.lock()
+        _ = try unlock(lifecycle)
+        let resumeCheck = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await checker.waitForCall(2)
+        let checkSucceeded = await checker.succeed(2)
+        XCTAssertTrue(checkSucceeded)
+        await resumeCheck.value
+
+        coordinator.surfaceReady()
+        XCTAssertEqual(runtime.resumeRequestCount, 1)
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertNil(coordinator.mountedViewController)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertEqual(lease.endCount, 1)
+    }
+
+    func testLifecycleLockDuringResumeSubmissionRejectsStaleContinuation() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeSignalDiagnosticGuestRuntime(available: true)
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeSignalDiagnosticCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startSignalDiagnosticGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+        lifecycle.lock()
+        _ = try unlock(lifecycle)
+        let resumeCheck = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await checker.waitForCall(2)
+        let checkSucceeded = await checker.succeed(2)
+        XCTAssertTrue(checkSucceeded)
+        await resumeCheck.value
+
+        runtime.onResumeRequest = { lifecycle.lock() }
+        coordinator.surfaceReady()
+        XCTAssertEqual(runtime.resumeRequestCount, 1)
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertNil(coordinator.mountedViewController)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertEqual(lease.endCount, 1)
+    }
+
+    func testReentrantLeaseEndLockRevokesTheRestoredGuest() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeSignalDiagnosticGuestRuntime(available: true)
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeSignalDiagnosticCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startSignalDiagnosticGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+        lifecycle.lock()
+        _ = try unlock(lifecycle)
+        let resumeCheck = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await checker.waitForCall(2)
+        let checkSucceeded = await checker.succeed(2)
+        XCTAssertTrue(checkSucceeded)
+        await resumeCheck.value
+
+        lease.onEndDuringEnd = { lifecycle.lock() }
+        coordinator.surfaceReady()
+        XCTAssertEqual(runtime.resumeRequestCount, 1)
+        XCTAssertEqual(lease.endCount, 1)
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertNil(coordinator.viewController)
+        XCTAssertNil(coordinator.mountedViewController)
+        XCTAssertEqual(runtime.revokeCount, 2)
+    }
+
+    func testStaleResumeCheckCannotExposeGuestOrSubmitResume() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeSignalDiagnosticGuestRuntime(available: true)
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeSignalDiagnosticCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startSignalDiagnosticGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+        lifecycle.lock()
+        _ = try unlock(lifecycle)
+
+        let staleCheck = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await checker.waitForCall(2)
+        lifecycle.lock()
+        _ = try unlock(lifecycle)
+        let staleCheckSucceeded = await checker.succeed(2)
+        XCTAssertTrue(staleCheckSucceeded)
+        await staleCheck.value
+
+        XCTAssertEqual(coordinator.state, .holding)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertNil(coordinator.viewController)
+        XCTAssertNotNil(coordinator.mountedViewController)
+        XCTAssertEqual(runtime.resumeRequestCount, 0)
+        XCTAssertTrue(coordinator.canResumeSignalDiagnostic)
+    }
+
     private func completeCheck(
         _ coordinator: NativeGuestCoordinator,
         checker: SuspendedGuestChecker
@@ -864,10 +1269,61 @@ final class NativeGuestCoordinatorTests: XCTestCase {
         )
     }
 
+    private func makeSignalDiagnosticCoordinator(
+        lifecycle: SessionLifecycleCoordinator,
+        checker: SuspendedGuestChecker,
+        runtime: any NativeGuestRuntime,
+        lease: FakeGuestHandoffLease?,
+        signalDiagnosticDuration: Duration = .seconds(30)
+    ) -> NativeGuestCoordinator {
+        let leaseFactory: (@MainActor (@escaping @MainActor () -> Void) -> (any NativeGuestHandoffLease)?)?
+        if let lease {
+            leaseFactory = { onEnd in
+                lease.install(onEnd: onEnd)
+                return lease
+            }
+        } else {
+            leaseFactory = nil
+        }
+        return NativeGuestCoordinator(
+            lifecycle: lifecycle,
+            check: { biometricEnabled in
+                try await checker.check(biometricEnabled: biometricEnabled)
+            },
+            runtimeFactory: {
+                if let runtime = runtime as? FakeSignalDiagnosticGuestRuntime {
+                    runtime.noteFactoryInvocation()
+                } else if let runtime = runtime as? FakeGuestRuntime {
+                    runtime.noteFactoryInvocation()
+                }
+                return runtime
+            },
+            leaseFactory: leaseFactory,
+            handoffDuration: .seconds(120),
+            signalDiagnosticDuration: signalDiagnosticDuration
+        )
+    }
+
     private func startVerificationGuest(
         _ coordinator: NativeGuestCoordinator,
         checker: SuspendedGuestChecker,
         runtime: FakeVerificationGuestRuntime
+    ) async throws {
+        let task = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await checker.waitForCall(1)
+        let checkSucceeded = await checker.succeed(1)
+        XCTAssertTrue(checkSucceeded)
+        await task.value
+        coordinator.surfaceReady()
+        XCTAssertEqual(runtime.startCount, 1)
+        runtime.completeStart(true)
+        XCTAssertEqual(coordinator.state, .running)
+    }
+
+    private func startSignalDiagnosticGuest(
+        _ coordinator: NativeGuestCoordinator,
+        checker: SuspendedGuestChecker,
+        runtime: FakeSignalDiagnosticGuestRuntime
     ) async throws {
         let task = try XCTUnwrap(coordinator.start(biometricEnabled: false))
         await checker.waitForCall(1)
@@ -967,9 +1423,54 @@ private final class FakeVerificationGuestRuntime: NativeGuestVerificationRuntime
 }
 
 @MainActor
+private final class FakeSignalDiagnosticGuestRuntime: NativeGuestSignalDiagnosticRuntime {
+    let viewController = UIViewController()
+    let summary = "Signal diagnostic runtime is ready."
+    var signalDiagnosticAvailable: Bool
+    var pauseSubmission = true
+    var resumeSubmission = true
+    private(set) var factoryCount = 0
+    private(set) var startCount = 0
+    private(set) var pauseRequestCount = 0
+    private(set) var resumeRequestCount = 0
+    private(set) var revokeCount = 0
+    var onPauseRequest: (@MainActor () -> Void)?
+    var onResumeRequest: (@MainActor () -> Void)?
+    private var startCompletion: (@MainActor (Bool) -> Void)?
+
+    init(available: Bool) {
+        signalDiagnosticAvailable = available
+    }
+
+    func noteFactoryInvocation() { factoryCount += 1 }
+
+    func start(completion: @escaping @MainActor (Bool) -> Void) {
+        startCount += 1
+        startCompletion = completion
+    }
+
+    func requestSignalDiagnosticPause() -> Bool {
+        pauseRequestCount += 1
+        onPauseRequest?()
+        return pauseSubmission
+    }
+
+    func requestSignalDiagnosticResume() -> Bool {
+        resumeRequestCount += 1
+        onResumeRequest?()
+        return resumeSubmission
+    }
+
+    func revoke() { revokeCount += 1 }
+
+    func completeStart(_ started: Bool) { startCompletion?(started) }
+}
+
+@MainActor
 private final class FakeGuestHandoffLease: NativeGuestHandoffLease {
     private(set) var isValid = true
     private(set) var endCount = 0
+    var onEndDuringEnd: (@MainActor () -> Void)?
     private var onEnd: (@MainActor () -> Void)?
     private let expiresDuringInstall: Bool
 
@@ -991,6 +1492,7 @@ private final class FakeGuestHandoffLease: NativeGuestHandoffLease {
     func end() {
         endCount += 1
         isValid = false
+        onEndDuringEnd?()
     }
 }
 

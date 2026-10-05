@@ -121,7 +121,8 @@ return @"Synthetic Keychain fixture setup is inconclusive; device probe stopped 
         self.assertIn('if profile?.representsTikTokGuest == true', shortcut)
         self.assertIn('model.canResumeVerification ? "Resume TikTok verification" : "TikTok (native)"', shortcut)
         self.assertIn('action: start', shortcut)
-        self.assertIn('.disabled(!model.canRequestLaunch && !model.canResumeVerification)', shortcut)
+        self.assertIn('.disabled(!model.canRequestLaunch && !model.canResumeVerification && !model.canResumeSignalDiagnostic)', shortcut)
+        self.assertIn('model.canResumeSignalDiagnostic ? "Resume pause test"', shortcut)
         for forbidden in ('onAppear', '.task', 'runtimeFactory', 'authenticate(', 'surfaceReady('):
             self.assertNotIn(forbidden, shortcut)
         private_ui = (app_root / 'ContentView.swift').read_text()
@@ -149,12 +150,12 @@ return @"Synthetic Keychain fixture setup is inconclusive; device probe stopped 
             self.assertIn(gate, start)
         self.assertNotIn('canRequestLaunch', start)
         ui = (app_root / 'CalcVaultIntegratedHost.swift').read_text()
-        self.assertIn('.disabled(profile == nil || (!model.canRequestLaunch && !model.canResumeVerification))', ui)
+        self.assertIn('.disabled(profile == nil || (!model.canRequestLaunch && !model.canResumeVerification && !model.canResumeSignalDiagnostic))', ui)
 
     def test_native_handoff_requires_capability_and_protected_loss_is_terminal(self):
         app_root = ROOT.parent.parent / 'CalcVault' / 'App'
         app = (ROOT / 'IntegrationApp.swift').read_text()
-        self.assertIn('IntegrationRuntime: NativeGuestRuntime', app)
+        self.assertIn('IntegrationRuntime: NativeGuestSignalDiagnosticRuntime', app)
         self.assertNotIn('IntegrationRuntime: NativeGuestVerificationRuntime', app)
         ui = (app_root / 'CalcVaultIntegratedHost.swift').read_text()
         hard_boundary = ui.split('@objc private func protectedDataUnavailable()', 1)[1].split(

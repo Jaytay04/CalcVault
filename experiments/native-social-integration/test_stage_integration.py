@@ -93,6 +93,25 @@ class IntegrationStageTests(unittest.TestCase):
             stage.stage(self.host, self.kit)
         self.assertFalse((self.host / 'Frameworks/CalcVaultKit.framework').exists())
 
+    def test_native_pause_flag_is_default_off(self):
+        stage.stage(self.host, self.kit, build=24)
+        info = plistlib.loads((self.host / 'Info.plist').read_bytes())
+        self.assertNotIn('CVNativeSignalDiagnosticEnabled', info)
+
+    def test_native_pause_opt_in_keeps_ci_guest_synthetic(self):
+        stage.stage(self.host, self.kit, build=24, signal_diagnostic=True)
+        info = plistlib.loads((self.host / 'Info.plist').read_bytes())
+        self.assertIs(info['CVNativeSignalDiagnosticEnabled'], True)
+        self.assertEqual(info['CVNativeGuestKind'], 'synthetic')
+
+    def test_native_pause_rejects_wrong_build_and_untyped_flag_before_write(self):
+        for build, flag in ((23, True), (24, 1), (24, 'true')):
+            before = (self.host / 'Info.plist').read_bytes()
+            with self.assertRaisesRegex(ValueError, 'unsupported_signal_diagnostic'):
+                stage.stage(self.host, self.kit, build=build, signal_diagnostic=flag)
+            self.assertEqual((self.host / 'Info.plist').read_bytes(), before)
+            self.assertFalse((self.host / 'Frameworks/CalcVaultKit.framework').exists())
+
     def test_rejects_extra_extensions(self):
         (self.host / 'PlugIns/Extra.appex').mkdir()
         with self.assertRaisesRegex(ValueError, 'unexpected_extension_inventory'):

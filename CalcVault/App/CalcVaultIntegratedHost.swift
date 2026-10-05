@@ -66,6 +66,20 @@ public final class CalcVaultIntegratedHost: NSObject, ObservableObject {
         revealCalculatorAfterLock()
     }
 
+    public func beginSignalDiagnostic() {
+        guard UIApplication.shared.isProtectedDataAvailable else {
+            protectedDataUnavailable()
+            return
+        }
+        shield.coverImmediately()
+        if coordinator.nativeGuest.beginSignalDiagnostic() {
+            coordinator.lockForNativeVerificationHandoff()
+        } else {
+            coordinator.lock()
+        }
+        revealCalculatorAfterLock()
+    }
+
     public func lock() {
         shield.coverImmediately()
         coordinator.lock()
@@ -122,6 +136,15 @@ public struct CalcVaultIntegratedRootView: View {
                             .frame(minHeight: 44)
                             .background(.black.opacity(0.9), in: Capsule())
                             .accessibilityHint("Locks the Vault and holds this guest for up to two minutes while you get a verification code. Keep the phone unlocked and authenticate again on return.")
+                    }
+                    if guest.canBeginSignalDiagnostic {
+                        Button("Pause test", action: host.beginSignalDiagnostic)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 44)
+                            .background(.black.opacity(0.9), in: Capsule())
+                            .accessibilityHint("Conceals the guest before submitting a signal pause request. Guest suspension and media stop are unproved. Resume requires fresh authentication and a credential check within 30 seconds. Lock, protected-data loss, or expiry ends the test.")
                     }
                 }
                 .padding(.leading, 12).padding(.top, 8)
@@ -199,8 +222,8 @@ struct NativeGuestSocialLaunchButton: View {
 
     var body: some View {
         if profile?.representsTikTokGuest == true {
-            Button(model.canResumeVerification ? "Resume TikTok verification" : "TikTok (native)", systemImage: "play.rectangle", action: start)
-                .disabled(!model.canRequestLaunch && !model.canResumeVerification)
+            Button(model.canResumeSignalDiagnostic ? "Resume pause test" : (model.canResumeVerification ? "Resume TikTok verification" : "TikTok (native)"), systemImage: "play.rectangle", action: start)
+                .disabled(!model.canRequestLaunch && !model.canResumeVerification && !model.canResumeSignalDiagnostic)
                 .accessibilityIdentifier("native-tiktok-launch")
         }
     }
@@ -218,14 +241,14 @@ struct NativeGuestIntegrationSection: View {
                  ? "Private native TikTok candidate. Browser services and downloaders remain separate. Guest data is not vault-encrypted."
                  : "Synthetic guest only. Native TikTok is not included in this isolation-test build.")
             Text("Face ID may be requested to verify protected credential metadata before launch. No credential values are shared with the guest.")
-            Button(model.canResumeVerification ? "Resume verification" : (profile?.representsTikTokGuest == true ? "Open native TikTok" : "Open isolated test guest"), action: start)
-                .disabled(profile == nil || (!model.canRequestLaunch && !model.canResumeVerification))
+            Button(model.canResumeSignalDiagnostic ? "Resume pause test" : (model.canResumeVerification ? "Resume verification" : (profile?.representsTikTokGuest == true ? "Open native TikTok" : "Open isolated test guest")), action: start)
+                .disabled(profile == nil || (!model.canRequestLaunch && !model.canResumeVerification && !model.canResumeSignalDiagnostic))
             Text(status)
             Button("Refresh native report") { report = model.summary }
             if !report.isEmpty { Text(report).font(.footnote.monospaced()).textSelection(.enabled) }
             Text("One guest attempt per app launch. Restart after testing. Credential checks do not certify isolation.")
                 .font(.footnote)
-            Text("Verification handoff requires a tested pause/resume runtime; unsupported runtimes still end on app switching. When available, Get code locks the Vault and conceals the guest for at most two minutes. Keep the phone unlocked; authenticate again and choose Resume verification. Explicit Lock, protected-data loss or an earlier OS deadline ends it. Force-quitting does not preserve the page.")
+            Text("The verified two-minute handoff is unavailable unless the runtime proves pause and resume. The separate signal diagnostic is opt-in and lasts at most 30 seconds. It conceals the guest before submitting a pause request; submission does not prove suspension or media stop. Resume is manual through the normal fresh-authentication and credential-check path. A failed or cancelled check stays concealed; no automatic resume signal is sent. Lock, protected-data loss, lease failure or expiry ends the diagnostic.")
                 .font(.footnote)
         }
     }
@@ -236,7 +259,11 @@ struct NativeGuestIntegrationSection: View {
         case .checking: "Checking credential boundary."
         case .presenting: "Attaching isolated guest."
         case .running: "Guest request accepted; verify visible content separately."
-        case .holding: "Verification handoff held behind the locked calculator. Resume requires fresh authentication and a current credential check."
+        case .holding: model.isSignalDiagnosticHeld
+            ? (model.isSignalDiagnosticPauseRequestSubmitted
+                ? "Signal pause request submitted. Suspension and media stop are unproved; resume requires fresh authentication and a current credential check."
+                : "Signal diagnostic request pending. Suspension and media stop are unproved.")
+            : "Verification handoff held behind the locked calculator. Resume requires fresh authentication and a current credential check."
         case .blocked: "Launch blocked. Refresh the native report for the diagnostic code. No credential changes were made by this check."
         case .ended: "Guest revoked. Restart the app before another native launch."
         }
