@@ -40,6 +40,17 @@ public protocol NativeGuestSignalDiagnosticRuntime: NativeGuestRuntime {
     func requestSignalDiagnosticResume() -> Bool
 }
 
+/// A cooperative handoff capability for runtimes that can gate their own
+/// media without suspending the guest process. A successful pause callback
+/// acknowledges only that this narrow media gate was applied; it does not
+/// prove whole-process suspension or coverage of every media source.
+@MainActor
+public protocol NativeGuestCooperativePauseRuntime: NativeGuestRuntime {
+    var cooperativePauseAvailable: Bool { get }
+    func pauseMediaForHandoff(completion: @escaping @MainActor (Bool) -> Void)
+    func resumeMediaAfterHandoff(completion: @escaping @MainActor (Bool) -> Void)
+}
+
 /// A host-owned lease that bounds how long a suspended runtime may be retained.
 @MainActor
 public protocol NativeGuestHandoffLease: AnyObject {
@@ -100,6 +111,7 @@ public final class NativeGuestCoordinator: ObservableObject {
     private let handoffLeaseFactory: (@MainActor (@escaping @MainActor () -> Void) -> (any NativeGuestHandoffLease)?)?
     private let handoffDuration: Duration
     private let signalDiagnosticDuration: Duration
+    private let cooperativePauseAcknowledgementTimeout: Duration
     private struct ActiveAuthorization {
         let request: CheckRequest
         let promptToken: UUID
@@ -136,13 +148,29 @@ public final class NativeGuestCoordinator: ObservableObject {
         var pauseRequestSubmitted: Bool
         var resumePending = false
     }
+    private struct CooperativePauseHandoff {
+        let token: UUID
+        let originatingSession: SessionContext
+        let runtime: any NativeGuestCooperativePauseRuntime
+        let lease: any NativeGuestHandoffLease
+        let deadline: ContinuousClock.Instant
+        var pauseOperationID: UUID
+        var pauseAcknowledged = false
+        var resumeOperationID: UUID?
+        var resumeRequest: CheckRequest?
+    }
     private var verificationHandoff: VerificationHandoff?
     private var handoffDeadlineTask: Task<Void, Never>?
     private var verificationOperationID: UUID?
     private var signalDiagnosticHandoff: SignalDiagnosticHandoff?
     private var signalDiagnosticDeadlineTask: Task<Void, Never>?
+    private var cooperativePauseHandoff: CooperativePauseHandoff?
+    private var cooperativePauseDeadlineTask: Task<Void, Never>?
+    private var cooperativePauseAcknowledgementTask: Task<Void, Never>?
+    private var cooperativeResumeAcknowledgementTask: Task<Void, Never>?
+    private var cooperativeAuthenticationAttemptID: UUID?
     private var signalDiagnosticAttemptConsumed = false
-    private var signalDiagnosticReport: String?
+    private var handoffReport: String?
 
     public init(
         lifecycle: SessionLifecycleCoordinator,
@@ -158,6 +186,7 @@ public final class NativeGuestCoordinator: ObservableObject {
         self.handoffLeaseFactory = leaseFactory
         self.handoffDuration = .seconds(120)
         self.signalDiagnosticDuration = .seconds(30)
+        self.cooperativePauseAcknowledgementTimeout = .seconds(3)
         self.state = runtimeFactory == nil ? .unavailable : .idle
 
         observeLifecycle()
@@ -170,7 +199,8 @@ public final class NativeGuestCoordinator: ObservableObject {
         authorizationFactory: (@MainActor () -> any NativeGuestCredentialAuthorization)? = nil,
         leaseFactory: (@MainActor (@escaping @MainActor () -> Void) -> (any NativeGuestHandoffLease)?)? = nil,
         handoffDuration: Duration,
-        signalDiagnosticDuration: Duration = .seconds(30)
+        signalDiagnosticDuration: Duration = .seconds(30),
+        cooperativePauseAcknowledgementTimeout: Duration = .seconds(3)
     ) {
         self.lifecycle = lifecycle
         self.checkLegacyCredentialAbsence = check
@@ -179,6 +209,7 @@ public final class NativeGuestCoordinator: ObservableObject {
         self.handoffLeaseFactory = leaseFactory
         self.handoffDuration = min(handoffDuration, .seconds(120))
         self.signalDiagnosticDuration = Self.boundedSignalDiagnosticDuration(signalDiagnosticDuration)
+        self.cooperativePauseAcknowledgementTimeout = min(cooperativePauseAcknowledgementTimeout, .seconds(3))
         self.state = runtimeFactory == nil ? .unavailable : .idle
 
         observeLifecycle()
@@ -209,6 +240,7 @@ public final class NativeGuestCoordinator: ObservableObject {
         return runtime?.viewController
             ?? verificationHandoff?.runtime.viewController
             ?? signalDiagnosticHandoff?.runtime.viewController
+            ?? cooperativePauseHandoff?.runtime.viewController
     }
 
     /// Presentation hint only. `start` independently enforces every launch gate.
@@ -229,15 +261,18 @@ public final class NativeGuestCoordinator: ObservableObject {
             && handoffLeaseFactory != nil
     }
 
-    /// Opt-in diagnostic affordance for runtimes that can submit a signal
-    /// request. This is deliberately separate from the verified handoff gate.
+    /// Opt-in handoff affordance. Cooperative media gating takes precedence;
+    /// signal submission remains available only to legacy diagnostic runtimes.
     public var canBeginSignalDiagnostic: Bool {
         guard state == .running, showingGuest, !runtimeRevoked,
               !signalDiagnosticAttemptConsumed,
               presentationRequest.map({ isValid($0.session) }) == true,
               handoffLeaseFactory != nil,
-              let diagnosticRuntime = runtime as? any NativeGuestSignalDiagnosticRuntime else { return false }
-        return diagnosticRuntime.signalDiagnosticAvailable
+              let runtime else { return false }
+        if let cooperativeRuntime = runtime as? any NativeGuestCooperativePauseRuntime {
+            return cooperativeRuntime.cooperativePauseAvailable
+        }
+        return (runtime as? any NativeGuestSignalDiagnosticRuntime)?.signalDiagnosticAvailable == true
     }
 
     /// Internal mount point retained while the guest is hidden during a hold.
@@ -246,10 +281,12 @@ public final class NativeGuestCoordinator: ObservableObject {
         guard !runtimeRevoked,
               (showingGuest && presentationRequest.map { isValid($0.session) } == true)
                 || verificationHandoff != nil
-                || signalDiagnosticHandoff != nil else { return nil }
+                || signalDiagnosticHandoff != nil
+                || cooperativePauseHandoff != nil else { return nil }
         return runtime?.viewController
             ?? verificationHandoff?.runtime.viewController
             ?? signalDiagnosticHandoff?.runtime.viewController
+            ?? cooperativePauseHandoff?.runtime.viewController
     }
 
     /// Resume is offered only after suspension acknowledgement and while the
@@ -267,9 +304,20 @@ public final class NativeGuestCoordinator: ObservableObject {
         return true
     }
 
-    /// Resume uses the same credential inventory check as initial launch. The
-    /// pause signal's submission is not treated as suspension acknowledgement.
+    /// Resume eligibility requires a cooperative pause acknowledgement, or a
+    /// legacy signal submission, plus a fresh private session and live lease.
     public var canResumeSignalDiagnostic: Bool {
+        if let handoff = cooperativePauseHandoff {
+            guard handoff.pauseAcknowledged,
+                  handoff.resumeOperationID == nil,
+                  activeRequest == nil,
+                  state == .holding || state == .blocked,
+                  handoff.lease.isValid,
+                  ContinuousClock().now < handoff.deadline,
+                  let session = validSessionContext(),
+                  session != handoff.originatingSession else { return false }
+            return true
+        }
         guard let handoff = signalDiagnosticHandoff,
               handoff.pauseRequestSubmitted,
               !handoff.resumePending,
@@ -282,10 +330,23 @@ public final class NativeGuestCoordinator: ObservableObject {
         return true
     }
 
-    public var isSignalDiagnosticHeld: Bool { signalDiagnosticHandoff != nil }
+    public var isSignalDiagnosticHeld: Bool {
+        signalDiagnosticHandoff != nil || cooperativePauseHandoff != nil
+    }
+
+    public var isCooperativePauseHeld: Bool { cooperativePauseHandoff != nil }
+
+    public var isCooperativePauseRuntime: Bool {
+        cooperativePauseHandoff != nil || runtime is any NativeGuestCooperativePauseRuntime
+    }
+
+    public var isCooperativePauseAcknowledged: Bool {
+        cooperativePauseHandoff?.pauseAcknowledged == true
+    }
 
     public var isSignalDiagnosticPauseRequestSubmitted: Bool {
         signalDiagnosticHandoff?.pauseRequestSubmitted == true
+            || cooperativePauseHandoff?.pauseAcknowledged == true
     }
 
     /// Runtime summaries are surfaced only for an authorized live presentation.
@@ -298,12 +359,13 @@ public final class NativeGuestCoordinator: ObservableObject {
                 let diagnostic = "Native launch diagnostic v1\n\(launchFailure)"
                 return runtime.map { diagnostic + "\n\n" + $0.summary } ?? diagnostic
             }
-            if let signalDiagnosticReport {
+            if let handoffReport {
                 let runtimeSummary = runtime?.summary
                     ?? verificationHandoff?.runtime.summary
                     ?? signalDiagnosticHandoff?.runtime.summary
-                return runtimeSummary.map { signalDiagnosticReport + "\n\n" + $0 }
-                    ?? signalDiagnosticReport
+                    ?? cooperativePauseHandoff?.runtime.summary
+                return runtimeSummary.map { handoffReport + "\n\n" + $0 }
+                    ?? handoffReport
             }
             if let runtime { return runtime.summary }
         }
@@ -320,6 +382,11 @@ public final class NativeGuestCoordinator: ObservableObject {
         case .running:
             return "Native guest is running."
         case .holding:
+            if let cooperativePauseHandoff {
+                return cooperativePauseHandoff.pauseAcknowledged
+                    ? "Cooperative media pause acknowledged; this confirms only the adapter's narrow media gate."
+                    : "Cooperative media pause acknowledgement is pending."
+            }
             if let signalDiagnosticHandoff {
                 return signalDiagnosticHandoff.pauseRequestSubmitted
                     ? "Pause signal request submitted; guest suspension and media stop are unproved."
@@ -350,7 +417,17 @@ public final class NativeGuestCoordinator: ObservableObject {
             return nil
         }
 
-        if let handoff = signalDiagnosticHandoff {
+        if let handoff = cooperativePauseHandoff {
+            guard handoff.resumeOperationID == nil,
+                  state == .holding || state == .blocked else { return nil }
+            guard handoff.pauseAcknowledged else { return nil }
+            guard handoff.lease.isValid,
+                  ContinuousClock().now < handoff.deadline else {
+                endCooperativePause(reason: "lease-expired")
+                return nil
+            }
+            guard session != handoff.originatingSession else { return nil }
+        } else if let handoff = signalDiagnosticHandoff {
             guard !handoff.resumePending,
                   state == .holding || state == .blocked else { return nil }
             guard handoff.pauseRequestSubmitted,
@@ -417,14 +494,26 @@ public final class NativeGuestCoordinator: ObservableObject {
         return task
     }
 
-    /// Conceals the guest, locks the private workspace at the host, and submits
-    /// one bounded diagnostic pause request. No acknowledgement is claimed.
+    /// Conceals the guest, lets the host lock its private workspace, then
+    /// starts one bounded cooperative media pause or legacy signal diagnostic.
     @discardableResult
-    public func beginSignalDiagnostic() -> Bool {
+    public func beginSignalDiagnostic(
+        beforePauseRequest: @escaping @MainActor () -> Void = {}
+    ) -> Bool {
         guard state == .running, showingGuest, !runtimeRevoked,
               !signalDiagnosticAttemptConsumed,
               presentationRequest.map({ isValid($0.session) }) == true else { return false }
         signalDiagnosticAttemptConsumed = true
+        if let cooperativeRuntime = runtime as? any NativeGuestCooperativePauseRuntime {
+            guard cooperativeRuntime.cooperativePauseAvailable else {
+                launchFailure = "stage=cooperative-media-handoff; reason=unsupported"
+                return false
+            }
+            return beginCooperativePause(
+                using: cooperativeRuntime,
+                beforePauseRequest: beforePauseRequest
+            )
+        }
         guard let diagnosticRuntime = runtime as? any NativeGuestSignalDiagnosticRuntime,
               diagnosticRuntime.signalDiagnosticAvailable else {
             launchFailure = "stage=signal-diagnostic; reason=unsupported"
@@ -477,7 +566,7 @@ public final class NativeGuestCoordinator: ObservableObject {
         self.runtime = nil
         runtimeRevoked = false
         launchFailure = nil
-        signalDiagnosticReport = nil
+        handoffReport = nil
         state = .holding
         signalDiagnosticDeadlineTask = Task { @MainActor [weak self] in
             do {
@@ -489,6 +578,14 @@ public final class NativeGuestCoordinator: ObservableObject {
             self?.endSignalDiagnostic(reason: "lease-expired")
         }
 
+        beforePauseRequest()
+        guard let active = signalDiagnosticHandoff, active.token == token,
+              active.lease.isValid, ContinuousClock().now < active.deadline else {
+            if signalDiagnosticHandoff?.token == token {
+                endSignalDiagnostic(reason: "lease-expired")
+            }
+            return false
+        }
         let submitted = diagnosticRuntime.requestSignalDiagnosticPause()
         guard let active = signalDiagnosticHandoff, active.token == token else { return false }
         guard active.lease.isValid, ContinuousClock().now < active.deadline else {
@@ -500,8 +597,226 @@ public final class NativeGuestCoordinator: ObservableObject {
             return false
         }
         signalDiagnosticHandoff?.pauseRequestSubmitted = true
-        signalDiagnosticReport = "Native guest signal diagnostic\nPause request submitted. Submission is not an acknowledgement; guest suspension and media stop are unproved."
+        handoffReport = "Native guest signal diagnostic\nPause request submitted. Submission is not an acknowledgement; guest suspension and media stop are unproved."
         return true
+    }
+
+    private func beginCooperativePause(
+        using cooperativeRuntime: any NativeGuestCooperativePauseRuntime,
+        beforePauseRequest: @escaping @MainActor () -> Void
+    ) -> Bool {
+        guard let leaseFactory = handoffLeaseFactory else {
+            endRuntimePresentation()
+            launchFailure = "stage=cooperative-media-handoff; reason=lease-unavailable"
+            return false
+        }
+
+        let token = UUID()
+        var leaseInvalidatedDuringCreation = false
+        guard let lease = leaseFactory({ [weak self] in
+            leaseInvalidatedDuringCreation = true
+            self?.cooperativePauseLeaseDidEnd(token)
+        }) else {
+            endRuntimePresentation()
+            launchFailure = "stage=cooperative-media-handoff; reason=lease-unavailable"
+            return false
+        }
+        guard lease.isValid, !leaseInvalidatedDuringCreation else {
+            lease.end()
+            endRuntimePresentation()
+            launchFailure = "stage=cooperative-media-handoff; reason=lease-unavailable"
+            return false
+        }
+        guard let originatingSession = presentationRequest?.session else {
+            lease.end()
+            endRuntimePresentation()
+            return false
+        }
+
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: handoffDuration)
+        let pauseOperationID = UUID()
+        cooperativePauseHandoff = CooperativePauseHandoff(
+            token: token,
+            originatingSession: originatingSession,
+            runtime: cooperativeRuntime,
+            lease: lease,
+            deadline: deadline,
+            pauseOperationID: pauseOperationID
+        )
+
+        // Revoke the old presentation before locking the host and before the
+        // runtime is asked to apply its asynchronous media gate.
+        showingGuest = false
+        presentationRequest = nil
+        runtimeStartPending = false
+        runtimeStartAttempted = true
+        runtime = nil
+        runtimeRevoked = false
+        launchFailure = nil
+        handoffReport = nil
+        state = .holding
+        cooperativePauseDeadlineTask = Task { @MainActor [weak self] in
+            do {
+                try await clock.sleep(until: deadline)
+            } catch {
+                return
+            }
+            guard self?.cooperativePauseHandoff?.token == token else { return }
+            self?.endCooperativePause(reason: "lease-expired")
+        }
+
+        // The host covers and locks the vault synchronously here. Its lifecycle
+        // transition preserves this concealed handoff but invalidates the old
+        // authenticated session before any media operation is submitted.
+        beforePauseRequest()
+        guard let active = cooperativePauseHandoff,
+              active.token == token,
+              active.pauseOperationID == pauseOperationID,
+              active.lease.isValid,
+              ContinuousClock().now < active.deadline else {
+            if cooperativePauseHandoff?.token == token {
+                endCooperativePause(reason: "lease-expired")
+            }
+            return false
+        }
+
+        let acknowledgementTimeout = cooperativePauseAcknowledgementTimeout
+        cooperativePauseAcknowledgementTask = Task { @MainActor [weak self] in
+            do {
+                try await clock.sleep(for: acknowledgementTimeout)
+            } catch {
+                return
+            }
+            guard let self,
+                  self.cooperativePauseHandoff?.token == token,
+                  self.cooperativePauseHandoff?.pauseOperationID == pauseOperationID,
+                  self.cooperativePauseHandoff?.pauseAcknowledged == false else { return }
+            self.endCooperativePause(reason: "pause-ack-timeout")
+        }
+        cooperativeRuntime.pauseMediaForHandoff { [weak self] acknowledged in
+            self?.cooperativeMediaPaused(
+                token: token,
+                operationID: pauseOperationID,
+                acknowledged: acknowledged
+            )
+        }
+        return true
+    }
+
+    private func cooperativeMediaPaused(
+        token: UUID,
+        operationID: UUID,
+        acknowledged: Bool
+    ) {
+        guard let handoff = cooperativePauseHandoff,
+              handoff.token == token,
+              handoff.pauseOperationID == operationID,
+              !handoff.pauseAcknowledged else { return }
+        guard handoff.lease.isValid, ContinuousClock().now < handoff.deadline else {
+            endCooperativePause(reason: "lease-expired")
+            return
+        }
+        guard acknowledged else {
+            endCooperativePause(reason: "pause-rejected")
+            return
+        }
+
+        cooperativePauseHandoff?.pauseAcknowledged = true
+        cooperativePauseAcknowledgementTask?.cancel()
+        cooperativePauseAcknowledgementTask = nil
+        handoffReport = "Cooperative media handoff\nPause acknowledged. The runtime confirms only that its narrow media gate was applied; whole-process suspension, coverage of every media source, and device behavior are unverified."
+    }
+
+    private func beginCooperativeResume(
+        _ handoff: CooperativePauseHandoff,
+        request: CheckRequest
+    ) {
+        guard let active = cooperativePauseHandoff,
+              active.token == handoff.token,
+              active.pauseAcknowledged,
+              active.resumeOperationID == nil,
+              active.lease.isValid,
+              ContinuousClock().now < active.deadline,
+              request.session != active.originatingSession,
+              isValid(request.session) else {
+            endCooperativePause(reason: "stale-authentication")
+            return
+        }
+
+        let operationID = UUID()
+        cooperativePauseHandoff?.resumeOperationID = operationID
+        cooperativePauseHandoff?.resumeRequest = request
+        state = .holding
+        let clock = ContinuousClock()
+        let acknowledgementTimeout = cooperativePauseAcknowledgementTimeout
+        cooperativeResumeAcknowledgementTask = Task { @MainActor [weak self] in
+            do {
+                try await clock.sleep(for: acknowledgementTimeout)
+            } catch {
+                return
+            }
+            guard let self,
+                  self.cooperativePauseHandoff?.token == handoff.token,
+                  self.cooperativePauseHandoff?.resumeOperationID == operationID else { return }
+            self.endCooperativePause(reason: "resume-ack-timeout")
+        }
+        handoff.runtime.resumeMediaAfterHandoff { [weak self] resumed in
+            self?.cooperativeMediaResumed(
+                token: handoff.token,
+                operationID: operationID,
+                request: request,
+                resumed: resumed
+            )
+        }
+    }
+
+    private func cooperativeMediaResumed(
+        token: UUID,
+        operationID: UUID,
+        request: CheckRequest,
+        resumed: Bool
+    ) {
+        guard let handoff = cooperativePauseHandoff,
+              handoff.token == token,
+              handoff.pauseAcknowledged,
+              handoff.resumeOperationID == operationID,
+              handoff.resumeRequest == request else { return }
+        guard handoff.lease.isValid, ContinuousClock().now < handoff.deadline else {
+            endCooperativePause(reason: "lease-expired")
+            return
+        }
+        guard state == .holding,
+              activeRequest == nil,
+              request.session != handoff.originatingSession,
+              isValid(request.session) else {
+            endCooperativePause(reason: "stale-resume")
+            return
+        }
+        guard resumed else {
+            endCooperativePause(reason: "resume-rejected")
+            return
+        }
+
+        // Transfer the still-running guest only after the fenced media resume
+        // acknowledgement. Duplicate and late callbacks now find no token.
+        cooperativePauseHandoff = nil
+        cooperativePauseDeadlineTask?.cancel()
+        cooperativePauseDeadlineTask = nil
+        cooperativePauseAcknowledgementTask?.cancel()
+        cooperativePauseAcknowledgementTask = nil
+        cooperativeResumeAcknowledgementTask?.cancel()
+        cooperativeResumeAcknowledgementTask = nil
+        runtime = handoff.runtime
+        runtimeRevoked = false
+        runtimeStartPending = false
+        runtimeStartAttempted = true
+        launchFailure = nil
+        presentationRequest = request
+        showingGuest = true
+        handoffReport = "Cooperative media handoff\nPause and resume acknowledged by the runtime's narrow media gate. Whole-process suspension, coverage of every media source, visible content, and device behavior remain unverified."
+        state = .running
+        handoff.lease.end()
     }
 
     /// Hides the current presentation before asking the runtime to suspend.
@@ -575,6 +890,10 @@ public final class NativeGuestCoordinator: ObservableObject {
     /// Hard termination for an explicit lock or protected lifecycle boundary.
     /// This is idempotent and never extends the active handoff deadline.
     public func endVerificationHandoff() {
+        if cooperativePauseHandoff != nil {
+            endCooperativePause(reason: "ended")
+            return
+        }
         if signalDiagnosticHandoff != nil {
             endSignalDiagnostic(reason: "ended")
             return
@@ -643,7 +962,7 @@ public final class NativeGuestCoordinator: ObservableObject {
             runtimeStartPending = false
             runtimeStartAttempted = true
             launchFailure = nil
-            signalDiagnosticReport = "Native guest signal diagnostic\nPause request submitted; suspension and media stop are unproved.\nResume request submitted; runtime resumption and visible content are unproved."
+            handoffReport = "Native guest signal diagnostic\nPause request submitted; suspension and media stop are unproved.\nResume request submitted; runtime resumption and visible content are unproved."
             state = .running
             // End the lease after committing the transfer so a synchronous
             // lease callback can still lock/revoke the newly presented runtime.
@@ -697,7 +1016,7 @@ public final class NativeGuestCoordinator: ObservableObject {
 
     private func canRunCheck(_ request: CheckRequest) -> Bool {
         activeRequest == request
-            && (!runtimeAttemptConsumed || verificationHandoff != nil || signalDiagnosticHandoff != nil)
+            && (!runtimeAttemptConsumed || verificationHandoff != nil || signalDiagnosticHandoff != nil || cooperativePauseHandoff != nil)
             && runtimeFactory != nil
             && isValid(request.session)
     }
@@ -750,12 +1069,35 @@ public final class NativeGuestCoordinator: ObservableObject {
         activeCheckTask = nil
 
         guard isValid(request.session) else {
-            state = (verificationHandoff == nil && signalDiagnosticHandoff == nil) ? .idle : .holding
+            if cooperativePauseHandoff != nil {
+                endCooperativePause(reason: "stale-authentication")
+            } else {
+                state = (verificationHandoff == nil && signalDiagnosticHandoff == nil) ? .idle : .holding
+            }
             return
         }
         if let failure {
+            if cooperativePauseHandoff != nil {
+                let reason = failure.contains("credential-authentication; reason=cancelled-or-unavailable")
+                    ? "authentication-cancelled"
+                    : "credential-check-failed"
+                endCooperativePause(reason: reason)
+                return
+            }
             launchFailure = failure
             state = .blocked
+            return
+        }
+
+        if let handoff = cooperativePauseHandoff {
+            guard handoff.pauseAcknowledged,
+                  handoff.lease.isValid,
+                  ContinuousClock().now < handoff.deadline,
+                  request.session != handoff.originatingSession else {
+                endCooperativePause(reason: "lease-expired")
+                return
+            }
+            beginCooperativeResume(handoff, request: request)
             return
         }
 
@@ -846,6 +1188,11 @@ public final class NativeGuestCoordinator: ObservableObject {
         guard activeRequest == request else { return }
         activeRequest = nil
         activeCheckTask = nil
+        if cooperativePauseHandoff != nil {
+            endCooperativePause(reason: "authentication-cancelled")
+            endAuthorization(request)
+            return
+        }
         state = (verificationHandoff != nil || signalDiagnosticHandoff != nil)
             ? .holding
             : (runtimeFactory == nil ? .unavailable : .idle)
@@ -880,12 +1227,15 @@ public final class NativeGuestCoordinator: ObservableObject {
         let endedRuntime = runtime
             ?? verificationHandoff?.runtime
             ?? signalDiagnosticHandoff?.runtime
+            ?? cooperativePauseHandoff?.runtime
         guard let endedRuntime else {
             runtimeInstanceToken = nil
             return
         }
 
-        let heldLease = verificationHandoff?.lease ?? signalDiagnosticHandoff?.lease
+        let heldLease = verificationHandoff?.lease
+            ?? signalDiagnosticHandoff?.lease
+            ?? cooperativePauseHandoff?.lease
 
         // Revoke presentation, request, resume, and callback authority before
         // asking any injected object to end or revoke itself.
@@ -899,10 +1249,18 @@ public final class NativeGuestCoordinator: ObservableObject {
         verificationOperationID = nil
         verificationHandoff = nil
         signalDiagnosticHandoff = nil
+        cooperativePauseHandoff = nil
         handoffDeadlineTask?.cancel()
         handoffDeadlineTask = nil
         signalDiagnosticDeadlineTask?.cancel()
         signalDiagnosticDeadlineTask = nil
+        cooperativePauseDeadlineTask?.cancel()
+        cooperativePauseDeadlineTask = nil
+        cooperativePauseAcknowledgementTask?.cancel()
+        cooperativePauseAcknowledgementTask = nil
+        cooperativeResumeAcknowledgementTask?.cancel()
+        cooperativeResumeAcknowledgementTask = nil
+        cooperativeAuthenticationAttemptID = nil
 
         // Keep the terminated runtime only for its existing authenticated
         // diagnostic summary. All controller access is now revoked.
@@ -996,6 +1354,11 @@ public final class NativeGuestCoordinator: ObservableObject {
         endSignalDiagnostic(reason: "lease-expired")
     }
 
+    private func cooperativePauseLeaseDidEnd(_ token: UUID) {
+        guard cooperativePauseHandoff?.token == token else { return }
+        endCooperativePause(reason: "lease-expired")
+    }
+
     private func endSignalDiagnostic(reason: String) {
         guard let handoff = signalDiagnosticHandoff else { return }
 
@@ -1016,6 +1379,38 @@ public final class NativeGuestCoordinator: ObservableObject {
         launchFailure = reason == "ended"
             ? nil
             : "stage=signal-diagnostic; reason=" + reason
+        state = .ended
+        if let authorizationRequest { endAuthorization(authorizationRequest) }
+        handoff.lease.end()
+        revokeRuntime(handoff.runtime, evenIfPreviouslyRevoked: true)
+    }
+
+    private func endCooperativePause(reason: String) {
+        guard let handoff = cooperativePauseHandoff else { return }
+
+        // Drop every callback token and presentation reference before lease or
+        // runtime code can reenter the coordinator.
+        let authorizationRequest = activeAuthorization?.request
+        runtimeInstanceToken = nil
+        cooperativePauseHandoff = nil
+        cooperativePauseDeadlineTask?.cancel()
+        cooperativePauseDeadlineTask = nil
+        cooperativePauseAcknowledgementTask?.cancel()
+        cooperativePauseAcknowledgementTask = nil
+        cooperativeResumeAcknowledgementTask?.cancel()
+        cooperativeResumeAcknowledgementTask = nil
+        cooperativeAuthenticationAttemptID = nil
+        showingGuest = false
+        presentationRequest = nil
+        runtimeStartPending = false
+        runtime = nil
+        activeCheckTask?.cancel()
+        activeCheckTask = nil
+        activeRequest = nil
+        runtimeRevoked = true
+        launchFailure = reason == "ended"
+            ? nil
+            : "stage=cooperative-media-handoff; reason=" + reason
         state = .ended
         if let authorizationRequest { endAuthorization(authorizationRequest) }
         handoff.lease.end()
@@ -1068,6 +1463,34 @@ public final class NativeGuestCoordinator: ObservableObject {
     }
 
     private func invalidateForLifecycleTransition() {
+        if let handoff = cooperativePauseHandoff {
+            switch lifecycle.state {
+            case .authenticating(let attemptID):
+                cooperativeAuthenticationAttemptID = attemptID
+            case .privateUnlocked:
+                cooperativeAuthenticationAttemptID = nil
+            case .locking, .calculatorLocked:
+                if cooperativeAuthenticationAttemptID != nil {
+                    endCooperativePause(reason: "authentication-cancelled")
+                    return
+                }
+            }
+
+            // A credential check or resume in progress belongs to one exact
+            // session. Any lifecycle transition makes its eventual callback
+            // stale, so revoke instead of keeping an uncertain guest alive.
+            if handoff.resumeOperationID != nil || activeRequest != nil {
+                endCooperativePause(reason: "stale-resume")
+                return
+            }
+
+            showingGuest = false
+            presentationRequest = nil
+            runtimeStartPending = false
+            state = .holding
+            return
+        }
+
         if let handoff = signalDiagnosticHandoff {
             // Preserve only the manually paused, concealed diagnostic. A
             // lifecycle change during resume makes runtime state uncertain.

@@ -5,9 +5,14 @@ import plistlib
 import shutil
 
 
-def stage(host, kit, build=23, profile='synthetic', signal_diagnostic=False):
+def stage(host, kit, build=23, profile='synthetic', signal_diagnostic=False,
+          cooperative_pause=False):
     if type(signal_diagnostic) is not bool or (signal_diagnostic and build != 24):
         raise ValueError('unsupported_signal_diagnostic')
+    if type(cooperative_pause) is not bool or (cooperative_pause and build != 24):
+        raise ValueError('unsupported_cooperative_pause')
+    if signal_diagnostic and cooperative_pause:
+        raise ValueError('conflicting_pause_modes')
     if type(build) is not int or build not in (23, 24):
         raise ValueError('unsupported_integration_build')
     if profile not in ('synthetic', 'tiktok47') or (build == 23 and profile != 'synthetic'):
@@ -62,6 +67,10 @@ def stage(host, kit, build=23, profile='synthetic', signal_diagnostic=False):
         info['CVNativeSignalDiagnosticEnabled'] = True
     else:
         info.pop('CVNativeSignalDiagnosticEnabled', None)
+    if cooperative_pause:
+        info['CVNativeCooperativePauseEnabled'] = True
+    else:
+        info.pop('CVNativeCooperativePauseEnabled', None)
     # The containing app is CalcVault, not the generic upstream file manager.
     # Do not expose its Documents directory or inherit broad network/background
     # exceptions. Guest extension metadata is intentionally untouched here.
@@ -81,5 +90,8 @@ if __name__ == '__main__':
     parser.add_argument('--build', type=int, choices=(23, 24), default=23)
     parser.add_argument('--profile', choices=('synthetic', 'tiktok47'), default='synthetic')
     parser.add_argument('--signal-diagnostic', action='store_true')
+    parser.add_argument('--cooperative-pause', action='store_true')
     args = parser.parse_args()
-    stage(args.host, args.kit, build=args.build, profile=args.profile, signal_diagnostic=args.signal_diagnostic)
+    stage(args.host, args.kit, build=args.build, profile=args.profile,
+          signal_diagnostic=args.signal_diagnostic,
+          cooperative_pause=args.cooperative_pause)

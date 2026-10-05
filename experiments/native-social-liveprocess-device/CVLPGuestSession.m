@@ -24,6 +24,10 @@
 - (BOOL)cvlpRequestVerificationSignal:(int)signal;
 @property(nonatomic) BOOL cvlpNativeSignalDiagnosticTargetVerified;
 - (BOOL)cvlpRequestNativeSignalDiagnostic:(int)signal;
+@property(nonatomic) BOOL cvlpCooperativePauseTargetVerified;
+- (BOOL)cvlpCooperativePauseAvailable;
+- (void)cvlpPauseMediaWithReply:(void (^)(BOOL))reply;
+- (void)cvlpResumeMediaWithReply:(void (^)(BOOL))reply;
 @property(nonatomic, readonly) NSUInteger cvlpPreRevokeAttemptCount;
 - (void)cvlpRevoke;
 @end
@@ -56,12 +60,18 @@
 @property(nonatomic) BOOL nativeSignalDiagnosticStopSubmitted;
 @property(nonatomic) BOOL nativeSignalDiagnosticContinueAttempted;
 @property(nonatomic) BOOL nativeSignalDiagnosticContinueSubmitted;
+@property(nonatomic) BOOL cooperativePauseAttempted;
+@property(nonatomic) BOOL cooperativePauseAcknowledged;
+@property(nonatomic) BOOL cooperativeResumeAttempted;
+@property(nonatomic) BOOL cooperativeResumeAcknowledged;
 @property(nonatomic, strong) NSMutableArray<NSString *> *diagnosticEvents;
 @property(nonatomic, strong) NSMutableArray *hostLifecycleObservers;
 @property(nonatomic) NSTimeInterval diagnosticStartUptime;
 - (BOOL)syntheticTargetIdentityIsVerified;
 - (BOOL)verificationSignalRequestIsReady;
 - (BOOL)nativeSignalDiagnosticIdentityIsVerified;
+- (BOOL)cooperativePauseIdentityIsVerified;
+- (BOOL)cooperativePauseRequestIsReady;
 - (BOOL)nativeSignalDiagnosticRequestIsReady;
 - (void)recordDiagnosticPhase:(NSString *)phase reason:(NSString *)reason
                        sample:(CVLPLivenessSample)sample hasSample:(BOOL)hasSample;
@@ -112,6 +122,7 @@ static NSString *CVLPDiagnosticAllowlistedReason(NSString *phase, NSString *reas
     NSDictionary<NSString *, NSArray<NSString *> *> *allowlist = @{
         @"STOP": @[@"before", @"before-unproved", @"after-submitted", @"after-rejected"],
         @"CONT": @[@"before", @"before-unproved", @"after-submitted", @"after-rejected"],
+        @"MEDIA": @[@"pause-before", @"pause-ack", @"pause-rejected", @"resume-before", @"resume-ack", @"resume-rejected"],
         @"host": @[@"inactive", @"background", @"active"],
         @"scene": @[@"unexpected-exit"],
         @"revoke": @[@"explicit"],
@@ -168,7 +179,7 @@ static NSString *CVLPDiagnosticAllowlistedReason(NSString *phase, NSString *reas
 - (void)recordDiagnosticPhase:(NSString *)phase reason:(NSString *)reason
                        sample:(CVLPLivenessSample)sample hasSample:(BOOL)hasSample {
     NSAssert(NSThread.isMainThread, @"Guest diagnostics must be recorded on main");
-    NSArray<NSString *> *phases = @[@"STOP", @"CONT", @"host", @"scene", @"revoke", @"reject"];
+    NSArray<NSString *> *phases = @[@"STOP", @"CONT", @"MEDIA", @"host", @"scene", @"revoke", @"reject"];
     NSString *safePhase = [phases containsObject:phase] ? phase : @"reject";
     NSString *safeReason = CVLPDiagnosticAllowlistedReason(safePhase, reason);
     NSTimeInterval elapsed = MAX(0, NSProcessInfo.processInfo.systemUptime - self.diagnosticStartUptime);
@@ -244,6 +255,9 @@ static NSString *CVLPDiagnosticAllowlistedReason(NSString *phase, NSString *reas
     }
     scene.cvlpSyntheticTargetVerified = self.syntheticTargetIdentityVerified;
     scene.cvlpNativeSignalDiagnosticTargetVerified = [self nativeSignalDiagnosticIdentityIsVerified];
+    if ([scene respondsToSelector:@selector(setCvlpCooperativePauseTargetVerified:)]) {
+        scene.cvlpCooperativePauseTargetVerified = [self cooperativePauseIdentityIsVerified];
+    }
     [self.hostController addChildViewController:scene];
     scene.view.frame = self.hostController.view.bounds;
     scene.view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -278,6 +292,72 @@ static NSString *CVLPDiagnosticAllowlistedReason(NSString *phase, NSString *reas
 
 - (BOOL)isVerificationSignalProbeAvailable {
     return [self verificationSignalRequestIsReady] && !self.verificationSignalProbeUsed;
+}
+
+- (BOOL)cooperativePauseIdentityIsVerified {
+#if CVLP_HAS_FRAMEWORK_GUEST_VALIDATOR
+    NSDictionary *host = NSBundle.mainBundle.infoDictionary;
+    id enabled = host[@"CVNativeCooperativePauseEnabled"];
+    if (!enabled || CFGetTypeID((__bridge CFTypeRef)enabled) != CFBooleanGetTypeID() ||
+        ![enabled boolValue] || [host[@"CVNativeSignalDiagnosticEnabled"] boolValue] ||
+        ![host[@"CVLPFrameworkGuestMode"] boolValue] || ![host[@"CFBundleVersion"] isEqual:@"24"] ||
+        ![host[@"CVNativeIntegrationStage"] isEqual:@"private-tiktok47-integration-24"] ||
+        ![host[@"CVNativeGuestKind"] isEqual:@"tiktok47"] ||
+        ![self.targetBundleIdentifier isEqualToString:@"cvlp-immutable-framework"] ||
+        ![self.targetDataUUID isEqualToString:@"integration-native-24"]) return NO;
+    NSURL *guest = CVLPFrameworkGuestURL(NSBundle.mainBundle.bundleURL);
+    if (!guest) return NO;
+    NSDictionary *descriptor = CVLPGuestPropertyList(
+        [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"CVLPFrameworkGuest.plist"], 64 * 1024);
+    NSDictionary *info = CVLPGuestPropertyList([guest.path stringByAppendingPathComponent:@"Info.plist"], 1024 * 1024);
+    return [descriptor[@"bundleIdentifier"] isEqual:@"com.zhiliaoapp.musically"] &&
+        [descriptor[@"bundleVersion"] isEqual:@"470044"] &&
+        [descriptor[@"executable"] isEqual:@"NativeGuest"] &&
+        [info[@"CFBundleShortVersionString"] isEqual:@"47.0.0"];
+#else
+    return NO;
+#endif
+}
+
+- (BOOL)cooperativePauseRequestIsReady {
+    NSAssert(NSThread.isMainThread, @"Cooperative media control must run on main");
+    return self.started && !self.revoked && !self.sceneEnded && self.sceneController &&
+        [self.sceneController respondsToSelector:@selector(cvlpCooperativePauseAvailable)] &&
+        self.sceneController.cvlpBeginCompleted && self.observedPID > 0 &&
+        self.sceneController.cvlpObservedPID == self.observedPID &&
+        self.sceneController.cvlpCooperativePauseTargetVerified && [self cooperativePauseIdentityIsVerified];
+}
+
+- (BOOL)isCooperativePauseAvailable {
+    return [self cooperativePauseRequestIsReady] && [self.sceneController cvlpCooperativePauseAvailable];
+}
+
+- (void)pauseMediaWithCompletion:(void (^)(BOOL))completion {
+    if (![self isCooperativePauseAvailable]) { completion(NO); return; }
+    self.cooperativePauseAttempted = YES;
+    CVLPLivenessSample before = CVLPSampleLiveness(self.observedPID);
+    [self recordDiagnosticPhase:@"MEDIA" reason:@"pause-before" sample:before hasSample:YES];
+    [self.sceneController cvlpPauseMediaWithReply:^(BOOL applied) {
+        BOOL current = applied && [self cooperativePauseRequestIsReady];
+        self.cooperativePauseAcknowledged = current;
+        CVLPLivenessSample sample = CVLPSampleLiveness(self.observedPID);
+        [self recordDiagnosticPhase:@"MEDIA" reason:current ? @"pause-ack" : @"pause-rejected" sample:sample hasSample:YES];
+        completion(current);
+    }];
+}
+
+- (void)resumeMediaWithCompletion:(void (^)(BOOL))completion {
+    if (![self cooperativePauseRequestIsReady]) { completion(NO); return; }
+    self.cooperativeResumeAttempted = YES;
+    CVLPLivenessSample before = CVLPSampleLiveness(self.observedPID);
+    [self recordDiagnosticPhase:@"MEDIA" reason:@"resume-before" sample:before hasSample:YES];
+    [self.sceneController cvlpResumeMediaWithReply:^(BOOL released) {
+        BOOL current = released && [self cooperativePauseRequestIsReady];
+        self.cooperativeResumeAcknowledged = current;
+        CVLPLivenessSample sample = CVLPSampleLiveness(self.observedPID);
+        [self recordDiagnosticPhase:@"MEDIA" reason:current ? @"resume-ack" : @"resume-rejected" sample:sample hasSample:YES];
+        completion(current);
+    }];
 }
 
 - (BOOL)nativeSignalDiagnosticIdentityIsVerified {
@@ -488,6 +568,10 @@ static NSString *CVLPDiagnosticAllowlistedReason(NSString *phase, NSString *reas
         self.nativeSignalDiagnosticStopAttempted, self.nativeSignalDiagnosticStopSubmitted,
         self.nativeSignalDiagnosticContinueAttempted, self.nativeSignalDiagnosticContinueSubmitted,
         self.sceneEnded, self.unexpectedSceneExitObserved];
+    diagnostics = [diagnostics stringByAppendingFormat:
+        @"\nCooperative media diagnostic v1: pause attempted=%d acknowledged=%d; resume attempted=%d acknowledged=%d; known API gate only; universal media coverage and two-minute device retention unproved",
+        self.cooperativePauseAttempted, self.cooperativePauseAcknowledged,
+        self.cooperativeResumeAttempted, self.cooperativeResumeAcknowledged];
     NSString *eventRing = self.diagnosticEvents.count > 0 ?
         [self.diagnosticEvents componentsJoinedByString:@"\n"] : @"empty";
     diagnostics = [diagnostics stringByAppendingFormat:

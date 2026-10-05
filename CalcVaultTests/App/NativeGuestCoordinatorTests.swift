@@ -1538,6 +1538,331 @@ final class NativeGuestCoordinatorTests: XCTestCase {
         await task.value
     }
 
+    func testCooperativePauseLocksBeforeRequestAndConsumesAcknowledgementOnce() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeCooperativePauseGuestRuntime()
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeCooperativePauseCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startCooperativePauseGuest(coordinator, checker: checker, runtime: runtime)
+
+        var hostLockedBeforeRequest = false
+        XCTAssertTrue(coordinator.beginSignalDiagnostic {
+            XCTAssertFalse(coordinator.showingGuest)
+            XCTAssertNil(coordinator.viewController)
+            XCTAssertNotNil(coordinator.mountedViewController)
+            XCTAssertEqual(runtime.pauseRequestCount, 0)
+            lifecycle.lock()
+            hostLockedBeforeRequest = true
+        })
+
+        XCTAssertTrue(hostLockedBeforeRequest)
+        XCTAssertEqual(runtime.pauseRequestCount, 1)
+        XCTAssertEqual(runtime.signalPauseRequestCount, 0)
+        XCTAssertEqual(runtime.signalResumeRequestCount, 0)
+        XCTAssertFalse(coordinator.canResumeSignalDiagnostic)
+
+        runtime.completePause(true)
+        XCTAssertTrue(coordinator.isCooperativePauseAcknowledged)
+        XCTAssertTrue(coordinator.summary.contains("narrow media gate"))
+        runtime.completePause(false)
+
+        XCTAssertTrue(coordinator.isCooperativePauseAcknowledged)
+        XCTAssertEqual(coordinator.state, .holding)
+        XCTAssertEqual(runtime.revokeCount, 0)
+        XCTAssertEqual(runtime.signalPauseRequestCount, 0)
+        XCTAssertEqual(runtime.signalResumeRequestCount, 0)
+    }
+
+    func testCooperativePauseAcknowledgementTimeoutRevokesAndIgnoresLateAck() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeCooperativePauseGuestRuntime()
+        let coordinator = makeCooperativePauseCoordinator(
+            lifecycle: lifecycle,
+            checker: checker,
+            runtime: runtime,
+            lease: FakeGuestHandoffLease(),
+            acknowledgementTimeout: .milliseconds(20)
+        )
+        try await startCooperativePauseGuest(coordinator, checker: checker, runtime: runtime)
+
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+        try await Task.sleep(nanoseconds: 70_000_000)
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertFalse(coordinator.showingGuest)
+
+        runtime.completePause(true)
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertFalse(coordinator.canResumeSignalDiagnostic)
+        XCTAssertEqual(runtime.signalPauseRequestCount, 0)
+    }
+
+    func testCooperativePauseRejectionRevokesGuest() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeCooperativePauseGuestRuntime()
+        let coordinator = makeCooperativePauseCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: FakeGuestHandoffLease()
+        )
+        try await startCooperativePauseGuest(coordinator, checker: checker, runtime: runtime)
+
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+        runtime.completePause(false)
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertFalse(coordinator.canResumeSignalDiagnostic)
+        runtime.completePause(true)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertEqual(runtime.signalPauseRequestCount, 0)
+    }
+
+    func testCooperativePauseLateAcknowledgementAfterExplicitRevokeIsIgnored() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeCooperativePauseGuestRuntime()
+        let coordinator = makeCooperativePauseCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: FakeGuestHandoffLease()
+        )
+        try await startCooperativePauseGuest(coordinator, checker: checker, runtime: runtime)
+
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+        coordinator.endVerificationHandoff()
+        XCTAssertEqual(runtime.revokeCount, 1)
+        runtime.completePause(true)
+        runtime.completePause(true)
+
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertFalse(coordinator.isCooperativePauseAcknowledged)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertEqual(runtime.resumeRequestCount, 0)
+        XCTAssertEqual(runtime.signalPauseRequestCount, 0)
+        XCTAssertEqual(runtime.signalResumeRequestCount, 0)
+    }
+
+    func testCooperativeResumeWaitsForFreshCheckAndRevokesAfterBackground() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeCooperativePauseGuestRuntime()
+        let coordinator = makeCooperativePauseCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: FakeGuestHandoffLease()
+        )
+        try await startCooperativePauseGuest(coordinator, checker: checker, runtime: runtime)
+
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+        runtime.completePause(true)
+        XCTAssertFalse(coordinator.canResumeSignalDiagnostic)
+        XCTAssertNil(coordinator.start(biometricEnabled: false))
+
+        lifecycle.lock()
+        _ = try unlock(lifecycle)
+        XCTAssertTrue(coordinator.canResumeSignalDiagnostic)
+        let task = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await checker.waitForCall(2)
+        let succeeded = await checker.succeed(2)
+        XCTAssertTrue(succeeded)
+        await task.value
+
+        XCTAssertEqual(runtime.resumeRequestCount, 1)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertEqual(runtime.signalResumeRequestCount, 0)
+        lifecycle.applicationDidEnterBackground()
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertEqual(runtime.revokeCount, 1)
+
+        runtime.completeResume(true)
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertEqual(runtime.signalResumeRequestCount, 0)
+    }
+
+    func testCooperativeResumeAcknowledgementTransfersOnceWithoutSignalCalls() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeCooperativePauseGuestRuntime()
+        let coordinator = makeCooperativePauseCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: FakeGuestHandoffLease()
+        )
+        try await startCooperativePauseGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+        runtime.completePause(true)
+        lifecycle.lock()
+        _ = try unlock(lifecycle)
+
+        let task = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await checker.waitForCall(2)
+        let succeeded = await checker.succeed(2)
+        XCTAssertTrue(succeeded)
+        await task.value
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertEqual(runtime.resumeRequestCount, 1)
+
+        runtime.completeResume(true)
+        XCTAssertTrue(coordinator.showingGuest)
+        XCTAssertEqual(coordinator.state, .running)
+        XCTAssertTrue(coordinator.summary.contains("narrow media gate"))
+        runtime.completeResume(false)
+        XCTAssertTrue(coordinator.showingGuest)
+        XCTAssertEqual(coordinator.state, .running)
+        XCTAssertEqual(runtime.revokeCount, 0)
+        XCTAssertEqual(runtime.signalPauseRequestCount, 0)
+        XCTAssertEqual(runtime.signalResumeRequestCount, 0)
+    }
+
+    func testCooperativeCredentialRecheckFailureRevokesHeldGuest() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeCooperativePauseGuestRuntime()
+        let coordinator = makeCooperativePauseCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: FakeGuestHandoffLease()
+        )
+        try await startCooperativePauseGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+        runtime.completePause(true)
+        lifecycle.lock()
+        _ = try unlock(lifecycle)
+
+        let task = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await checker.waitForCall(2)
+        let failed = await checker.fail(2)
+        XCTAssertTrue(failed)
+        await task.value
+
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertEqual(runtime.resumeRequestCount, 0)
+        XCTAssertEqual(runtime.signalPauseRequestCount, 0)
+        XCTAssertEqual(runtime.signalResumeRequestCount, 0)
+    }
+
+    func testCooperativeResumeAcknowledgementTimeoutAndLateDuplicateCannotRestoreGuest() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeCooperativePauseGuestRuntime()
+        let coordinator = makeCooperativePauseCoordinator(
+            lifecycle: lifecycle,
+            checker: checker,
+            runtime: runtime,
+            lease: FakeGuestHandoffLease(),
+            acknowledgementTimeout: .milliseconds(20)
+        )
+        try await startCooperativePauseGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+        runtime.completePause(true)
+        lifecycle.lock()
+        _ = try unlock(lifecycle)
+
+        let task = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await checker.waitForCall(2)
+        let succeeded = await checker.succeed(2)
+        XCTAssertTrue(succeeded)
+        await task.value
+        XCTAssertEqual(runtime.resumeRequestCount, 1)
+        XCTAssertFalse(coordinator.showingGuest)
+
+        try await Task.sleep(nanoseconds: 70_000_000)
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        runtime.completeResume(true)
+        runtime.completeResume(true)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertEqual(runtime.signalResumeRequestCount, 0)
+    }
+
+    func testCooperativeResumeAcknowledgementAfterLeaseExpiryCannotRestoreGuest() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeCooperativePauseGuestRuntime()
+        let coordinator = makeCooperativePauseCoordinator(
+            lifecycle: lifecycle,
+            checker: checker,
+            runtime: runtime,
+            lease: FakeGuestHandoffLease(),
+            handoffDuration: .milliseconds(700),
+            acknowledgementTimeout: .seconds(2)
+        )
+        try await startCooperativePauseGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+        runtime.completePause(true)
+        lifecycle.lock()
+        _ = try unlock(lifecycle)
+
+        let task = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await checker.waitForCall(2)
+        let succeeded = await checker.succeed(2)
+        XCTAssertTrue(succeeded)
+        await task.value
+        XCTAssertEqual(runtime.resumeRequestCount, 1)
+
+        try await Task.sleep(nanoseconds: 800_000_000)
+        XCTAssertEqual(coordinator.state, .ended)
+        runtime.completeResume(true)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertEqual(runtime.signalResumeRequestCount, 0)
+    }
+
+    private func makeCooperativePauseCoordinator(
+        lifecycle: SessionLifecycleCoordinator,
+        checker: SuspendedGuestChecker,
+        runtime: FakeCooperativePauseGuestRuntime,
+        lease: FakeGuestHandoffLease,
+        handoffDuration: Duration = .seconds(120),
+        acknowledgementTimeout: Duration = .seconds(3)
+    ) -> NativeGuestCoordinator {
+        NativeGuestCoordinator(
+            lifecycle: lifecycle,
+            check: { biometricEnabled in
+                try await checker.check(biometricEnabled: biometricEnabled)
+            },
+            runtimeFactory: {
+                runtime.noteFactoryInvocation()
+                return runtime
+            },
+            leaseFactory: { onEnd in
+                lease.install(onEnd: onEnd)
+                return lease
+            },
+            handoffDuration: handoffDuration,
+            cooperativePauseAcknowledgementTimeout: acknowledgementTimeout
+        )
+    }
+
+    private func startCooperativePauseGuest(
+        _ coordinator: NativeGuestCoordinator,
+        checker: SuspendedGuestChecker,
+        runtime: FakeCooperativePauseGuestRuntime
+    ) async throws {
+        let task = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await checker.waitForCall(1)
+        let checkSucceeded = await checker.succeed(1)
+        XCTAssertTrue(checkSucceeded)
+        await task.value
+        coordinator.surfaceReady()
+        XCTAssertEqual(runtime.startCount, 1)
+        runtime.completeStart(true)
+        XCTAssertEqual(coordinator.state, .running)
+    }
+
     private func makeCoordinator(
         lifecycle: SessionLifecycleCoordinator,
         checker: SuspendedGuestChecker,
@@ -1740,6 +2065,63 @@ private final class FakeVerificationGuestRuntime: NativeGuestVerificationRuntime
         if resumed { isSuspended = false }
         resumeCompletion?(resumed)
     }
+}
+
+@MainActor
+private final class FakeCooperativePauseGuestRuntime: NativeGuestCooperativePauseRuntime, NativeGuestSignalDiagnosticRuntime, NativeGuestTerminationReportingRuntime {
+    let viewController = UIViewController()
+    let summary = "Cooperative guest runtime is ready."
+    var terminationHandler: (@MainActor () -> Void)?
+    var reportsTerminationDuringRevoke = false
+    var cooperativePauseAvailable = true
+    var signalDiagnosticAvailable = true
+    private(set) var factoryCount = 0
+    private(set) var startCount = 0
+    private(set) var pauseRequestCount = 0
+    private(set) var resumeRequestCount = 0
+    private(set) var signalPauseRequestCount = 0
+    private(set) var signalResumeRequestCount = 0
+    private(set) var revokeCount = 0
+    private var startCompletion: (@MainActor (Bool) -> Void)?
+    private var pauseCompletion: (@MainActor (Bool) -> Void)?
+    private var resumeCompletion: (@MainActor (Bool) -> Void)?
+
+    func noteFactoryInvocation() { factoryCount += 1 }
+
+    func start(completion: @escaping @MainActor (Bool) -> Void) {
+        startCount += 1
+        startCompletion = completion
+    }
+
+    func pauseMediaForHandoff(completion: @escaping @MainActor (Bool) -> Void) {
+        pauseRequestCount += 1
+        pauseCompletion = completion
+    }
+
+    func resumeMediaAfterHandoff(completion: @escaping @MainActor (Bool) -> Void) {
+        resumeRequestCount += 1
+        resumeCompletion = completion
+    }
+
+    func requestSignalDiagnosticPause() -> Bool {
+        signalPauseRequestCount += 1
+        return true
+    }
+
+    func requestSignalDiagnosticResume() -> Bool {
+        signalResumeRequestCount += 1
+        return true
+    }
+
+    func revoke() {
+        revokeCount += 1
+        if reportsTerminationDuringRevoke { terminate() }
+    }
+
+    func terminate() { terminationHandler?() }
+    func completeStart(_ started: Bool) { startCompletion?(started) }
+    func completePause(_ acknowledged: Bool) { pauseCompletion?(acknowledged) }
+    func completeResume(_ resumed: Bool) { resumeCompletion?(resumed) }
 }
 
 @MainActor

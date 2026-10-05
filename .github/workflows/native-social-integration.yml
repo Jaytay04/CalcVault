@@ -11,6 +11,10 @@ on:
         description: 'Default-off native pause request diagnostic; Build 24 synthetic CI only'
         type: boolean
         default: false
+      guest_cooperative_pause:
+        description: 'Enable the opt-in cooperative media pause adapter; Build 24 synthetic CI only'
+        type: boolean
+        default: false
       highlights_diagnostics:
         description: 'Enable bounded, content-free Highlights observations (synthetic CI only)'
         type: boolean
@@ -38,6 +42,10 @@ on:
   workflow_call:
     inputs:
       guest_pause_diagnostic:
+        type: boolean
+        default: false
+      guest_cooperative_pause:
+        description: 'Enable the opt-in cooperative media pause adapter; Build 24 synthetic CI only'
         type: boolean
         default: false
       tiktok47_host:
@@ -77,6 +85,7 @@ jobs:
         env:
           TIKTOK47_HOST: ${{ inputs.tiktok47_host }}
           PAUSE: ${{ inputs.guest_pause_diagnostic }}
+          COOPERATIVE: ${{ inputs.guest_cooperative_pause }}
           VIEWING: ${{ inputs.highlights_viewing_experiment }}
           DIRECT: ${{ inputs.highlights_direct_viewing_experiment }}
           EARLY: ${{ inputs.highlights_early_viewing_experiment }}
@@ -85,6 +94,8 @@ jobs:
           DIAGNOSTICS: ${{ inputs.highlights_diagnostics }}
         run: |
           test "$PAUSE" != true || test "$TIKTOK47_HOST" = true
+          test "$COOPERATIVE" != true || test "$TIKTOK47_HOST" = true
+          test "$COOPERATIVE" != true || test "$PAUSE" = false
           test "$VIEWING" != true || test "$DIAGNOSTICS" = true
           test "$DIRECT" != true || test "$DIAGNOSTICS" = true
           test "$DIRECT" != true || test "$VIEWING" != true
@@ -132,6 +143,10 @@ jobs:
           fi
           echo "CV_INTEGRATION_UPSTREAM=$source" >> "$GITHUB_ENV"
 
+      - name: Prepare opt-in cooperative media pause adapter
+        if: inputs.guest_cooperative_pause
+        run: python3 experiments/native-social-liveprocess-device/prepare-cooperative-pause.py "$CV_INTEGRATION_UPSTREAM"
+
       - name: Prepare opt-in Highlights diagnostic adapter
         if: inputs.highlights_diagnostics
         env:
@@ -163,6 +178,7 @@ jobs:
         env:
           CV_INTEGRATION_BUILD: ${{ inputs.tiktok47_host && '24' || '23' }}
           CV_NATIVE_SIGNAL_DIAGNOSTIC: ${{ inputs.guest_pause_diagnostic && '1' || '0' }}
+          CV_NATIVE_COOPERATIVE_PAUSE: ${{ inputs.guest_cooperative_pause && '1' || '0' }}
           CV_HIGHLIGHTS_DIAGNOSTICS: ${{ inputs.highlights_diagnostics && '1' || '0' }}
         run: bash experiments/native-social-integration/build.sh "$CV_INTEGRATION_UPSTREAM" "$RUNNER_TEMP/cv-integration"
 
@@ -170,10 +186,10 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: calcvault-integration-host-${{ inputs.tiktok47_host && '24-synthetic' || '23' }}${{ inputs.guest_pause_diagnostic && '-pause1' || '' }}${{ inputs.highlights_admission_owner_metadata && '-highlights-owner1' || inputs.highlights_admission_metadata && '-highlights-admission2' || inputs.highlights_early_viewing_experiment && '-highlights-earlyviewing1' || inputs.highlights_direct_viewing_experiment && '-highlights-directviewing1' || inputs.highlights_viewing_experiment && '-highlights-viewing1' || inputs.highlights_diagnostics && '-highlights2' || '' }}
+          name: calcvault-integration-host-${{ inputs.tiktok47_host && '24-synthetic' || '23' }}${{ inputs.guest_cooperative_pause && '-cooperative1' || inputs.guest_pause_diagnostic && '-pause1' || '' }}${{ inputs.highlights_admission_owner_metadata && '-highlights-owner1' || inputs.highlights_admission_metadata && '-highlights-admission2' || inputs.highlights_early_viewing_experiment && '-highlights-earlyviewing1' || inputs.highlights_direct_viewing_experiment && '-highlights-directviewing1' || inputs.highlights_viewing_experiment && '-highlights-viewing1' || inputs.highlights_diagnostics && '-highlights2' || '' }}
           path: |
-            ${{ runner.temp }}/cv-integration/output/CalcVault-integration-host-${{ inputs.tiktok47_host && '24' || '23' }}${{ inputs.guest_pause_diagnostic && '-pause1' || '' }}.ipa
-            ${{ runner.temp }}/cv-integration/output/CalcVault-integration-host-${{ inputs.tiktok47_host && '24' || '23' }}${{ inputs.guest_pause_diagnostic && '-pause1' || '' }}.ipa.sha256
+            ${{ runner.temp }}/cv-integration/output/CalcVault-integration-host-${{ inputs.tiktok47_host && '24' || '23' }}${{ inputs.guest_cooperative_pause && '-cooperative1' || inputs.guest_pause_diagnostic && '-pause1' || '' }}.ipa
+            ${{ runner.temp }}/cv-integration/output/CalcVault-integration-host-${{ inputs.tiktok47_host && '24' || '23' }}${{ inputs.guest_cooperative_pause && '-cooperative1' || inputs.guest_pause_diagnostic && '-pause1' || '' }}.ipa.sha256
           if-no-files-found: error
           retention-days: 7
 
@@ -181,7 +197,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: calcvault-integration-host-${{ inputs.tiktok47_host && '24-synthetic' || '23' }}${{ inputs.guest_pause_diagnostic && '-pause1' || '' }}${{ inputs.highlights_admission_owner_metadata && '-highlights-owner1' || inputs.highlights_admission_metadata && '-highlights-admission2' || inputs.highlights_early_viewing_experiment && '-highlights-earlyviewing1' || inputs.highlights_direct_viewing_experiment && '-highlights-directviewing1' || inputs.highlights_viewing_experiment && '-highlights-viewing1' || inputs.highlights_diagnostics && '-highlights2' || '' }}-evidence
+          name: calcvault-integration-host-${{ inputs.tiktok47_host && '24-synthetic' || '23' }}${{ inputs.guest_cooperative_pause && '-cooperative1' || inputs.guest_pause_diagnostic && '-pause1' || '' }}${{ inputs.highlights_admission_owner_metadata && '-highlights-owner1' || inputs.highlights_admission_metadata && '-highlights-admission2' || inputs.highlights_early_viewing_experiment && '-highlights-earlyviewing1' || inputs.highlights_direct_viewing_experiment && '-highlights-directviewing1' || inputs.highlights_viewing_experiment && '-highlights-viewing1' || inputs.highlights_diagnostics && '-highlights2' || '' }}-evidence
           path: |
             ${{ runner.temp }}/integration-xcode-version.log
             ${{ runner.temp }}/cv-integration/logs/

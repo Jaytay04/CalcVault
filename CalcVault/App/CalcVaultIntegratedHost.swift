@@ -72,12 +72,16 @@ public final class CalcVaultIntegratedHost: NSObject, ObservableObject {
             return
         }
         shield.coverImmediately()
-        if coordinator.nativeGuest.beginSignalDiagnostic() {
+        let began = coordinator.nativeGuest.beginSignalDiagnostic {
+            // The coordinator has already concealed the guest. Lock Vault and
+            // schedule calculator reveal before the asynchronous media request.
             coordinator.lockForNativeVerificationHandoff()
-        } else {
-            coordinator.lock()
+            revealCalculatorAfterLock()
         }
-        revealCalculatorAfterLock()
+        if !began {
+            coordinator.lock()
+            revealCalculatorAfterLock()
+        }
     }
 
     public func lock() {
@@ -138,13 +142,15 @@ public struct CalcVaultIntegratedRootView: View {
                             .accessibilityHint("Locks the Vault and holds this guest for up to two minutes while you get a verification code. Keep the phone unlocked and authenticate again on return.")
                     }
                     if guest.canBeginSignalDiagnostic {
-                        Button("Pause test", action: host.beginSignalDiagnostic)
+                        Button(guest.isCooperativePauseHeld ? "Resume media test" : (guest.isCooperativePauseRuntime ? "Pause media test" : "Pause test"), action: host.beginSignalDiagnostic)
                             .font(.footnote.weight(.semibold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 14)
                             .frame(minHeight: 44)
                             .background(.black.opacity(0.9), in: Capsule())
-                            .accessibilityHint("Conceals the guest before submitting a signal pause request. Guest suspension and media stop are unproved. Resume requires fresh authentication and a credential check within 30 seconds. Lock, protected-data loss, or expiry ends the test.")
+                            .accessibilityHint(guest.isCooperativePauseRuntime
+                                ? "Conceals the guest and locks the Vault before requesting the cooperative media gate. Acknowledgement confirms only that narrow gate; full media coverage and device behavior are unverified. Resume requires a different fresh session and a successful credential check before the bounded lease expires."
+                                : "Conceals the guest and locks the Vault before submitting a legacy signal pause request. Submission does not prove guest suspension or media stop. Resume requires fresh authentication and a credential check within 30 seconds.")
                     }
                 }
                 .padding(.leading, 12).padding(.top, 8)
@@ -222,7 +228,7 @@ struct NativeGuestSocialLaunchButton: View {
 
     var body: some View {
         if profile?.representsTikTokGuest == true {
-            Button(model.canResumeSignalDiagnostic ? "Resume pause test" : (model.canResumeVerification ? "Resume TikTok verification" : "TikTok (native)"), systemImage: "play.rectangle", action: start)
+            Button(model.canResumeSignalDiagnostic ? (model.isCooperativePauseHeld ? "Resume media test" : "Resume pause test") : (model.canResumeVerification ? "Resume TikTok verification" : "TikTok (native)"), systemImage: "play.rectangle", action: start)
                 .disabled(!model.canRequestLaunch && !model.canResumeVerification && !model.canResumeSignalDiagnostic)
                 .accessibilityIdentifier("native-tiktok-launch")
         }
@@ -241,14 +247,14 @@ struct NativeGuestIntegrationSection: View {
                  ? "Private native TikTok candidate. Browser services and downloaders remain separate. Guest data is not vault-encrypted."
                  : "Synthetic guest only. Native TikTok is not included in this isolation-test build.")
             Text("Face ID may be requested to verify protected credential metadata before launch. No credential values are shared with the guest.")
-            Button(model.canResumeSignalDiagnostic ? "Resume pause test" : (model.canResumeVerification ? "Resume verification" : (profile?.representsTikTokGuest == true ? "Open native TikTok" : "Open isolated test guest")), action: start)
+            Button(model.canResumeSignalDiagnostic ? (model.isCooperativePauseHeld ? "Resume media test" : "Resume pause test") : (model.canResumeVerification ? "Resume verification" : (profile?.representsTikTokGuest == true ? "Open native TikTok" : "Open isolated test guest")), action: start)
                 .disabled(profile == nil || (!model.canRequestLaunch && !model.canResumeVerification && !model.canResumeSignalDiagnostic))
             Text(status)
             Button("Refresh native report") { report = model.summary }
             if !report.isEmpty { Text(report).font(.footnote.monospaced()).textSelection(.enabled) }
             Text("One guest attempt per app launch. Restart after testing. Credential checks do not certify isolation.")
                 .font(.footnote)
-            Text("The verified two-minute handoff is unavailable unless the runtime proves pause and resume. The separate signal diagnostic is opt-in and lasts at most 30 seconds. It conceals the guest before submitting a pause request; submission does not prove suspension or media stop. Resume is manual through the normal fresh-authentication and credential-check path. A failed or cancelled check stays concealed; no automatic resume signal is sent. Lock, protected-data loss, lease failure or expiry ends the diagnostic.")
+            Text("When supported, Pause media test asks the guest to apply a cooperative media gate. Its acknowledgement confirms only that narrow gate; whole-process suspension, coverage of every media source, and device behavior remain unverified. The hold may last up to two minutes under the finite host lease; no minimum duration is promised. Resume requires a different fresh private session and a successful credential inventory check, then waits for a fenced resume acknowledgement. Lock, stale or cancelled authentication, protected-data loss, guest termination, acknowledgement timeout, or lease expiry revokes the guest. Synthetic runtimes that expose only the legacy signal diagnostic keep its 30-second cap and report request submission without claiming suspension or media stop.")
                 .font(.footnote)
         }
     }
@@ -260,9 +266,13 @@ struct NativeGuestIntegrationSection: View {
         case .presenting: "Attaching isolated guest."
         case .running: "Guest request accepted; verify visible content separately."
         case .holding: model.isSignalDiagnosticHeld
-            ? (model.isSignalDiagnosticPauseRequestSubmitted
-                ? "Signal pause request submitted. Suspension and media stop are unproved; resume requires fresh authentication and a current credential check."
-                : "Signal diagnostic request pending. Suspension and media stop are unproved.")
+            ? (model.isCooperativePauseHeld
+                ? (model.isCooperativePauseAcknowledged
+                    ? "Cooperative media gate acknowledged. Full media coverage and device behavior are unverified; resume requires fresh authentication and a successful credential check."
+                    : "Waiting up to three seconds for the cooperative media gate acknowledgement.")
+                : (model.isSignalDiagnosticPauseRequestSubmitted
+                    ? "Signal pause request submitted. Suspension and media stop are unproved; resume requires fresh authentication and a current credential check."
+                    : "Signal diagnostic request pending. Suspension and media stop are unproved."))
             : "Verification handoff held behind the locked calculator. Resume requires fresh authentication and a current credential check."
         case .blocked: "Launch blocked. Refresh the native report for the diagnostic code. No credential changes were made by this check."
         case .ended: "Guest revoked. Restart the app before another native launch."

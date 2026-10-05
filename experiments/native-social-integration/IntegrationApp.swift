@@ -49,7 +49,7 @@ private final class IntegrationAppDelegate: UIResponder, UIApplicationDelegate {
 }
 
 @MainActor
-private final class IntegrationRuntime: NativeGuestSignalDiagnosticRuntime, NativeGuestTerminationReportingRuntime {
+private final class IntegrationRuntime: NativeGuestCooperativePauseRuntime, NativeGuestTerminationReportingRuntime {
     private let session: CVLPGuestSession
     private let profile: NativeGuestIntegrationProfile
     private var terminationCallback: (@MainActor () -> Void)?
@@ -89,9 +89,13 @@ private final class IntegrationRuntime: NativeGuestSignalDiagnosticRuntime, Nati
         }
     }
     func revoke() { session.revoke() }
-    var signalDiagnosticAvailable: Bool { session.isNativeSignalDiagnosticAvailable }
-    func requestSignalDiagnosticPause() -> Bool { session.requestNativeSignalDiagnostic(SIGSTOP) }
-    func requestSignalDiagnosticResume() -> Bool { session.requestNativeSignalDiagnostic(SIGCONT) }
+    var cooperativePauseAvailable: Bool { session.isCooperativePauseAvailable }
+    func pauseMediaForHandoff(completion: @escaping @MainActor (Bool) -> Void) {
+        session.pauseMedia { applied in MainActor.assumeIsolated { completion(applied) } }
+    }
+    func resumeMediaAfterHandoff(completion: @escaping @MainActor (Bool) -> Void) {
+        session.resumeMedia { released in MainActor.assumeIsolated { completion(released) } }
+    }
     // Exact known fixture messages map to fixed codes; never display arbitrary
     // NSError descriptions, entitlement values or filesystem paths.
     private static func preparationFailure(_ message: String) -> NativeGuestPreparationFailure {

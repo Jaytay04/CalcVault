@@ -15,6 +15,10 @@ NS_ASSUME_NONNULL_BEGIN
 /// not that the OS has acknowledged suspension or media quiescence.
 @property(nonatomic, readonly, getter=isNativeSignalDiagnosticAvailable) BOOL nativeSignalDiagnosticAvailable;
 - (BOOL)requestNativeSignalDiagnostic:(int)signal NS_SWIFT_NAME(requestNativeSignalDiagnostic(_:));
+/// Default-off cooperative known-media gate, not proof of universal media quiescence.
+@property(nonatomic, readonly, getter=isCooperativePauseAvailable) BOOL cooperativePauseAvailable;
+- (void)pauseMediaWithCompletion:(void (^)(BOOL applied))completion NS_SWIFT_NAME(pauseMedia(completion:));
+- (void)resumeMediaWithCompletion:(void (^)(BOOL released))completion NS_SWIFT_NAME(resumeMedia(completion:));
 - (void)startWithCompletion:(void (^)(BOOL success))completion NS_SWIFT_NAME(start(completion:));
 - (BOOL)requestVerificationSignal:(int)signal NS_SWIFT_NAME(requestVerificationSignal(_:));
 - (void)revoke;

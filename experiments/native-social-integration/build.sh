@@ -12,12 +12,25 @@ evidence="$work/evidence"
 output="$work/output"
 integration_build="${CV_INTEGRATION_BUILD:-23}"
 signal_diagnostic="${CV_NATIVE_SIGNAL_DIAGNOSTIC:-0}"
+cooperative_pause="${CV_NATIVE_COOPERATIVE_PAUSE:-0}"
 case "$signal_diagnostic" in
     0|1) ;;
     *) echo 'CV_NATIVE_SIGNAL_DIAGNOSTIC must be exactly 0 or 1' >&2; exit 2 ;;
 esac
+case "$cooperative_pause" in
+    0|1) ;;
+    *) echo 'CV_NATIVE_COOPERATIVE_PAUSE must be exactly 0 or 1' >&2; exit 2 ;;
+esac
 if [[ "$signal_diagnostic" == 1 && "$integration_build" != 24 ]]; then
     echo 'Native pause diagnostic requires Build 24' >&2
+    exit 2
+fi
+if [[ "$cooperative_pause" == 1 && "$integration_build" != 24 ]]; then
+    echo 'Cooperative guest pause requires Build 24' >&2
+    exit 2
+fi
+if [[ "$cooperative_pause" == 1 && "$signal_diagnostic" == 1 ]]; then
+    echo 'Cooperative pause and native signal diagnostics are mutually exclusive' >&2
     exit 2
 fi
 case "$integration_build" in
@@ -259,16 +272,27 @@ PY
     codesign -d --entitlements - --xml "$extension" 2>/dev/null > "$evidence/extension-entitlements-$sdk.plist"
     codesign -d --entitlements - --xml "$host" 2>/dev/null > "$evidence/host-entitlements-$sdk.plist"
     python3 - "$host" "$evidence/extension-entitlements-$sdk.plist" \
-        "$evidence/host-entitlements-$sdk.plist" "$entitlements" "$integration_build" <<'PY'
+        "$evidence/host-entitlements-$sdk.plist" "$entitlements" "$integration_build" \
+        "$signal_diagnostic" "$cooperative_pause" <<'PY'
 import plistlib, sys
 from pathlib import Path
 host = Path(sys.argv[1])
 info = plistlib.loads((host / 'Info.plist').read_bytes())
 build = sys.argv[5]
+signal_diagnostic, cooperative_pause = sys.argv[6:8]
 assert info.get('CFBundleVersion') == build
 assert info.get('CVNativeIntegrationStage') == f'synthetic-integration-{build}'
 assert info.get('CVNativeGuestKind') == 'synthetic'
 assert info.get('CVLPFrameworkGuestMode') == 1
+if signal_diagnostic == '1':
+    assert info.get('CVNativeSignalDiagnosticEnabled') is True
+else:
+    assert 'CVNativeSignalDiagnosticEnabled' not in info
+if cooperative_pause == '1':
+    assert info.get('CVNativeCooperativePauseEnabled') is True
+else:
+    assert 'CVNativeCooperativePauseEnabled' not in info
+assert not (signal_diagnostic == '1' and cooperative_pause == '1')
 assert info.get('CFBundleIdentifier') == 'com.jaylintaylor.calcvault'
 assert info.get('UIFileSharingEnabled') is False
 assert info.get('LSSupportsOpeningDocumentsInPlace') is False
@@ -301,6 +325,7 @@ stage_and_package() {
         > "$logs/package-framework-$sdk.log"
     stage_args=(--build "$integration_build" --profile synthetic)
     if [[ "$signal_diagnostic" == 1 ]]; then stage_args+=(--signal-diagnostic); fi
+    if [[ "$cooperative_pause" == 1 ]]; then stage_args+=(--cooperative-pause); fi
     python3 "$kit_project/stage-integration.py" "$host" "$kit" \
         "${stage_args[@]}" > "$logs/stage-integration-$sdk.log"
     verify_and_sign "$sdk" "$host" "$entitlements"
@@ -341,10 +366,12 @@ mkdir -p "$output/Payload"
 ditto "$device_host" "$output/Payload/LiveContainer.app"
 artifact="CalcVault-integration-host-$integration_build.ipa"
 if [[ "$signal_diagnostic" == 1 ]]; then artifact="CalcVault-integration-host-$integration_build-pause1.ipa"; fi
+if [[ "$cooperative_pause" == 1 ]]; then artifact="CalcVault-integration-host-$integration_build-cooperative1.ipa"; fi
 (cd "$output" && zip -qry "$artifact" Payload)
 shasum -a 256 "$output/$artifact" > "$output/$artifact.sha256"
 unzip -t "$output/$artifact" > "$evidence/ipa-zip-check.txt"
 printf '%s\n' "Build $integration_build synthetic integration-host artifact created." \
+    "Cooperative media pause opt-in: $cooperative_pause (runtime behavior is not established by this build)." \
     'Simulator evidence covers only the locked CalcVault root; no guest launch was attempted.' \
     'Physical-device signing, install, native guest launch and isolation remain NOT RUN.' \
     > "$evidence/result.txt"
