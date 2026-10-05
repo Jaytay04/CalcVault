@@ -93,6 +93,7 @@ public final class NativeGuestCoordinator: ObservableObject {
 
     @Published public private(set) var state: State
     @Published public private(set) var showingGuest = false
+    @Published private var cooperativePauseReadinessSnapshot = false
 
     private struct SessionContext: Equatable {
         let sessionID: UUID
@@ -169,6 +170,8 @@ public final class NativeGuestCoordinator: ObservableObject {
     private var cooperativePauseAcknowledgementTask: Task<Void, Never>?
     private var cooperativeResumeAcknowledgementTask: Task<Void, Never>?
     private var cooperativeAuthenticationAttemptID: UUID?
+    private var cooperativePauseReadinessRuntimeToken: UUID?
+    private var cooperativePauseReadinessRefreshTask: Task<Void, Never>?
     private var signalDiagnosticAttemptConsumed = false
     private var handoffReport: String?
 
@@ -270,7 +273,10 @@ public final class NativeGuestCoordinator: ObservableObject {
               handoffLeaseFactory != nil,
               let runtime else { return false }
         if let cooperativeRuntime = runtime as? any NativeGuestCooperativePauseRuntime {
-            return cooperativeRuntime.cooperativePauseAvailable
+            guard cooperativePauseReadinessRuntimeToken == runtimeInstanceToken else {
+                return cooperativeRuntime.cooperativePauseAvailable
+            }
+            return cooperativePauseReadinessSnapshot
         }
         return (runtime as? any NativeGuestSignalDiagnosticRuntime)?.signalDiagnosticAvailable == true
     }
@@ -504,6 +510,7 @@ public final class NativeGuestCoordinator: ObservableObject {
               !signalDiagnosticAttemptConsumed,
               presentationRequest.map({ isValid($0.session) }) == true else { return false }
         signalDiagnosticAttemptConsumed = true
+        stopCooperativePauseReadinessRefresh()
         if let cooperativeRuntime = runtime as? any NativeGuestCooperativePauseRuntime {
             guard cooperativeRuntime.cooperativePauseAvailable else {
                 launchFailure = "stage=cooperative-media-handoff; reason=unsupported"
@@ -1213,6 +1220,7 @@ public final class NativeGuestCoordinator: ObservableObject {
         runtimeStartPending = false
         if started {
             state = .running
+            startCooperativePauseReadinessRefresh()
         } else {
             launchFailure = "stage=runtime-start; reason=request-rejected"
             showingGuest = false
@@ -1221,8 +1229,55 @@ public final class NativeGuestCoordinator: ObservableObject {
         }
     }
 
+    /// A guest may report connection acceptance after its start callback. Poll
+    /// readiness only while that exact runtime is running, at a fixed cadence,
+    /// for a bounded ten-second window; changing the snapshot publishes an
+    /// ObservableObject update so SwiftUI can reveal the handoff control.
+    private func startCooperativePauseReadinessRefresh() {
+        cooperativePauseReadinessRefreshTask?.cancel()
+        cooperativePauseReadinessRefreshTask = nil
+        guard state == .running,
+              !signalDiagnosticAttemptConsumed,
+              let runtimeToken = runtimeInstanceToken,
+              let cooperativeRuntime = runtime as? any NativeGuestCooperativePauseRuntime else {
+            return
+        }
+
+        cooperativePauseReadinessRuntimeToken = runtimeToken
+        cooperativePauseReadinessSnapshot = cooperativeRuntime.cooperativePauseAvailable
+        guard !cooperativePauseReadinessSnapshot else { return }
+
+        cooperativePauseReadinessRefreshTask = Task { @MainActor [weak self] in
+            for _ in 0..<40 {
+                do { try await Task.sleep(nanoseconds: 250_000_000) } catch { return }
+                guard let self,
+                      self.state == .running,
+                      self.runtimeInstanceToken == runtimeToken,
+                      !self.signalDiagnosticAttemptConsumed,
+                      let currentRuntime = self.runtime as? any NativeGuestCooperativePauseRuntime else {
+                    return
+                }
+                let readiness = currentRuntime.cooperativePauseAvailable
+                if self.cooperativePauseReadinessSnapshot != readiness {
+                    self.cooperativePauseReadinessSnapshot = readiness
+                }
+                if readiness {
+                    self.cooperativePauseReadinessRefreshTask = nil
+                    return
+                }
+            }
+            self?.cooperativePauseReadinessRefreshTask = nil
+        }
+    }
+
+    private func stopCooperativePauseReadinessRefresh() {
+        cooperativePauseReadinessRefreshTask?.cancel()
+        cooperativePauseReadinessRefreshTask = nil
+    }
+
     private func runtimeDidTerminate(token: UUID) {
         guard runtimeInstanceToken == token else { return }
+        stopCooperativePauseReadinessRefresh()
 
         let endedRuntime = runtime
             ?? verificationHandoff?.runtime
@@ -1450,6 +1505,7 @@ public final class NativeGuestCoordinator: ObservableObject {
     }
 
     private func endRuntimePresentation() {
+        stopCooperativePauseReadinessRefresh()
         let runtimeToRevoke = runtime
         showingGuest = false
         presentationRequest = nil
@@ -1536,6 +1592,7 @@ public final class NativeGuestCoordinator: ObservableObject {
 
         // Retry the idempotent revoke for every lifecycle transition. The
         // lifecycle publishes `.locking` and `.calculatorLocked` separately.
+        stopCooperativePauseReadinessRefresh()
         let authorizationRequest = activeAuthorization?.request
         let runtimeToRevoke = runtime
         showingGuest = false

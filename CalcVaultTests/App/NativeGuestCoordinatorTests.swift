@@ -1577,6 +1577,27 @@ final class NativeGuestCoordinatorTests: XCTestCase {
         XCTAssertEqual(runtime.signalResumeRequestCount, 0)
     }
 
+    func testCooperativePauseReadinessRefreshPublishesLateConnectionAcceptance() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeCooperativePauseGuestRuntime()
+        runtime.cooperativePauseAvailable = false
+        let coordinator = makeCooperativePauseCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: FakeGuestHandoffLease()
+        )
+        try await startCooperativePauseGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertEqual(coordinator.state, .running)
+        XCTAssertFalse(coordinator.canBeginSignalDiagnostic)
+
+        runtime.cooperativePauseAvailable = true
+        try await Task.sleep(nanoseconds: 350_000_000)
+
+        XCTAssertEqual(coordinator.state, .running)
+        XCTAssertTrue(coordinator.canBeginSignalDiagnostic)
+        XCTAssertEqual(runtime.pauseRequestCount, 0)
+    }
+
     func testCooperativePauseAcknowledgementTimeoutRevokesAndIgnoresLateAck() async throws {
         let lifecycle = SessionLifecycleCoordinator()
         _ = try unlock(lifecycle)

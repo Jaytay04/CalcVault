@@ -75,8 +75,8 @@ public final class CalcVaultIntegratedHost: NSObject, ObservableObject {
         let began = coordinator.nativeGuest.beginSignalDiagnostic {
             // The coordinator has already concealed the guest. Lock Vault and
             // schedule calculator reveal before the asynchronous media request.
-            coordinator.lockForNativeVerificationHandoff()
-            revealCalculatorAfterLock()
+            self.coordinator.lockForNativeVerificationHandoff()
+            self.revealCalculatorAfterLock()
         }
         if !began {
             coordinator.lock()
