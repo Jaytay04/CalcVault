@@ -292,7 +292,7 @@ public final class NativeGuestCoordinator: ObservableObject {
             (UIApplication.didBecomeActiveNotification, "host-active")
         ] {
             let observation: AnyCancellable = NotificationCenter.default.publisher(for: name)
-                .sink { [weak self] _ -> Void in
+                .sink { @Sendable [weak self] _ -> Void in
                     if Thread.isMainThread {
                         MainActor.assumeIsolated { _ = self?.recordCooperativeHold(phase) }
                     } else {
