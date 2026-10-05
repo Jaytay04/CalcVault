@@ -26,6 +26,7 @@ static NSString * const CVLPMediaGateErrorDomain = @"CVLPCooperativeMediaGate";
 - (instancetype)initPrivate;
 @property(nonatomic) os_unfair_lock stateLock;
 @property(nonatomic, strong) dispatch_queue_t controlQueue;
+@property(nonatomic, strong) dispatch_queue_t mediaQueue;
 @property(nonatomic, strong) NSHashTable<AVPlayer *> *players;
 @property(nonatomic, strong) NSHashTable<AVAudioPlayer *> *audioPlayers;
 @property(nonatomic, strong) NSHashTable<AVAudioEngine *> *audioEngines;
@@ -129,7 +130,10 @@ static BOOL CVLPHasPositiveRate(float rate) {
 @interface CVLPCooperativeMediaGate (Private)
 - (instancetype)initPrivate;
 - (BOOL)installHooks;
-- (BOOL)beginHoldWithToken:(NSUUID *)token maximumDuration:(NSTimeInterval)duration expiration:(void (^)(void))expiration;
+- (void)beginHoldWithToken:(NSUUID *)token
+           maximumDuration:(NSTimeInterval)duration
+                completion:(void (^)(BOOL applied))completion
+                expiration:(void (^)(void))expiration;
 - (BOOL)endHoldWithToken:(NSUUID *)token;
 - (void)invalidateGate;
 - (void)cancelExpirationTimerLocked;
@@ -145,9 +149,12 @@ static BOOL CVLPHasPositiveRate(float rate) {
 - (BOOL)beginMediaEntryForObject:(nullable id)object kind:(CVLPMediaKind)kind;
 - (BOOL)beginSessionActivation;
 - (void)endMediaEntry;
-- (BOOL)pauseTrackedMediaSynchronously;
 - (BOOL)deactivateAudioSessionForHold;
 - (void)pauseTrackedMedia;
+- (void)completeHoldApplicationForToken:(NSUUID *)token
+                                  paused:(BOOL)paused
+                             deactivated:(BOOL)deactivated
+                              completion:(void (^)(BOOL applied))completion;
 - (void)expireHoldForToken:(NSUUID *)token;
 - (void)deliverExpiration:(nullable void (^)(void))handler;
 @end
@@ -260,6 +267,7 @@ static BOOL CVLPAVAudioSessionSetActiveWithOptions(id self, SEL selector, BOOL a
     os_unfair_lock lock = OS_UNFAIR_LOCK_INIT;
     _stateLock = lock;
     _controlQueue = dispatch_queue_create("org.example.cvlp.cooperative-media-gate", DISPATCH_QUEUE_SERIAL);
+    _mediaQueue = dispatch_queue_create("org.example.cvlp.cooperative-media-gate.media", DISPATCH_QUEUE_SERIAL);
     _players = [NSHashTable hashTableWithOptions:NSPointerFunctionsWeakMemory | NSPointerFunctionsObjectPointerPersonality];
     _audioPlayers = [NSHashTable hashTableWithOptions:NSPointerFunctionsWeakMemory | NSPointerFunctionsObjectPointerPersonality];
     _audioEngines = [NSHashTable hashTableWithOptions:NSPointerFunctionsWeakMemory | NSPointerFunctionsObjectPointerPersonality];
@@ -272,10 +280,11 @@ static BOOL CVLPAVAudioSessionSetActiveWithOptions(id self, SEL selector, BOOL a
     return [CVLPSharedMediaGate() installHooks];
 }
 
-+ (BOOL)beginHoldWithToken:(NSUUID *)token
++ (void)beginHoldWithToken:(NSUUID *)token
            maximumDuration:(NSTimeInterval)duration
-                 expiration:(void (^)(void))expiration {
-    return [CVLPSharedMediaGate() beginHoldWithToken:token maximumDuration:duration expiration:expiration];
+                completion:(void (^)(BOOL applied))completion
+                expiration:(void (^)(void))expiration {
+    [CVLPSharedMediaGate() beginHoldWithToken:token maximumDuration:duration completion:completion expiration:expiration];
 }
 
 + (BOOL)endHoldWithToken:(NSUUID *)token {
@@ -333,6 +342,17 @@ static BOOL CVLPAVAudioSessionSetActiveWithOptions(id self, SEL selector, BOOL a
 }
 
 - (BOOL)installHooks {
+    // AVPlayer playback control was main-queue-only before iOS 16. This gate
+    // performs pause calls on its dedicated worker, so fail closed there.
+    if (@available(iOS 16.0, *)) {
+    } else {
+        os_unfair_lock_lock(&_stateLock);
+        self.invalidated = YES;
+        self.held = YES;
+        os_unfair_lock_unlock(&_stateLock);
+        return NO;
+    }
+
     os_unfair_lock_lock(&_stateLock);
     BOOL allInstalled = YES;
     const char *objectVoidArgs[] = {@encode(id), @encode(SEL)};
@@ -404,28 +424,40 @@ static BOOL CVLPAVAudioSessionSetActiveWithOptions(id self, SEL selector, BOOL a
     return YES;
 }
 
-- (BOOL)beginHoldWithToken:(NSUUID *)token
+- (void)beginHoldWithToken:(NSUUID *)token
            maximumDuration:(NSTimeInterval)duration
-                 expiration:(void (^)(void))expiration {
-    if (!NSThread.isMainThread || ![token isKindOfClass:NSUUID.class] || !expiration || !isfinite(duration) ||
-        duration <= 0.0 || duration > CVLPMediaMaximumHoldDuration) return NO;
+                completion:(void (^)(BOOL applied))completion
+                expiration:(void (^)(void))expiration {
+    if (!completion) return;
+    if (!NSThread.isMainThread) {
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(NO); });
+        return;
+    }
+    if (![token isKindOfClass:NSUUID.class] || !expiration || !isfinite(duration) ||
+        duration <= 0.0 || duration > CVLPMediaMaximumHoldDuration) {
+        completion(NO);
+        return;
+    }
 
+    NSArray<AVPlayer *> *players = nil;
+    NSArray<AVAudioPlayer *> *audioPlayers = nil;
+    NSArray<AVAudioEngine *> *audioEngines = nil;
+    BOOL shouldPause = NO;
     os_unfair_lock_lock(&_stateLock);
     if (!self.installed || self.invalidated || self.held || self.activeToken ||
         self.inFlightEntries != 0 || [self.consumedTokens containsObject:token] ||
         self.consumedTokens.count >= CVLPMediaTokenLimit ||
         ![self hooksAreOwnedLocked]) {
-        if (self.installed && ![self hooksAreOwnedLocked]) {
-            self.invalidated = YES;
-            self.held = YES;
-        } else if (self.consumedTokens.count >= CVLPMediaTokenLimit) {
+        if ((self.installed && ![self hooksAreOwnedLocked]) ||
+            self.consumedTokens.count >= CVLPMediaTokenLimit) {
             self.invalidated = YES;
             self.held = YES;
         }
-        BOOL shouldPause = self.held && self.invalidated;
+        shouldPause = self.held && self.invalidated;
         os_unfair_lock_unlock(&_stateLock);
         if (shouldPause) [self pauseTrackedMedia];
-        return NO;
+        completion(NO);
+        return;
     }
 
     [self.consumedTokens addObject:token];
@@ -434,39 +466,12 @@ static BOOL CVLPAVAudioSessionSetActiveWithOptions(id self, SEL selector, BOOL a
     self.activeDeadlineUptime = NSProcessInfo.processInfo.systemUptime + duration;
     self.held = YES;
     self.holdApplying = YES;
-    os_unfair_lock_unlock(&_stateLock);
 
-    // Begin runs on the main thread and does not synchronously wait for another
-    // queue. The brief native pause calls complete before a successful reply.
-    BOOL paused = [self pauseTrackedMediaSynchronously];
-    BOOL deactivated = paused && [self deactivateAudioSessionForHold];
-    void (^expirationHandler)(void) = nil;
-
-    os_unfair_lock_lock(&_stateLock);
-    BOOL stillOwnsHold = self.held && !self.invalidated && self.holdApplying &&
-        self.activeToken && [self.activeToken isEqual:token];
-    BOOL stillOwnsHooks = [self hooksAreOwnedLocked];
-    if (!paused || !deactivated || !stillOwnsHold || !stillOwnsHooks) {
-        self.invalidated = YES;
-        self.held = YES;
-        self.holdApplying = NO;
-        [self cancelExpirationTimerLocked];
-        self.activeToken = nil;
-        self.expirationHandler = nil;
-        self.activeDeadlineUptime = 0;
-        os_unfair_lock_unlock(&_stateLock);
-        [self pauseTrackedMedia];
-        return NO;
-    }
-
-    if (NSProcessInfo.processInfo.systemUptime >= self.activeDeadlineUptime) {
-        self.holdApplying = NO;
-        expirationHandler = [self finishExpirationLockedForToken:token];
-        os_unfair_lock_unlock(&_stateLock);
-        [self deliverExpiration:expirationHandler];
-        return NO;
-    }
-
+    // Snapshot weak registries while closing admission. Start the independent
+    // expiration timer before enqueueing any potentially blocking AV call.
+    players = self.players.allObjects;
+    audioPlayers = self.audioPlayers.allObjects;
+    audioEngines = self.audioEngines.allObjects;
     dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, self.controlQueue);
     if (!timer) {
         self.invalidated = YES;
@@ -476,8 +481,8 @@ static BOOL CVLPAVAudioSessionSetActiveWithOptions(id self, SEL selector, BOOL a
         self.expirationHandler = nil;
         self.activeDeadlineUptime = 0;
         os_unfair_lock_unlock(&_stateLock);
-        [self pauseTrackedMedia];
-        return NO;
+        completion(NO);
+        return;
     }
     self.expirationTimer = timer;
     __weak typeof(self) weakSelf = self;
@@ -487,10 +492,36 @@ static BOOL CVLPAVAudioSessionSetActiveWithOptions(id self, SEL selector, BOOL a
     NSTimeInterval remaining = MAX(0.0, self.activeDeadlineUptime - NSProcessInfo.processInfo.systemUptime);
     uint64_t nanoseconds = (uint64_t)MAX(1.0, ceil(remaining * (NSTimeInterval)NSEC_PER_SEC));
     dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, (int64_t)nanoseconds), DISPATCH_TIME_FOREVER, 0);
-    self.holdApplying = NO;
     dispatch_resume(timer);
     os_unfair_lock_unlock(&_stateLock);
-    return YES;
+
+    CVLPCooperativeMediaGate *gate = self;
+    dispatch_async(self.mediaQueue, ^{
+        os_unfair_lock_lock(&gate->_stateLock);
+        BOOL mayApply = gate.held && !gate.invalidated && gate.holdApplying &&
+            gate.activeToken && [gate.activeToken isEqual:token] &&
+            NSProcessInfo.processInfo.systemUptime < gate.activeDeadlineUptime &&
+            [gate hooksAreOwnedLocked];
+        os_unfair_lock_unlock(&gate->_stateLock);
+
+        BOOL paused = NO;
+        BOOL deactivated = NO;
+        if (mayApply) {
+            for (AVPlayer *player in players) [player pause];
+            for (AVAudioPlayer *player in audioPlayers) [player pause];
+            for (AVAudioEngine *engine in audioEngines) [engine pause];
+            paused = YES;
+
+            os_unfair_lock_lock(&gate->_stateLock);
+            BOOL mayDeactivate = gate.held && !gate.invalidated && gate.holdApplying &&
+                gate.activeToken && [gate.activeToken isEqual:token] &&
+                NSProcessInfo.processInfo.systemUptime < gate.activeDeadlineUptime &&
+                [gate hooksAreOwnedLocked];
+            os_unfair_lock_unlock(&gate->_stateLock);
+            if (mayDeactivate) deactivated = [gate deactivateAudioSessionForHold];
+        }
+        [gate completeHoldApplicationForToken:token paused:paused deactivated:deactivated completion:completion];
+    });
 }
 
 - (BOOL)endHoldWithToken:(NSUUID *)token {
@@ -586,7 +617,7 @@ static BOOL CVLPAVAudioSessionSetActiveWithOptions(id self, SEL selector, BOOL a
 
 - (void)deliverExpiration:(nullable void (^)(void))handler {
     if (!handler) return;
-    dispatch_async(dispatch_get_main_queue(), ^{ handler(); });
+    dispatch_async(self.controlQueue, ^{ handler(); });
 }
 
 - (BOOL)beginMediaEntryForObject:(nullable id)object kind:(CVLPMediaKind)kind {
@@ -646,40 +677,6 @@ static BOOL CVLPAVAudioSessionSetActiveWithOptions(id self, SEL selector, BOOL a
     os_unfair_lock_unlock(&_stateLock);
 }
 
-- (BOOL)pauseTrackedMediaSynchronously {
-    if (!NSThread.isMainThread) return NO;
-
-    NSArray<AVPlayer *> *players = nil;
-    NSArray<AVAudioPlayer *> *audioPlayers = nil;
-    NSArray<AVAudioEngine *> *audioEngines = nil;
-    os_unfair_lock_lock(&_stateLock);
-    BOOL ready = self.held && !self.invalidated && [self hooksAreOwnedLocked];
-    if (!ready) {
-        self.invalidated = YES;
-        self.held = YES;
-    }
-    players = self.players.allObjects;
-    audioPlayers = self.audioPlayers.allObjects;
-    audioEngines = self.audioEngines.allObjects;
-    os_unfair_lock_unlock(&_stateLock);
-    if (!ready) return NO;
-
-    // All calls are direct, bounded control operations; no sync dispatch or
-    // queue wait is used. The token is not acknowledged until they return.
-    for (AVPlayer *player in players) [player pause];
-    for (AVAudioPlayer *player in audioPlayers) [player pause];
-    for (AVAudioEngine *engine in audioEngines) [engine pause];
-
-    os_unfair_lock_lock(&_stateLock);
-    ready = self.held && !self.invalidated && [self hooksAreOwnedLocked];
-    if (!ready) {
-        self.invalidated = YES;
-        self.held = YES;
-    }
-    os_unfair_lock_unlock(&_stateLock);
-    return ready;
-}
-
 - (BOOL)deactivateAudioSessionForHold {
     IMP original = CVLPAVAudioSessionSetActiveOriginal;
     if (!original) return NO;
@@ -695,8 +692,46 @@ static BOOL CVLPAVAudioSessionSetActiveWithOptions(id self, SEL selector, BOOL a
         error.code == AVAudioSessionErrorCodeIsBusy;
 }
 
+- (void)completeHoldApplicationForToken:(NSUUID *)token
+                                  paused:(BOOL)paused
+                             deactivated:(BOOL)deactivated
+                              completion:(void (^)(BOOL applied))completion {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        void (^expiration)(void) = nil;
+        BOOL applied = NO;
+        BOOL shouldPause = NO;
+        os_unfair_lock_lock(&self->_stateLock);
+        BOOL tokenMatches = self.activeToken && [self.activeToken isEqual:token];
+        BOOL holdCurrent = tokenMatches && self.held && !self.invalidated && self.holdApplying;
+        BOOL hooksOwned = [self hooksAreOwnedLocked];
+        NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+
+        if (holdCurrent && now >= self.activeDeadlineUptime) {
+            expiration = [self finishExpirationLockedForToken:token];
+        } else if (holdCurrent && paused && deactivated && hooksOwned) {
+            // This is the only path that can acknowledge application. Check
+            // token, deadline, and hook ownership on main immediately before YES.
+            self.holdApplying = NO;
+            applied = YES;
+        } else if (holdCurrent) {
+            self.invalidated = YES;
+            self.held = YES;
+            self.holdApplying = NO;
+            [self cancelExpirationTimerLocked];
+            self.activeToken = nil;
+            self.expirationHandler = nil;
+            self.activeDeadlineUptime = 0;
+            shouldPause = YES;
+        }
+        os_unfair_lock_unlock(&self->_stateLock);
+
+        if (shouldPause) [self pauseTrackedMedia];
+        [self deliverExpiration:expiration];
+        completion(applied);
+    });
+}
+
 - (void)pauseTrackedMedia {
-    __weak typeof(self) weakSelf = self;
     os_unfair_lock_lock(&_stateLock);
     if (self.pauseRequestScheduled) {
         os_unfair_lock_unlock(&_stateLock);
@@ -705,9 +740,8 @@ static BOOL CVLPAVAudioSessionSetActiveWithOptions(id self, SEL selector, BOOL a
     self.pauseRequestScheduled = YES;
     os_unfair_lock_unlock(&_stateLock);
 
-    dispatch_async(dispatch_get_main_queue(), ^{
-        CVLPCooperativeMediaGate *gate = weakSelf;
-        if (!gate) return;
+    CVLPCooperativeMediaGate *gate = self;
+    dispatch_async(self.mediaQueue, ^{
         NSArray<AVPlayer *> *players = nil;
         NSArray<AVAudioPlayer *> *audioPlayers = nil;
         NSArray<AVAudioEngine *> *audioEngines = nil;

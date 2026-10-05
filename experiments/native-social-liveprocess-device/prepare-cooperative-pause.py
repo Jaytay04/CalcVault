@@ -78,6 +78,8 @@ def transform(scene, extension):
                      '#import "../LiveContainer/CVLPProbe.h"\n#define CVLP_COOPERATIVE_GUEST 1\n#import "../LiveContainer/CVLPCooperativePause.m"')
     extension = once(extension, '    NSCAssert(appInfo, @"Failed to retrieve app info");',
                      '    NSCAssert(appInfo, @"Failed to retrieve app info");\n    if (!CVLPInstallGuestMediaHoldControl(appInfo)) return 104;')
+    extension = once(extension, '    NSLog(@"Retrieved app info: %@", appInfo);',
+                     '    NSLog(@"Retrieved guest launch configuration (values redacted)");')
     return scene, extension
 
 

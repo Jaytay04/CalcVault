@@ -14,13 +14,15 @@
     dispatch_async(dispatch_get_main_queue(), ^{
         BOOL allowed = [launch isKindOfClass:NSUUID.class] &&
             [hold isKindOfClass:NSUUID.class] && [launch isEqual:self.launchToken];
-        BOOL applied = allowed && [CVLPCooperativeMediaGate beginHoldWithToken:hold
-            maximumDuration:duration expiration:^{
+        if (!allowed) { reply(NO, (int)getpid()); return; }
+        [CVLPCooperativeMediaGate beginHoldWithToken:hold
+            maximumDuration:duration completion:^(BOOL applied) {
+                reply(applied, (int)getpid());
+            } expiration:^{
                 // Expiration never resumes media. The host also has an independent deadline.
                 [CVLPCooperativeMediaGate invalidate];
                 _exit(102);
             }];
-        reply(applied, (int)getpid());
     });
 }
 - (void)releaseForLaunch:(NSUUID *)launch hold:(NSUUID *)hold

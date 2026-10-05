@@ -18,7 +18,8 @@ class CooperativeTransportTests(unittest.TestCase):
                 '    item.userInfo = userInfo;\n- (void)cvlpRevoke {\n'
                 '- (void)appTerminationCleanUp {',
                 'integration-native-24\n#import "../LiveContainer/CVLPProbe.h"\n'
-                '    NSCAssert(appInfo, @"Failed to retrieve app info");')
+                '    NSCAssert(appInfo, @"Failed to retrieve app info");\n'
+                '    NSLog(@"Retrieved app info: %@", appInfo);')
 
     def test_opt_in_preserves_lifecycle_and_namespace(self):
         scene, guest = adapter.transform(*self.fixture())
@@ -29,6 +30,8 @@ class CooperativeTransportTests(unittest.TestCase):
         self.assertIn('[owner appTerminationCleanUp]', scene)
         self.assertIn('[self.cvlpMediaControl invalidate]', scene)
         self.assertIn('CVLPInstallGuestMediaHoldControl(appInfo)', guest)
+        self.assertNotIn('NSLog(@"Retrieved app info: %@", appInfo)', guest)
+        self.assertIn('values redacted', guest)
         self.assertNotIn('SIGSTOP', scene + guest)
         self.assertNotIn('shouldIgnoreSceneUpdates', scene)
         self.assertNotIn('integration-native-25', scene + guest)

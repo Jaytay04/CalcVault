@@ -8,12 +8,15 @@ NS_ASSUME_NONNULL_BEGIN
 @interface CVLPCooperativeMediaGate : NSObject
 
 + (BOOL)install;
-/// Must run on the main thread. YES is returned only after tracked media has
-/// been paused and the app audio session deactivated or its documented isBusy
-/// deactivation result has been verified.
-+ (BOOL)beginHoldWithToken:(NSUUID *)token
+/// Must run on the main thread. The gate closes before media work is queued.
+/// Completion is delivered on the main thread and is YES only after tracked
+/// media pause/audio-session deactivation succeeds and the hold remains current.
+/// A caller timeout cannot cancel media work already running on the worker queue.
+/// Completion runs on main; expiration runs on the independent control queue.
++ (void)beginHoldWithToken:(NSUUID *)token
            maximumDuration:(NSTimeInterval)duration
-                 expiration:(void (^)(void))expiration;
+                completion:(void (^)(BOOL applied))completion
+                expiration:(void (^)(void))expiration;
 + (BOOL)endHoldWithToken:(NSUUID *)token;
 + (void)invalidate;
 
