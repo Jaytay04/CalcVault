@@ -12,6 +12,13 @@ spec = importlib.util.spec_from_file_location(
 initial_geometry = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(initial_geometry)
 
+geometry_spec = importlib.util.spec_from_file_location(
+    "framework_geometry",
+    Path(__file__).with_name("framework_geometry.py"),
+)
+geometry = importlib.util.module_from_spec(geometry_spec)
+geometry_spec.loader.exec_module(geometry)
+
 
 def sources():
     # Minimal fixture follows AppSceneViewController.m's pinned method order:
@@ -21,12 +28,16 @@ def sources():
 
 @interface AppSceneViewController()
 @property(nonatomic) BOOL cvlpRevoked;
+@property(atomic) BOOL cvlpSceneEnded;
+@property(nonatomic) NSUInteger cvlpPreRevokeAttemptCount;
+- (void)cvlpRevoke;
+@property int resizeDebounceToken;
 @end
 
 @implementation AppSceneViewController
 - (instancetype)initWithBundleId:(NSString *)bundleId delegate:(id)delegate {
     dispatch_block_t handleCompletion = ^{
-        if (self.cvlpRevoked) return;
+        if (self.cvlpRevoked || self.cvlpSceneEnded) return;
                 if (identifier) {
                     [MultitaskManager registerMultitaskContainerWithContainer:self.dataUUID];
                     [delegate appSceneVC:self didInitializeWithError:nil];
@@ -37,12 +48,13 @@ def sources():
 }
 - (void)cvlpRevoke {
     self.cvlpRevoked = YES;
+    self.cvlpSceneEnded = YES;
     self.view.hidden = YES;
     [self.extension _kill:SIGKILL];
     [self.presenter invalidate];
 }
 - (void)setUpAppPresenter {
-    if (self.cvlpRevoked) return;
+    if (self.cvlpRevoked || self.cvlpSceneEnded) return;
     RBSProcessPredicate* predicate = [PrivClass(RBSProcessPredicate) predicateMatchingIdentifier:@(self.pid)];
     UIApplicationSceneSpecification *specification = [UIApplicationSceneSpecification specification];
     void (^updateSceneSettings)(id) = ^void(UIMutableApplicationSceneSettings *settings) {
@@ -66,6 +78,27 @@ def sources():
         }];
         [self addChildViewController:self.hostingController.sceneViewController];
     }
+    [self.view addSubview:_contentView];
+    [self.view.window.windowScene _registerSettingsDiffActionArray:@[self] forKey:self.sceneID];
+}
+- (void)viewWillLayoutSubviews {
+    if (self.cvlpRevoked || self.cvlpSceneEnded) return;
+    [self updateFrameWithSettingsBlock:nil];
+}
+- (void)updateSettingsWithBlock:(void(^)(UIMutableApplicationSceneSettings *settings))updateSettingsBlock {
+    if (self.cvlpRevoked || self.cvlpSceneEnded) return;
+    if (!_hostingController && self.contentView) {
+        [self.presenter.scene updateSettingsWithBlock:updateSettingsBlock];
+        return;
+    }
+    updateSettingsBlock(settings);
+    CGRect frame = settings.frame;
+    if (self.contentView) {
+        self.contentView.frame = frame;
+    } else {
+        // This method can be called while contentView is nil to set up initial frame
+        self.view.frame = frame;
+    }
 }
 @end
 ''',
@@ -74,6 +107,21 @@ def sources():
 
 
 class FrameworkInitialGeometryTests(unittest.TestCase):
+    def test_current_session_geometry_and_initial_geometry_compose(self):
+        before = sources()
+        before[geometry.SESSION_PATH] = Path(__file__).with_name("CVLPGuestSession.m").read_text(encoding="utf-8")
+        snapshot = dict(before)
+        after = initial_geometry.transform(geometry.transform(before))
+        self.assertEqual(before, snapshot)
+        self.assertEqual(after["Unowned/Unchanged.m"], before["Unowned/Unchanged.m"])
+        self.assertIn("if (self.revoked || self.sceneEnded) return;", after[geometry.SESSION_PATH])
+        scene = after[geometry.SCENE_PATH]
+        for method in ("setUpAppPresenter", "viewWillLayoutSubviews"):
+            self.assertIn(f"- (void){method} {{\n    if (self.cvlpRevoked || self.cvlpSceneEnded) return;", scene)
+        self.assertIn("if (self.cvlpRevoked || self.cvlpSceneEnded) return NO;", scene)
+        self.assertIn("CVLP_GEOMETRY", scene)
+        self.assertIn("CVLP_INITIAL_SCENE_GEOMETRY", scene)
+
     def test_transform_returns_copy_and_preserves_unowned_sources(self):
         before = sources()
         snapshot = dict(before)
@@ -110,7 +158,8 @@ class FrameworkInitialGeometryTests(unittest.TestCase):
         self.assertIn("#if TARGET_OS_SIMULATOR", helper)
         self.assertIn("#endif", helper)
 
-        setup_completion = scene[scene.index("- (instancetype)initWithBundleId:"):scene.index("\n- (void)cvlpRevoke")]
+        completion_start = scene.index("- (instancetype)initWithBundleId:")
+        setup_completion = scene[completion_start:scene.index("\n- (void)cvlpRevoke", completion_start)]
         self.assertLess(setup_completion.index("[self cvlpPrepareInitialGeometry]"), setup_completion.index("CVLP_INITIAL_GEOMETRY_REJECTED"))
         self.assertLess(setup_completion.index("CVLP_INITIAL_GEOMETRY_REJECTED"), setup_completion.index("[self cvlpRevoke];"))
         self.assertLess(setup_completion.index("[self cvlpRevoke];"), setup_completion.index("didInitializeWithError:geometryError"))
@@ -165,7 +214,7 @@ class FrameworkInitialGeometryTests(unittest.TestCase):
         revoke_end_after = after.index("\n- (BOOL)cvlpPrepareInitialGeometry", revoke_start_after)
         self.assertEqual(before[revoke_start_before:revoke_end_before], after[revoke_start_after:revoke_end_after])
         setup = after[after.index("- (void)setUpAppPresenter {"):]
-        self.assertLess(setup.index("if (self.cvlpRevoked) return;"), setup.index("self.cvlpInitialGeometryPrepared"))
+        self.assertLess(setup.index("if (self.cvlpRevoked || self.cvlpSceneEnded) return;"), setup.index("self.cvlpInitialGeometryPrepared"))
         self.assertEqual(after.count("- (void)setUpAppPresenter {"), 1)
 
     def test_missing_anchor_drift_duplicate_and_reapplication_fail_atomically(self):

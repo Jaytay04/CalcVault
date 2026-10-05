@@ -36,7 +36,7 @@ def transform(sources):
         "        FBScene *scene = self.presenter.scene;\n"
         "        [scene configureParameters:^(FBSMutableSceneParameters *parameters) {",
         "        [self addChildViewController:self.hostingController.sceneViewController];",
-        "- (void)setUpAppPresenter {\n    if (self.cvlpRevoked) return;",
+        "- (void)setUpAppPresenter {\n    if (self.cvlpRevoked || self.cvlpSceneEnded) return;",
     )
     for anchor in anchors:
         _require_once(scene, anchor)
@@ -62,7 +62,7 @@ def transform(sources):
 
     helper = '''- (BOOL)cvlpPrepareInitialGeometry {
     NSAssert(NSThread.isMainThread, @"Initial scene geometry must be captured on main");
-    if (self.cvlpRevoked) return NO;
+    if (self.cvlpRevoked || self.cvlpSceneEnded) return NO;
 #if TARGET_OS_SIMULATOR
     if ([NSProcessInfo.processInfo.environment[@"CVLP_TEST_INVALID_INITIAL_GEOMETRY"] isEqualToString:@"1"]) return NO;
 #endif
@@ -136,9 +136,9 @@ def transform(sources):
     )
     scene = _replace_once(
         scene,
-        "- (void)setUpAppPresenter {\n    if (self.cvlpRevoked) return;",
+        "- (void)setUpAppPresenter {\n    if (self.cvlpRevoked || self.cvlpSceneEnded) return;",
         helper + "- (void)setUpAppPresenter {\n"
-        "    if (self.cvlpRevoked) return;\n"
+        "    if (self.cvlpRevoked || self.cvlpSceneEnded) return;\n"
         "    NSAssert(self.cvlpInitialGeometryPrepared, @\"Initial scene geometry must be prepared before scene setup\");\n"
         "    if (!self.cvlpInitialGeometryPrepared) return;",
     )

@@ -39,14 +39,14 @@ def transform(sources):
         "        [self addChildViewController:self.hostingController.sceneViewController];",
         "    [self.view addSubview:_contentView];",
         "    [self.view.window.windowScene _registerSettingsDiffActionArray:@[self] forKey:self.sceneID];\n}",
-        "- (void)viewWillLayoutSubviews {\n    if (self.cvlpRevoked) return;\n",
+        "- (void)viewWillLayoutSubviews {\n    if (self.cvlpRevoked || self.cvlpSceneEnded) return;\n",
         "        [self.presenter.scene updateSettingsWithBlock:updateSettingsBlock];\n        return;",
         "    } else {\n"
         "        // This method can be called while contentView is nil to set up initial frame\n"
         "        self.view.frame = frame;\n"
         "    }\n}",
         "- (void)updateSettingsWithBlock:(void(^)(UIMutableApplicationSceneSettings *settings))updateSettingsBlock {\n"
-        "    if (self.cvlpRevoked) return;",
+        "    if (self.cvlpRevoked || self.cvlpSceneEnded) return;",
     )
     for anchor in session_anchors:
         _require_once(session, anchor)
@@ -102,7 +102,7 @@ def transform(sources):
         scene,
         "    [self.view.window.windowScene _registerSettingsDiffActionArray:@[self] forKey:self.sceneID];\n}",
         "    [self.view.window.windowScene _registerSettingsDiffActionArray:@[self] forKey:self.sceneID];\n"
-        "    if (!self.cvlpRevoked && self.view.window && !CGRectIsEmpty(self.view.bounds)) {\n"
+        "    if (!self.cvlpRevoked && !self.cvlpSceneEnded && self.view.window && !CGRectIsEmpty(self.view.bounds)) {\n"
         "        self.shouldSkipDebounceOnce = YES;\n"
         "        [self updateFrameWithSettingsBlock:nil];\n"
         '        [self cvlpRecordGeometry:@"attached-setup"];\n'
@@ -110,7 +110,7 @@ def transform(sources):
     )
 
     geometry_methods = '''- (void)cvlpRecordGeometry:(NSString *)phase {
-    if (self.cvlpRevoked || !self.view.window || CGRectIsEmpty(self.view.bounds)) return;
+    if (self.cvlpRevoked || self.cvlpSceneEnded || !self.view.window || CGRectIsEmpty(self.view.bounds)) return;
     UIWindow *window = self.view.window;
     UIInterfaceOrientation orientation = window.windowScene.interfaceOrientation;
     UIApplicationSceneSettings *sceneSettings = (UIApplicationSceneSettings *)self.presenter.scene.settings;
@@ -141,10 +141,10 @@ def transform(sources):
 '''
     scene = _replace_once(
         scene,
-        "- (void)viewWillLayoutSubviews {\n    if (self.cvlpRevoked) return;\n",
+        "- (void)viewWillLayoutSubviews {\n    if (self.cvlpRevoked || self.cvlpSceneEnded) return;\n",
         geometry_methods
         + "- (void)viewWillLayoutSubviews {\n"
-        "    if (self.cvlpRevoked) return;\n"
+        "    if (self.cvlpRevoked || self.cvlpSceneEnded) return;\n"
         "    [super viewWillLayoutSubviews];\n"
         "    if (!self.presenter || !self.view.window || CGRectIsEmpty(self.view.bounds)) return;\n",
     )
@@ -152,7 +152,7 @@ def transform(sources):
         scene,
         "        [self.presenter.scene updateSettingsWithBlock:updateSettingsBlock];\n        return;",
         "        [self.presenter.scene updateSettingsWithBlock:updateSettingsBlock];\n"
-        "        if (!self.cvlpRevoked && self.view.window && !CGRectIsEmpty(self.view.bounds)) {\n"
+        "        if (!self.cvlpRevoked && !self.cvlpSceneEnded && self.view.window && !CGRectIsEmpty(self.view.bounds)) {\n"
         '            [self cvlpRecordGeometry:@"settings-update"];\n'
         "        }\n"
         "        return;",
@@ -167,7 +167,7 @@ def transform(sources):
         "        // This method can be called while contentView is nil to set up initial frame\n"
         "        self.view.frame = frame;\n"
         "    }\n"
-        "    if (!self.cvlpRevoked && self.view.window && !CGRectIsEmpty(self.view.bounds)) {\n"
+        "    if (!self.cvlpRevoked && !self.cvlpSceneEnded && self.view.window && !CGRectIsEmpty(self.view.bounds)) {\n"
         '        [self cvlpRecordGeometry:@"settings-update"];\n'
         "    }\n}",
     )

@@ -40,8 +40,9 @@ def sources():
 }
 @end
 ''',
-        geometry.SCENE_PATH: '''@interface AppSceneViewController()
+geometry.SCENE_PATH: '''@interface AppSceneViewController()
 @property(nonatomic) BOOL cvlpRevoked;
+@property(atomic) BOOL cvlpSceneEnded;
 @property(nonatomic) NSUInteger cvlpPreRevokeAttemptCount;
 - (void)cvlpRevoke;
 @property int resizeDebounceToken;
@@ -57,14 +58,14 @@ def sources():
     [self.view.window.windowScene _registerSettingsDiffActionArray:@[self] forKey:self.sceneID];
 }
 - (void)viewWillLayoutSubviews {
-    if (self.cvlpRevoked) return;
+    if (self.cvlpRevoked || self.cvlpSceneEnded) return;
     /// Existing upstream resize behavior.
     if(_contentView.autoresizingMask != (UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight)) {
         [self updateFrameWithSettingsBlock:nil];
     }
 }
 - (void)updateSettingsWithBlock:(void(^)(UIMutableApplicationSceneSettings *settings))updateSettingsBlock {
-    if (self.cvlpRevoked) return;
+    if (self.cvlpRevoked || self.cvlpSceneEnded) return;
     if(!_hostingController && self.contentView) {
         [self.presenter.scene updateSettingsWithBlock:updateSettingsBlock];
         return;
@@ -94,7 +95,7 @@ class FrameworkGeometryTests(unittest.TestCase):
         self.assertEqual(after["LiveContainer/LCBootstrap.m"], before["LiveContainer/LCBootstrap.m"])
         self.assertIn("if (self.revoked || self.sceneEnded) return;", after[geometry.SESSION_PATH])
         self.assertIn("[self.sceneController cvlpRevoke];", after[geometry.SESSION_PATH])
-        self.assertIn("if (self.cvlpRevoked) return;", after[geometry.SCENE_PATH])
+        self.assertIn("if (self.cvlpRevoked || self.cvlpSceneEnded) return;", after[geometry.SCENE_PATH])
         self.assertIn("fixed framework selection remains upstream", after[geometry.SCENE_PATH])
 
     def test_layout_order_explicit_mask_and_guarded_initial_sync(self):
@@ -112,13 +113,13 @@ class FrameworkGeometryTests(unittest.TestCase):
         self.assertLess(skip_debounce, immediate_sync)
         self.assertIn("sceneViewController.parentViewController == self", scene)
         self.assertIn("self.usesHostingControllerAPI", scene)
-        self.assertIn("if (!self.cvlpRevoked && self.view.window && !CGRectIsEmpty(self.view.bounds))", scene)
+        self.assertIn("if (!self.cvlpRevoked && !self.cvlpSceneEnded && self.view.window && !CGRectIsEmpty(self.view.bounds))", scene)
 
     def test_layout_and_geometry_diagnostics_are_bounded_and_allowlisted(self):
         scene = geometry.transform(sources())[geometry.SCENE_PATH]
         layout = scene[scene.index("- (void)viewWillLayoutSubviews"):
                        scene.index("- (void)updateSettingsWithBlock:")]
-        self.assertLess(layout.index("if (self.cvlpRevoked) return;"), layout.index("[super viewWillLayoutSubviews];"))
+        self.assertLess(layout.index("if (self.cvlpRevoked || self.cvlpSceneEnded) return;"), layout.index("[super viewWillLayoutSubviews];"))
         self.assertIn("!self.presenter || !self.view.window || CGRectIsEmpty(self.view.bounds)", layout)
 
         recorder_start = scene.index("- (void)cvlpRecordGeometry:")
@@ -135,6 +136,7 @@ class FrameworkGeometryTests(unittest.TestCase):
         self.assertIn("removeObjectAtIndex:0", recorder)
         self.assertIn("isEqualToString:geometry", recorder)
         self.assertIn('NSLog(@"CVLP_GEOMETRY %@", sample);', recorder)
+        self.assertIn("if (self.cvlpRevoked || self.cvlpSceneEnded || !self.view.window", recorder)
         self.assertEqual(scene.count("dispatch_after("), sources()[geometry.SCENE_PATH].count("dispatch_after("))
 
     def test_settings_geometry_sampling_occurs_after_assignment_and_has_guards(self):
