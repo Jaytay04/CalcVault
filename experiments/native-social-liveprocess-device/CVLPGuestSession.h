@@ -8,6 +8,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, readonly) UIViewController *viewController;
 @property(nonatomic, readonly) NSString *summary;
 @property(nonatomic, readonly, getter=isSettled) BOOL settled;
+/// Called once when the extension scene ends unexpectedly. Explicit revoke is not an unexpected exit.
+@property(nonatomic, copy, nullable) void (^terminationHandler)(void);
 @property(nonatomic, readonly, getter=isVerificationSignalProbeAvailable) BOOL verificationSignalProbeAvailable;
 /// Default-off native diagnostic. YES means a signal request can be submitted,
 /// not that the OS has acknowledged suspension or media quiescence.

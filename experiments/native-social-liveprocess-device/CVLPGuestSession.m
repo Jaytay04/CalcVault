@@ -19,6 +19,7 @@
 @property(nonatomic, readonly) BOOL cvlpHasFirstPreRevokeLivenessSample;
 @property(nonatomic, readonly) CVLPLivenessSample cvlpLatestPreRevokeLivenessSample;
 @property(nonatomic, readonly) CVLPLivenessSample cvlpProcessGroupPresenceSample;
+@property(nonatomic, readonly) NSString *cvlpLifecycleTraceSummary;
 @property(nonatomic) BOOL cvlpSyntheticTargetVerified;
 - (BOOL)cvlpRequestVerificationSignal:(int)signal;
 @property(nonatomic) BOOL cvlpNativeSignalDiagnosticTargetVerified;
@@ -35,6 +36,10 @@
 @property(nonatomic) BOOL revoked;
 @property(nonatomic) BOOL callbackDelivered;
 @property(nonatomic) BOOL exitObserved;
+@property(nonatomic) BOOL sceneEnded;
+@property(nonatomic) BOOL unexpectedSceneExitObserved;
+@property(nonatomic) BOOL terminationCallbackDelivered;
+@property(nonatomic, copy, nullable) void (^storedTerminationHandler)(void);
 @property(nonatomic) int observedPID;
 @property(nonatomic, copy) NSString *launchResult;
 @property(nonatomic) CVLPLivenessSample postcheckLivenessSample;
@@ -51,10 +56,18 @@
 @property(nonatomic) BOOL nativeSignalDiagnosticStopSubmitted;
 @property(nonatomic) BOOL nativeSignalDiagnosticContinueAttempted;
 @property(nonatomic) BOOL nativeSignalDiagnosticContinueSubmitted;
+@property(nonatomic, strong) NSMutableArray<NSString *> *diagnosticEvents;
+@property(nonatomic, strong) NSMutableArray *hostLifecycleObservers;
+@property(nonatomic) NSTimeInterval diagnosticStartUptime;
 - (BOOL)syntheticTargetIdentityIsVerified;
 - (BOOL)verificationSignalRequestIsReady;
 - (BOOL)nativeSignalDiagnosticIdentityIsVerified;
 - (BOOL)nativeSignalDiagnosticRequestIsReady;
+- (void)recordDiagnosticPhase:(NSString *)phase reason:(NSString *)reason
+                       sample:(CVLPLivenessSample)sample hasSample:(BOOL)hasSample;
+- (void)installHostLifecycleObservers;
+- (void)removeHostLifecycleObservers;
+- (void)deliverUnexpectedTerminationIfReady;
 @end
 
 static NSString *CVLPSyntheticBundleIdentifier(void) {
@@ -88,6 +101,29 @@ static NSString *CVLPDescribeLivenessSample(CVLPLivenessSample sample) {
             sample.groupErrorNumber, CVLPLivenessClassificationName(sample.groupClassification)];
 }
 
+static NSString *CVLPDiagnosticSampleClass(CVLPLivenessSample sample, BOOL hasSample) {
+    if (!hasSample) return @"not-sampled";
+    if (CVLPProcessPresenceObserved(sample)) return @"present";
+    if (CVLPProcessAbsenceObserved(sample)) return @"absent";
+    return @"unproved";
+}
+
+static NSString *CVLPDiagnosticAllowlistedReason(NSString *phase, NSString *reason) {
+    NSDictionary<NSString *, NSArray<NSString *> *> *allowlist = @{
+        @"STOP": @[@"before", @"before-unproved", @"after-submitted", @"after-rejected"],
+        @"CONT": @[@"before", @"before-unproved", @"after-submitted", @"after-rejected"],
+        @"host": @[@"inactive", @"background", @"active"],
+        @"scene": @[@"unexpected-exit"],
+        @"revoke": @[@"explicit"],
+        @"reject": @[@"invalid-signal", @"stop-not-ready", @"stop-unproved",
+                      @"cont-not-paused", @"cont-repeated", @"cont-not-ready",
+                      @"cont-unproved", @"scene-gate"]
+    };
+    NSArray<NSString *> *reasons = allowlist[phase];
+    if (!reasons) return @"other";
+    return [reasons containsObject:reason] ? reason : @"other";
+}
+
 @implementation CVLPGuestSession
 
 - (instancetype)init {
@@ -95,12 +131,90 @@ static NSString *CVLPDescribeLivenessSample(CVLPLivenessSample sample) {
     if (self) {
         _hostController = [UIViewController new];
         _launchResult = @"not started";
+        _diagnosticEvents = [NSMutableArray arrayWithCapacity:48];
+        _hostLifecycleObservers = [NSMutableArray arrayWithCapacity:3];
+        _diagnosticStartUptime = NSProcessInfo.processInfo.systemUptime;
     }
     return self;
 }
 
 - (UIViewController *)viewController {
     return self.hostController;
+}
+
+- (void (^ _Nullable)(void))terminationHandler {
+    return self.storedTerminationHandler;
+}
+
+- (void)setTerminationHandler:(void (^ _Nullable)(void))terminationHandler {
+    NSAssert(NSThread.isMainThread, @"Guest termination handler must be set on main");
+    if (self.revoked || self.terminationCallbackDelivered) {
+        self.storedTerminationHandler = nil;
+        return;
+    }
+    self.storedTerminationHandler = [terminationHandler copy];
+    [self deliverUnexpectedTerminationIfReady];
+}
+
+- (void)deliverUnexpectedTerminationIfReady {
+    NSAssert(NSThread.isMainThread, @"Guest termination callback must run on main");
+    if (!self.unexpectedSceneExitObserved || self.terminationCallbackDelivered || !self.storedTerminationHandler) return;
+    self.terminationCallbackDelivered = YES;
+    void (^callback)(void) = self.storedTerminationHandler;
+    self.storedTerminationHandler = nil;
+    callback();
+}
+
+- (void)recordDiagnosticPhase:(NSString *)phase reason:(NSString *)reason
+                       sample:(CVLPLivenessSample)sample hasSample:(BOOL)hasSample {
+    NSAssert(NSThread.isMainThread, @"Guest diagnostics must be recorded on main");
+    NSArray<NSString *> *phases = @[@"STOP", @"CONT", @"host", @"scene", @"revoke", @"reject"];
+    NSString *safePhase = [phases containsObject:phase] ? phase : @"reject";
+    NSString *safeReason = CVLPDiagnosticAllowlistedReason(safePhase, reason);
+    NSTimeInterval elapsed = MAX(0, NSProcessInfo.processInfo.systemUptime - self.diagnosticStartUptime);
+    unsigned long long elapsedMilliseconds = (unsigned long long)(elapsed * 1000.0);
+    pid_t pid = hasSample ? sample.pid : (pid_t)self.observedPID;
+    NSString *entry = [NSString stringWithFormat:@"t=%llums phase=%@ reason=%@ pid=%d sample=%@",
+                       elapsedMilliseconds, safePhase, safeReason, (int)pid,
+                       CVLPDiagnosticSampleClass(sample, hasSample)];
+    [self.diagnosticEvents addObject:entry];
+    if (self.diagnosticEvents.count > 48) [self.diagnosticEvents removeObjectAtIndex:0];
+}
+
+- (void)installHostLifecycleObservers {
+    NSAssert(NSThread.isMainThread, @"Host lifecycle observers must be installed on main");
+    if (self.hostLifecycleObservers.count > 0) return;
+    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+    __weak typeof(self) weakSelf = self;
+    NSArray<NSArray<NSString *> *> *notifications = @[
+        @[UIApplicationWillResignActiveNotification, @"inactive"],
+        @[UIApplicationDidEnterBackgroundNotification, @"background"],
+        @[UIApplicationDidBecomeActiveNotification, @"active"]
+    ];
+    for (NSArray<NSString *> *entry in notifications) {
+        id observer = [center addObserverForName:entry[0]
+                                         object:UIApplication.sharedApplication
+                                          queue:NSOperationQueue.mainQueue
+                                     usingBlock:^(NSNotification *notification) {
+            CVLPGuestSession *session = weakSelf;
+            if (!session) return;
+            CVLPLivenessSample sample = {0};
+            [session recordDiagnosticPhase:@"host" reason:entry[1] sample:sample hasSample:NO];
+        }];
+        [self.hostLifecycleObservers addObject:observer];
+    }
+}
+
+- (void)removeHostLifecycleObservers {
+    NSAssert(NSThread.isMainThread, @"Host lifecycle observers must be removed on main");
+    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+    for (id observer in self.hostLifecycleObservers.copy) [center removeObserver:observer];
+    [self.hostLifecycleObservers removeAllObjects];
+}
+
+- (void)dealloc {
+    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+    for (id observer in self.hostLifecycleObservers.copy) [center removeObserver:observer];
 }
 
 - (void)startWithCompletion:(void (^)(BOOL))completion {
@@ -111,6 +225,7 @@ static NSString *CVLPDescribeLivenessSample(CVLPLivenessSample sample) {
     }
     self.started = YES;
     self.completion = completion;
+    [self installHostLifecycleObservers];
     self.launchResult = @"extension request pending";
     NSString *bundleIdentifier = @"org.example.syntheticnativeguest.app";
     NSString *dataUUID = @"synthetic-liveprocess-device";
@@ -154,7 +269,7 @@ static NSString *CVLPDescribeLivenessSample(CVLPLivenessSample sample) {
 
 - (BOOL)verificationSignalRequestIsReady {
     NSAssert(NSThread.isMainThread, @"Verification signal probe must run on main");
-    return self.started && !self.revoked && self.sceneController &&
+    return self.started && !self.revoked && !self.sceneEnded && self.sceneController &&
         self.sceneController.cvlpBeginCompleted && self.sceneController.cvlpObservedPID > 0 &&
         self.sceneController.cvlpObservedPID == self.observedPID &&
         self.sceneController.cvlpSyntheticTargetVerified && [self syntheticTargetIdentityIsVerified] &&
@@ -192,7 +307,7 @@ static NSString *CVLPDescribeLivenessSample(CVLPLivenessSample sample) {
 
 - (BOOL)nativeSignalDiagnosticRequestIsReady {
     NSAssert(NSThread.isMainThread, @"Native signal diagnostic must run on main");
-    return self.started && !self.revoked && self.sceneController &&
+    return self.started && !self.revoked && !self.sceneEnded && self.sceneController &&
         self.sceneController.cvlpBeginCompleted && self.sceneController.cvlpObservedPID > 0 &&
         self.sceneController.cvlpObservedPID == self.observedPID &&
         self.sceneController.cvlpNativeSignalDiagnosticTargetVerified &&
@@ -207,20 +322,63 @@ static NSString *CVLPDescribeLivenessSample(CVLPLivenessSample sample) {
 - (BOOL)requestNativeSignalDiagnostic:(int)signal {
     NSAssert(NSThread.isMainThread, @"Native signal diagnostic must run on main");
     if (signal == SIGSTOP) {
-        if (!self.isNativeSignalDiagnosticAvailable) return NO;
+        if (!self.isNativeSignalDiagnosticAvailable) {
+            CVLPLivenessSample unavailable = {0};
+            [self recordDiagnosticPhase:@"reject" reason:@"stop-not-ready" sample:unavailable hasSample:NO];
+            return NO;
+        }
         self.nativeSignalDiagnosticStopAttempted = YES;
+        CVLPLivenessSample before = CVLPSampleLiveness((pid_t)self.sceneController.cvlpObservedPID);
+        [self recordDiagnosticPhase:@"STOP" reason:@"before" sample:before hasSample:YES];
+        if (!CVLPProcessPresenceObserved(before)) {
+            [self recordDiagnosticPhase:@"STOP" reason:@"before-unproved" sample:before hasSample:YES];
+            [self recordDiagnosticPhase:@"reject" reason:@"stop-unproved" sample:before hasSample:YES];
+            [self recordDiagnosticPhase:@"STOP" reason:@"after-rejected" sample:before hasSample:YES];
+            return NO;
+        }
         BOOL submitted = [self.sceneController cvlpRequestNativeSignalDiagnostic:signal];
         self.nativeSignalDiagnosticStopSubmitted = submitted;
+        CVLPLivenessSample after = CVLPSampleLiveness((pid_t)self.sceneController.cvlpObservedPID);
+        [self recordDiagnosticPhase:@"STOP" reason:(submitted ? @"after-submitted" : @"after-rejected")
+                             sample:after hasSample:YES];
+        if (!submitted) [self recordDiagnosticPhase:@"reject" reason:@"scene-gate" sample:after hasSample:YES];
         return submitted;
     }
     if (signal == SIGCONT) {
-        if (!self.nativeSignalDiagnosticStopSubmitted || self.nativeSignalDiagnosticContinueAttempted ||
-            ![self nativeSignalDiagnosticRequestIsReady]) return NO;
+        if (!self.nativeSignalDiagnosticStopSubmitted) {
+            CVLPLivenessSample unavailable = {0};
+            [self recordDiagnosticPhase:@"reject" reason:@"cont-not-paused" sample:unavailable hasSample:NO];
+            return NO;
+        }
+        if (self.nativeSignalDiagnosticContinueAttempted) {
+            CVLPLivenessSample unavailable = {0};
+            [self recordDiagnosticPhase:@"reject" reason:@"cont-repeated" sample:unavailable hasSample:NO];
+            return NO;
+        }
+        if (![self nativeSignalDiagnosticRequestIsReady]) {
+            CVLPLivenessSample unavailable = {0};
+            [self recordDiagnosticPhase:@"reject" reason:@"cont-not-ready" sample:unavailable hasSample:NO];
+            return NO;
+        }
         self.nativeSignalDiagnosticContinueAttempted = YES;
+        CVLPLivenessSample before = CVLPSampleLiveness((pid_t)self.sceneController.cvlpObservedPID);
+        [self recordDiagnosticPhase:@"CONT" reason:@"before" sample:before hasSample:YES];
+        if (!CVLPProcessPresenceObserved(before)) {
+            [self recordDiagnosticPhase:@"CONT" reason:@"before-unproved" sample:before hasSample:YES];
+            [self recordDiagnosticPhase:@"reject" reason:@"cont-unproved" sample:before hasSample:YES];
+            [self recordDiagnosticPhase:@"CONT" reason:@"after-rejected" sample:before hasSample:YES];
+            return NO;
+        }
         BOOL submitted = [self.sceneController cvlpRequestNativeSignalDiagnostic:signal];
         self.nativeSignalDiagnosticContinueSubmitted = submitted;
+        CVLPLivenessSample after = CVLPSampleLiveness((pid_t)self.sceneController.cvlpObservedPID);
+        [self recordDiagnosticPhase:@"CONT" reason:(submitted ? @"after-submitted" : @"after-rejected")
+                             sample:after hasSample:YES];
+        if (!submitted) [self recordDiagnosticPhase:@"reject" reason:@"scene-gate" sample:after hasSample:YES];
         return submitted;
     }
+    CVLPLivenessSample unavailable = {0};
+    [self recordDiagnosticPhase:@"reject" reason:@"invalid-signal" sample:unavailable hasSample:NO];
     return NO;
 }
 
@@ -256,6 +414,10 @@ static NSString *CVLPDescribeLivenessSample(CVLPLivenessSample sample) {
     NSAssert(NSThread.isMainThread, @"Guest revocation must run on main");
     if (self.revoked) return;
     self.revoked = YES;
+    CVLPLivenessSample unavailable = {0};
+    [self recordDiagnosticPhase:@"revoke" reason:@"explicit" sample:unavailable hasSample:NO];
+    [self removeHostLifecycleObservers];
+    self.terminationHandler = nil;
     self.hostController.view.hidden = YES;
     self.sceneController.view.hidden = YES;
     [self.sceneController cvlpRevoke];
@@ -322,9 +484,16 @@ static NSString *CVLPDescribeLivenessSample(CVLPLivenessSample sample) {
         groupShutdownObserved ? @"observed" : @"unproved"];
     diagnostics = [[diagnostics stringByAppendingString:syntheticTarget] stringByAppendingString:signalProbe];
     diagnostics = [diagnostics stringByAppendingFormat:
-        @"\nNative pause diagnostic v1: STOP attempted=%d submitted=%d; CONT attempted=%d submitted=%d; suspension/media stop/resumption unproved; real verification hold disabled",
+        @"\nNative pause diagnostic v2: STOP attempted=%d submitted=%d; CONT attempted=%d submitted=%d; sceneEnded=%d unexpected=%d; suspension/media stop/resumption unproved; real verification hold disabled",
         self.nativeSignalDiagnosticStopAttempted, self.nativeSignalDiagnosticStopSubmitted,
-        self.nativeSignalDiagnosticContinueAttempted, self.nativeSignalDiagnosticContinueSubmitted];
+        self.nativeSignalDiagnosticContinueAttempted, self.nativeSignalDiagnosticContinueSubmitted,
+        self.sceneEnded, self.unexpectedSceneExitObserved];
+    NSString *eventRing = self.diagnosticEvents.count > 0 ?
+        [self.diagnosticEvents componentsJoinedByString:@"\n"] : @"empty";
+    diagnostics = [diagnostics stringByAppendingFormat:
+        @"\nNative diagnostic event ring (newest 48; %@):\n%@", @(self.diagnosticEvents.count), eventRing];
+    NSString *sceneTrace = self.sceneController.cvlpLifecycleTraceSummary ?: @"unavailable";
+    diagnostics = [diagnostics stringByAppendingFormat:@"\nExtension lifecycle trace (bounded):\n%@", sceneTrace];
     if (!self.started) return [@"Synthetic guest: not started; settled" stringByAppendingString:diagnostics];
     NSString *request = self.sceneController.cvlpBeginCompleted ? @"completed" : @"pending";
     NSString *process = self.exitObserved ? @"exit observed (ESRCH)" :
@@ -338,12 +507,12 @@ static NSString *CVLPDescribeLivenessSample(CVLPLivenessSample sample) {
 
 - (void)appSceneVC:(AppSceneViewController *)vc didInitializeWithError:(NSError *)error {
     NSAssert(NSThread.isMainThread, @"Scene delegate must run on main");
+    if (self.revoked || self.sceneEnded) return;
     if (error) {
         self.launchResult = @"launch failed";
         [self deliverCompletion:NO];
         return;
     }
-    if (self.revoked) return;
     self.observedPID = vc.pid;
     self.launchResult = vc.pid > 0 ? @"extension launched" : @"launch PID unavailable";
     [self deliverCompletion:vc.pid > 0];
@@ -351,15 +520,21 @@ static NSString *CVLPDescribeLivenessSample(CVLPLivenessSample sample) {
 
 - (void)appSceneVCAppDidExit:(AppSceneViewController *)vc {
     NSAssert(NSThread.isMainThread, @"Scene delegate must run on main");
+    if (self.sceneEnded) return;
+    self.sceneEnded = YES;
     if (!self.revoked) {
+        self.unexpectedSceneExitObserved = YES;
+        CVLPLivenessSample sample = CVLPSampleLiveness((pid_t)vc.cvlpObservedPID);
+        [self recordDiagnosticPhase:@"scene" reason:@"unexpected-exit" sample:sample hasSample:YES];
         self.launchResult = @"scene ended";
+        [self deliverUnexpectedTerminationIfReady];
         [self deliverCompletion:NO];
     }
     [self observeExit];
 }
 
 - (void)appSceneVCWillActivateScene:(AppSceneViewController *)vc {
-    if (self.revoked) return;
+    if (self.revoked || self.sceneEnded) return;
     [vc updateSettingsWithBlock:^(UIMutableApplicationSceneSettings *settings) {
         UIEdgeInsets insets = vc.view.safeAreaInsets;
         settings.peripheryInsets = insets;
@@ -376,7 +551,7 @@ static NSString *CVLPDescribeLivenessSample(CVLPLivenessSample sample) {
 didUpdateFromSettings:(UIMutableApplicationSceneSettings *)settings
  transitionContext:(id)context
 lifecycleActionType:(uint32_t)actionType {
-    if (self.revoked || !vc.presenter) return;
+    if (self.revoked || self.sceneEnded || !vc.presenter) return;
     settings.interruptionPolicy = 0;
     [vc.presenter.scene updateSettings:settings withTransitionContext:context completion:nil];
 }

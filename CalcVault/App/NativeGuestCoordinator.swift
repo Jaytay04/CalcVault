@@ -13,6 +13,13 @@ public protocol NativeGuestRuntime: AnyObject {
     func revoke()
 }
 
+/// An optional terminal-state signal for runtimes that can end independently
+/// of the host. The callback must be delivered on the main actor.
+@MainActor
+public protocol NativeGuestTerminationReportingRuntime: NativeGuestRuntime {
+    var terminationHandler: (@MainActor () -> Void)? { get set }
+}
+
 /// A runtime that can briefly suspend and later resume a verified guest while
 /// the host performs a bounded, user-requested verification flow. A successful
 /// suspension callback must confirm that guest content and active media are
@@ -105,6 +112,7 @@ public final class NativeGuestCoordinator: ObservableObject {
     private var activeCheckTask: Task<Void, Never>?
     private var presentationRequest: CheckRequest?
     private var runtime: (any NativeGuestRuntime)?
+    private var runtimeInstanceToken: UUID?
     private var runtimeAttemptConsumed = false
     private var runtimeStartAttempted = false
     private var runtimeStartPending = false
@@ -576,11 +584,12 @@ public final class NativeGuestCoordinator: ObservableObject {
             return
         }
 
+        let authorizationRequest = activeAuthorization?.request
         activeCheckTask?.cancel()
         activeCheckTask = nil
         activeRequest = nil
-        if let request = activeAuthorization?.request { endAuthorization(request) }
         endRuntimePresentation()
+        if let authorizationRequest { endAuthorization(authorizationRequest) }
     }
 
     /// Call after the full-screen host has attached the authorized controller.
@@ -795,17 +804,28 @@ public final class NativeGuestCoordinator: ObservableObject {
         do {
             let createdRuntime = try runtimeFactory()
             runtime = createdRuntime
+            let runtimeToken = UUID()
+            runtimeInstanceToken = runtimeToken
+            runtimeRevoked = false
+            if let reportingRuntime = createdRuntime as? any NativeGuestTerminationReportingRuntime {
+                reportingRuntime.terminationHandler = { [weak self] in
+                    self?.runtimeDidTerminate(token: runtimeToken)
+                }
+            }
+
+            // Setting the reporting callback is injected runtime code and may
+            // synchronously report termination. Do not continue into a stale
+            // presentation path if that happened during installation.
+            guard runtimeInstanceToken == runtimeToken, !runtimeRevoked else { return }
             guard isValid(request.session) else {
                 showingGuest = false
                 presentationRequest = nil
                 runtimeStartPending = false
-                createdRuntime.revoke()
-                runtimeRevoked = true
                 state = .ended
+                revokeRuntime(createdRuntime, evenIfPreviouslyRevoked: true)
                 return
             }
 
-            runtimeRevoked = false
             runtimeStartAttempted = false
             runtimeStartPending = false
             presentationRequest = request
@@ -824,12 +844,12 @@ public final class NativeGuestCoordinator: ObservableObject {
 
     private func cancelCheck(_ request: CheckRequest) {
         guard activeRequest == request else { return }
-        endAuthorization(request)
         activeRequest = nil
         activeCheckTask = nil
         state = (verificationHandoff != nil || signalDiagnosticHandoff != nil)
             ? .holding
             : (runtimeFactory == nil ? .unavailable : .idle)
+        endAuthorization(request)
     }
 
     private func runtimeDidStart(_ request: CheckRequest, started: Bool) {
@@ -849,10 +869,63 @@ public final class NativeGuestCoordinator: ObservableObject {
         } else {
             launchFailure = "stage=runtime-start; reason=request-rejected"
             showingGuest = false
-            runtime?.revoke()
-            runtimeRevoked = true
             state = .blocked
+            if let runtime { revokeRuntime(runtime) }
         }
+    }
+
+    private func runtimeDidTerminate(token: UUID) {
+        guard runtimeInstanceToken == token else { return }
+
+        let endedRuntime = runtime
+            ?? verificationHandoff?.runtime
+            ?? signalDiagnosticHandoff?.runtime
+        guard let endedRuntime else {
+            runtimeInstanceToken = nil
+            return
+        }
+
+        let heldLease = verificationHandoff?.lease ?? signalDiagnosticHandoff?.lease
+
+        // Revoke presentation, request, resume, and callback authority before
+        // asking any injected object to end or revoke itself.
+        runtimeInstanceToken = nil
+        showingGuest = false
+        presentationRequest = nil
+        runtimeStartPending = false
+        activeRequest = nil
+        activeCheckTask?.cancel()
+        activeCheckTask = nil
+        verificationOperationID = nil
+        verificationHandoff = nil
+        signalDiagnosticHandoff = nil
+        handoffDeadlineTask?.cancel()
+        handoffDeadlineTask = nil
+        signalDiagnosticDeadlineTask?.cancel()
+        signalDiagnosticDeadlineTask = nil
+
+        // Keep the terminated runtime only for its existing authenticated
+        // diagnostic summary. All controller access is now revoked.
+        runtime = endedRuntime
+        runtimeRevoked = true
+        launchFailure = "stage=runtime-termination; reason=guest-ended"
+        state = .ended
+
+        if let request = activeAuthorization?.request { endAuthorization(request) }
+        heldLease?.end()
+        revokeRuntime(endedRuntime, evenIfPreviouslyRevoked: true)
+    }
+
+    private func revokeRuntime(
+        _ runtime: any NativeGuestRuntime,
+        evenIfPreviouslyRevoked: Bool = false
+    ) {
+        // A runtime may synchronously call its terminal handler from revoke().
+        // Invalidate the instance token before crossing that boundary.
+        runtimeInstanceToken = nil
+        guard evenIfPreviouslyRevoked || !runtimeRevoked else { return }
+        runtimeRevoked = true
+        runtime.revoke()
     }
 
     private func verificationSuspended(token: UUID, suspended: Bool) {
@@ -909,8 +982,8 @@ public final class NativeGuestCoordinator: ObservableObject {
         runtimeStartPending = false
         runtimeStartAttempted = true
         launchFailure = nil
-        handoff.lease.end()
         state = .running
+        handoff.lease.end()
     }
 
     private func handoffLeaseDidEnd(_ token: UUID) {
@@ -927,6 +1000,8 @@ public final class NativeGuestCoordinator: ObservableObject {
         guard let handoff = signalDiagnosticHandoff else { return }
 
         // Invalidate every public and asynchronous authority before adapter code.
+        let authorizationRequest = activeAuthorization?.request
+        runtimeInstanceToken = nil
         signalDiagnosticHandoff = nil
         signalDiagnosticDeadlineTask?.cancel()
         signalDiagnosticDeadlineTask = nil
@@ -937,14 +1012,14 @@ public final class NativeGuestCoordinator: ObservableObject {
         activeCheckTask?.cancel()
         activeCheckTask = nil
         activeRequest = nil
-        if let request = activeAuthorization?.request { endAuthorization(request) }
         runtimeRevoked = true
-        handoff.lease.end()
-        handoff.runtime.revoke()
         launchFailure = reason == "ended"
             ? nil
             : "stage=signal-diagnostic; reason=" + reason
         state = .ended
+        if let authorizationRequest { endAuthorization(authorizationRequest) }
+        handoff.lease.end()
+        revokeRuntime(handoff.runtime, evenIfPreviouslyRevoked: true)
     }
 
     private func endVerificationHandoff(reason: String) {
@@ -952,6 +1027,8 @@ public final class NativeGuestCoordinator: ObservableObject {
 
         // Revoke authority and invalidate every callback before calling any
         // injected cleanup code, which may synchronously notify the coordinator.
+        let authorizationRequest = activeAuthorization?.request
+        runtimeInstanceToken = nil
         verificationHandoff = nil
         verificationOperationID = nil
         handoffDeadlineTask?.cancel()
@@ -964,28 +1041,30 @@ public final class NativeGuestCoordinator: ObservableObject {
         activeCheckTask?.cancel()
         activeCheckTask = nil
         activeRequest = nil
-        if let request = activeAuthorization?.request { endAuthorization(request) }
 
         runtimeRevoked = true
-        handoff.lease.end()
-        handoff.runtime.revoke()
         if reason == "ended" {
             launchFailure = nil
         } else {
             launchFailure = "stage=verification-handoff; reason=" + reason
         }
         state = .ended
+        if let authorizationRequest { endAuthorization(authorizationRequest) }
+        handoff.lease.end()
+        revokeRuntime(handoff.runtime, evenIfPreviouslyRevoked: true)
     }
 
     private func endRuntimePresentation() {
+        let runtimeToRevoke = runtime
         showingGuest = false
         presentationRequest = nil
         runtimeStartPending = false
-        runtime?.revoke()
-        runtimeRevoked = runtime != nil
+        runtimeInstanceToken = nil
+        if runtimeToRevoke != nil { runtimeRevoked = true }
         if runtimeAttemptConsumed {
             state = .ended
         }
+        runtimeToRevoke?.revoke()
     }
 
     private func invalidateForLifecycleTransition() {
@@ -997,14 +1076,15 @@ public final class NativeGuestCoordinator: ObservableObject {
                 return
             }
 
+            let authorizationRequest = activeAuthorization?.request
             showingGuest = false
             presentationRequest = nil
             runtimeStartPending = false
-            if let request = activeAuthorization?.request { endAuthorization(request) }
             activeCheckTask?.cancel()
             activeCheckTask = nil
             activeRequest = nil
             state = .holding
+            if let authorizationRequest { endAuthorization(authorizationRequest) }
             return
         }
 
@@ -1017,34 +1097,36 @@ public final class NativeGuestCoordinator: ObservableObject {
                 return
             }
 
+            let authorizationRequest = activeAuthorization?.request
             showingGuest = false
             presentationRequest = nil
             runtimeStartPending = false
             verificationOperationID = nil
-
-            if let request = activeAuthorization?.request { endAuthorization(request) }
             activeCheckTask?.cancel()
             activeCheckTask = nil
             activeRequest = nil
             state = .holding
+            if let authorizationRequest { endAuthorization(authorizationRequest) }
 
             return
         }
 
-        // Hide access before invoking the adapter's revoke implementation.
+        // Retry the idempotent revoke for every lifecycle transition. The
+        // lifecycle publishes `.locking` and `.calculatorLocked` separately.
+        let authorizationRequest = activeAuthorization?.request
+        let runtimeToRevoke = runtime
         showingGuest = false
         presentationRequest = nil
         runtimeStartPending = false
-        if let runtime {
-            runtime.revoke()
-            runtimeRevoked = true
-        }
+        runtimeInstanceToken = nil
+        if runtimeToRevoke != nil { runtimeRevoked = true }
 
-        if let request = activeAuthorization?.request { endAuthorization(request) }
         activeCheckTask?.cancel()
         activeCheckTask = nil
         activeRequest = nil
         state = runtimeAttemptConsumed ? .ended : (runtimeFactory == nil ? .unavailable : .idle)
+        if let authorizationRequest { endAuthorization(authorizationRequest) }
+        runtimeToRevoke?.revoke()
     }
 
     private func validSessionContext() -> SessionContext? {

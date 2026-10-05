@@ -49,9 +49,10 @@ private final class IntegrationAppDelegate: UIResponder, UIApplicationDelegate {
 }
 
 @MainActor
-private final class IntegrationRuntime: NativeGuestSignalDiagnosticRuntime {
+private final class IntegrationRuntime: NativeGuestSignalDiagnosticRuntime, NativeGuestTerminationReportingRuntime {
     private let session: CVLPGuestSession
     private let profile: NativeGuestIntegrationProfile
+    private var terminationCallback: (@MainActor () -> Void)?
     init() throws {
         guard let profile = NativeGuestIntegrationProfile.current else {
             throw NativeGuestPreparationFailure.immutableContract
@@ -66,6 +67,19 @@ private final class IntegrationRuntime: NativeGuestSignalDiagnosticRuntime {
         session = CVLPGuestSession()
     }
     var viewController: UIViewController { session.viewController }
+    var terminationHandler: (@MainActor () -> Void)? {
+        get { terminationCallback }
+        set {
+            terminationCallback = newValue
+            guard newValue != nil else {
+                session.terminationHandler = nil
+                return
+            }
+            session.terminationHandler = { [weak self] in
+                MainActor.assumeIsolated { self?.terminationCallback?() }
+            }
+        }
+    }
     var summary: String { profile.title + "\n\n" + session.summary + "\n\n" + CVLPProbe.hostSummary() }
     func start(completion: @escaping @MainActor (Bool) -> Void) {
         session.start { success in

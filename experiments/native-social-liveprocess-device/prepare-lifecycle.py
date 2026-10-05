@@ -41,6 +41,7 @@ def main() -> None:
 @interface AppSceneViewController()
 - (BOOL)cvlpRequestVerificationSignal:(int)signal;
 @property(nonatomic) BOOL cvlpRevoked;
+@property(atomic) BOOL cvlpSceneEnded;
 @property(nonatomic) BOOL cvlpSyntheticTargetVerified;
 @property(nonatomic) BOOL cvlpNativeSignalDiagnosticTargetVerified;
 - (BOOL)cvlpRequestNativeSignalDiagnostic:(int)signal;
@@ -55,7 +56,11 @@ def main() -> None:
 @property(nonatomic) CVLPLivenessSample cvlpProcessGroupPresenceSample;
 @property(nonatomic) NSUInteger cvlpPreRevokeAttemptCount;
 - (void)cvlpRevoke;
-@property int resizeDebounceToken;''')
+@property int resizeDebounceToken;
+@property(nonatomic, strong) NSMutableArray<NSString *> *cvlpLifecycleTrace;
+@property(nonatomic) NSTimeInterval cvlpTraceStartUptime;
+- (void)cvlpTracePhase:(NSString *)phase reason:(NSString *)reason;
+- (NSString *)cvlpLifecycleTraceSummary;''')
     replace_once(scene, '#import "UIKitPrivate+MultitaskSupport.h"',
                  '''#import "UIKitPrivate+MultitaskSupport.h"
 #import "../LiveContainer/CVLPLiveness.h"
@@ -89,12 +94,17 @@ static void CVLPLogLivenessSample(NSString *phase, CVLPLivenessSample sample) {
         }
     }];''', '''    [_extension setRequestCancellationBlock:^(NSUUID *uuid, NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
+            [weakSelf cvlpTracePhase:@"extension" reason:@"cancellation"];
             [weakSelf appTerminationCleanUp];
-            if (!weakSelf.cvlpRevoked) [weakSelf.delegate appSceneVC:weakSelf didInitializeWithError:error];
+            [weakSelf.delegate appSceneVC:weakSelf didInitializeWithError:error];
         });
     }];
+    [self cvlpTracePhase:@"extension" reason:@"interruption-initial-registration"];
     [_extension setRequestInterruptionBlock:^(NSUUID *uuid) {
-        dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf appTerminationCleanUp]; });
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [weakSelf cvlpTracePhase:@"extension" reason:@"interruption-initial-callback"];
+            [weakSelf appTerminationCleanUp];
+        });
     }];
     [_extension beginExtensionRequestWithInputItems:@[item] completion:^(NSUUID *identifier) {
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -102,6 +112,7 @@ static void CVLPLogLivenessSample(NSString *phase, CVLPLivenessSample sample) {
                 self.identifier = identifier;
                 self.pid = [self.extension pidForRequestIdentifier:identifier];
                 self.cvlpObservedPID = self.pid;
+                if (self.pid <= 0) [self cvlpTracePhase:@"process" reason:@"pid-unavailable"];
                 if (!self.cvlpHasLaunchLivenessSample) {
                     self.cvlpLaunchLivenessSample = CVLPSampleLiveness((pid_t)self.pid);
                     self.cvlpHasLaunchLivenessSample = YES;
@@ -110,7 +121,7 @@ static void CVLPLogLivenessSample(NSString *phase, CVLPLivenessSample sample) {
             }
             dispatch_block_t handleCompletion = ^{
                 self.cvlpBeginCompleted = YES;
-                if (self.cvlpRevoked) {
+                if (self.cvlpRevoked || self.cvlpSceneEnded) {
                     NSLog(@"CVLP_LIFECYCLE_LATE_COMPLETION_REJECTED");
                     [self cvlpRevoke];
                     return;
@@ -120,6 +131,7 @@ static void CVLPLogLivenessSample(NSString *phase, CVLPLivenessSample sample) {
                     [delegate appSceneVC:self didInitializeWithError:nil];
                     if (!self.cvlpRevoked) [self setUpAppPresenter];
                 } else {
+                    [self cvlpTracePhase:@"process" reason:@"missing-process-callback"];
                     NSError* error = [NSError errorWithDomain:@"LiveProcess" code:2 userInfo:@{NSLocalizedDescriptionKey: @"Failed to start app. Child process has unexpectedly crashed"}];
                     [delegate appSceneVC:self didInitializeWithError:error];
                 }
@@ -133,10 +145,51 @@ static void CVLPLogLivenessSample(NSString *phase, CVLPLivenessSample sample) {
             handleCompletion();
         });
     }];''')
-    replace_once(scene, '- (void)setUpAppPresenter {', '''- (BOOL)cvlpRequestVerificationSignal:(int)signal {
+    replace_once(scene, '''    [self.extension setRequestInterruptionBlock:^(NSUUID *uuid) {
+        [weakSelf appTerminationCleanUp];
+    }];''', '''    [self cvlpTracePhase:@"extension" reason:@"interruption-presenter-registration"];
+    [self.extension setRequestInterruptionBlock:^(NSUUID *uuid) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [weakSelf cvlpTracePhase:@"extension" reason:@"interruption-presenter-callback"];
+            [weakSelf appTerminationCleanUp];
+        });
+    }];''')
+    replace_once(scene, '- (void)setUpAppPresenter {', '''- (void)cvlpTracePhase:(NSString *)phase reason:(NSString *)reason {
+    if (!NSThread.isMainThread) {
+        dispatch_async(dispatch_get_main_queue(), ^{ [self cvlpTracePhase:phase reason:reason]; });
+        return;
+    }
+    NSDictionary<NSString *, NSArray<NSString *> *> *allowlist = @{
+        @"extension": @[@"cancellation", @"interruption-initial-registration",
+                         @"interruption-initial-callback", @"interruption-presenter-registration",
+                         @"interruption-presenter-callback"],
+        @"cleanup": @[@"trigger", @"process-not-running"],
+        @"process": @[@"pid-unavailable", @"missing-process-callback"]
+    };
+    NSArray<NSString *> *reasons = allowlist[phase];
+    NSString *safePhase = reasons ? phase : @"other";
+    NSString *safeReason = reasons && [reasons containsObject:reason] ? reason : @"other";
+    if (!self.cvlpLifecycleTrace) {
+        self.cvlpLifecycleTrace = [NSMutableArray arrayWithCapacity:32];
+        self.cvlpTraceStartUptime = NSProcessInfo.processInfo.systemUptime;
+    }
+    NSTimeInterval elapsed = MAX(0, NSProcessInfo.processInfo.systemUptime - self.cvlpTraceStartUptime);
+    unsigned long long elapsedMilliseconds = (unsigned long long)(elapsed * 1000.0);
+    NSString *entry = [NSString stringWithFormat:@"t=%llums phase=%@ reason=%@ pid=%d",
+                       elapsedMilliseconds, safePhase, safeReason, self.cvlpObservedPID];
+    [self.cvlpLifecycleTrace addObject:entry];
+    if (self.cvlpLifecycleTrace.count > 32) [self.cvlpLifecycleTrace removeObjectAtIndex:0];
+    NSLog(@"CVLP_EXTENSION_TRACE %@", entry);
+}
+
+- (NSString *)cvlpLifecycleTraceSummary {
+    return [self.cvlpLifecycleTrace componentsJoinedByString:@"\\n"] ?: @"empty";
+}
+
+- (BOOL)cvlpRequestVerificationSignal:(int)signal {
     NSAssert(NSThread.isMainThread, @"Verification signal probe must run on main");
     if (signal != SIGSTOP && signal != SIGCONT) return NO;
-    if (self.cvlpRevoked || !self.cvlpSyntheticTargetVerified || !self.cvlpBeginCompleted ||
+    if (self.cvlpRevoked || self.cvlpSceneEnded || !self.cvlpSyntheticTargetVerified || !self.cvlpBeginCompleted ||
         self.cvlpObservedPID <= 0 || !self.identifier || !self.extension || !self.presenter ||
         !self.viewIfLoaded || !self.view.window) return NO;
     if (![self.extension respondsToSelector:@selector(_kill:)]) return NO;
@@ -149,11 +202,17 @@ static void CVLPLogLivenessSample(NSString *phase, CVLPLivenessSample sample) {
     NSAssert(NSThread.isMainThread, @"Native signal diagnostic must run on main");
     if (signal != SIGSTOP && signal != SIGCONT) return NO;
     if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive) return NO;
-    if (self.cvlpRevoked || !self.cvlpNativeSignalDiagnosticTargetVerified || !self.cvlpBeginCompleted ||
+    if (self.cvlpRevoked || self.cvlpSceneEnded || !self.cvlpNativeSignalDiagnosticTargetVerified || !self.cvlpBeginCompleted ||
         self.cvlpObservedPID <= 0 || self.pid != self.cvlpObservedPID ||
         !self.identifier || !self.extension || !self.presenter ||
         !self.viewIfLoaded || !self.view.window) return NO;
     if (![self.extension respondsToSelector:@selector(_kill:)]) return NO;
+    CVLPLivenessSample bridgeSample = CVLPSampleLiveness((pid_t)self.cvlpObservedPID);
+    if (!CVLPProcessPresenceObserved(bridgeSample)) {
+        NSLog(@"CVLP_NATIVE_PAUSE_REQUEST_REJECTED reason=process-presence-unproved class=%s",
+              CVLPLivenessClassificationName(bridgeSample.groupClassification));
+        return NO;
+    }
     @try { [self.extension _kill:signal]; }
     @catch (NSException *exception) {
         NSLog(@"CVLP_NATIVE_PAUSE_REQUEST_REJECTED reason=selector-exception");
@@ -166,6 +225,7 @@ static void CVLPLogLivenessSample(NSString *phase, CVLPLivenessSample sample) {
 - (void)cvlpRevoke {
     NSAssert(NSThread.isMainThread, @"Guest revocation must run on main");
     self.cvlpRevoked = YES;
+    self.cvlpSceneEnded = YES;
     self.view.hidden = YES;
     self.contentView.hidden = YES;
     self.shouldIgnoreSceneUpdates = YES;
@@ -204,17 +264,28 @@ static void CVLPLogLivenessSample(NSString *phase, CVLPLivenessSample sample) {
 }
 
 - (void)setUpAppPresenter {
-    if (self.cvlpRevoked) return;''')
+    if (self.cvlpRevoked || self.cvlpSceneEnded) return;''')
+    replace_once(scene, '''    if(!self.isAppRunning) {
+        [self appTerminationCleanUp];
+    }''', '''    if(!self.isAppRunning) {
+        [self cvlpTracePhase:@"cleanup" reason:@"process-not-running"];
+        [self appTerminationCleanUp];
+    }''')
+    replace_once(scene, '''- (void)appTerminationCleanUp {
+    if(_isAppTerminationCleanUpCalled) {''', '''- (void)appTerminationCleanUp {
+    self.cvlpSceneEnded = YES;
+    [self cvlpTracePhase:@"cleanup" reason:@"trigger"];
+    if(_isAppTerminationCleanUpCalled) {''')
     for anchor in (
         '- (void)_performActionsForUIScene:(UIScene *)scene withUpdatedFBSScene:(id)fbsScene settingsDiff:(FBSSceneSettingsDiff *)diff fromSettings:(UIApplicationSceneSettings *)settings transitionContext:(id)context lifecycleActionType:(uint32_t)actionType {',
         '- (void)viewWillLayoutSubviews {',
         '- (void)updateFrameWithSettingsBlock:(void (^)(UIMutableApplicationSceneSettings *settings))block {',
         '- (void)updateSettingsWithBlock:(void(^)(UIMutableApplicationSceneSettings *settings))updateSettingsBlock {',
     ):
-        replace_once(scene, anchor, anchor + '\n    if (self.cvlpRevoked) return;')
+        replace_once(scene, anchor, anchor + '\n    if (self.cvlpRevoked || self.cvlpSceneEnded) return;')
     replace_once(scene, '''    dispatch_block_t queueBlock = ^{
         if(currentDebounceToken != self.resizeDebounceToken) {''', '''    dispatch_block_t queueBlock = ^{
-        if (self.cvlpRevoked) return;
+        if (self.cvlpRevoked || self.cvlpSceneEnded) return;
         if(currentDebounceToken != self.resizeDebounceToken) {''')
     print("Prepared synthetic guest lifecycle guard")
 

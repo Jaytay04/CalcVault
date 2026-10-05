@@ -448,6 +448,297 @@ final class NativeGuestCoordinatorTests: XCTestCase {
         XCTAssertEqual(runtime.revokeCount, 1)
     }
 
+    func testTerminalExitWhileRunningConcealsAndDuplicateCallbacksStayEnded() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeGuestRuntime()
+        let coordinator = makeCoordinator(lifecycle: lifecycle, checker: checker, runtime: runtime)
+        try await completeCheck(coordinator, checker: checker)
+        coordinator.surfaceReady()
+        runtime.completeStart(true)
+        XCTAssertEqual(coordinator.state, .running)
+
+        let terminalCallback = try XCTUnwrap(runtime.terminationHandler)
+        runtime.terminate()
+
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertNil(coordinator.viewController)
+        XCTAssertNil(coordinator.mountedViewController)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertTrue(coordinator.summary.contains("stage=runtime-termination; reason=guest-ended"))
+        XCTAssertTrue(coordinator.summary.contains(runtime.summary))
+        XCTAssertFalse(coordinator.canRequestLaunch)
+
+        terminalCallback()
+        runtime.terminate()
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertNil(coordinator.viewController)
+        XCTAssertEqual(runtime.revokeCount, 1)
+    }
+
+    func testTerminalExitWhileStartPendingRejectsBothLateStartResults() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeGuestRuntime()
+        let coordinator = makeCoordinator(lifecycle: lifecycle, checker: checker, runtime: runtime)
+        try await completeCheck(coordinator, checker: checker)
+        coordinator.surfaceReady()
+        XCTAssertEqual(runtime.startCount, 1)
+        XCTAssertEqual(coordinator.state, .presenting)
+
+        runtime.terminate()
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertNil(coordinator.viewController)
+        XCTAssertTrue(coordinator.summary.contains("stage=runtime-termination; reason=guest-ended"))
+        XCTAssertTrue(coordinator.summary.contains(runtime.summary))
+        XCTAssertFalse(coordinator.canRequestLaunch)
+
+        runtime.completeStart(false)
+        runtime.completeStart(true)
+
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertNil(coordinator.viewController)
+        XCTAssertTrue(coordinator.summary.contains("stage=runtime-termination; reason=guest-ended"))
+        XCTAssertTrue(coordinator.summary.contains(runtime.summary))
+        XCTAssertFalse(coordinator.canRequestLaunch)
+        XCTAssertEqual(runtime.factoryCount, 1)
+        XCTAssertEqual(runtime.startCount, 1)
+    }
+
+    func testTerminalExitWhileVerifiedGuestIsHeldEndsLeaseAndRetainsSummary() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeVerificationGuestRuntime()
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeHandoffCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startVerificationGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginVerificationHandoff())
+        runtime.completeSuspend(true)
+        lifecycle.lock()
+        lease.onEndDuringEnd = { [weak runtime] in runtime?.terminate() }
+        runtime.reportsTerminationDuringRevoke = true
+
+        runtime.terminate()
+
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertNil(coordinator.viewController)
+        XCTAssertNil(coordinator.mountedViewController)
+        XCTAssertFalse(coordinator.canResumeVerification)
+        XCTAssertEqual(lease.endCount, 1)
+        XCTAssertEqual(runtime.revokeCount, 1)
+
+        _ = try unlock(lifecycle)
+        XCTAssertTrue(coordinator.summary.contains("stage=runtime-termination; reason=guest-ended"))
+        XCTAssertTrue(coordinator.summary.contains(runtime.summary))
+    }
+
+    func testTerminalExitWhileDiagnosticGuestIsHeldEndsLease() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeSignalDiagnosticGuestRuntime(available: true)
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeSignalDiagnosticCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startSignalDiagnosticGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+
+        runtime.terminate()
+
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertNil(coordinator.viewController)
+        XCTAssertNil(coordinator.mountedViewController)
+        XCTAssertFalse(coordinator.canResumeSignalDiagnostic)
+        XCTAssertEqual(lease.endCount, 1)
+        XCTAssertEqual(runtime.revokeCount, 1)
+    }
+
+    func testTerminalExitDuringResumeCheckCancelsResumeAuthority() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeVerificationGuestRuntime()
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeHandoffCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startVerificationGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginVerificationHandoff())
+        runtime.completeSuspend(true)
+        lifecycle.lock()
+        _ = try unlock(lifecycle)
+
+        let resumeCheck = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await checker.waitForCall(2)
+        runtime.terminate()
+        let checkSucceeded = await checker.succeed(2)
+        XCTAssertTrue(checkSucceeded)
+        await resumeCheck.value
+
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertNil(coordinator.viewController)
+        XCTAssertNil(coordinator.mountedViewController)
+        XCTAssertEqual(runtime.resumeCount, 0)
+        XCTAssertEqual(runtime.startCount, 1)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertEqual(lease.endCount, 1)
+    }
+
+    func testTerminalCallbackDuringHeldAuthorizationInvalidationStaysEnded() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let boundaryFailure = try makeBiometricBoundaryFailure()
+        let runtime = FakeVerificationGuestRuntime()
+        let lease = FakeGuestHandoffLease()
+        let authorization = ReentrantTerminationAuthorization {
+            runtime.terminate()
+        }
+        let coordinator = NativeGuestCoordinator(
+            lifecycle: lifecycle,
+            check: { biometricEnabled in
+                if biometricEnabled { throw boundaryFailure }
+            },
+            runtimeFactory: {
+                runtime.noteFactoryInvocation()
+                return runtime
+            },
+            authorizationFactory: { authorization },
+            leaseFactory: { onEnd in
+                lease.install(onEnd: onEnd)
+                return lease
+            }
+        )
+
+        let initialCheck = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await initialCheck.value
+        coordinator.surfaceReady()
+        runtime.completeStart(true)
+        XCTAssertTrue(coordinator.beginVerificationHandoff())
+        runtime.completeSuspend(true)
+        lifecycle.lock()
+        _ = try unlock(lifecycle)
+
+        let resumeCheck = try XCTUnwrap(coordinator.start(biometricEnabled: true))
+        await authorization.waitForAuthentication()
+        // One published transition isolates the reentrant held branch; lock()
+        // publishes twice and could hide a stale `.holding` write on its second event.
+        lifecycle.beginAuthentication()
+        await resumeCheck.value
+
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertNil(coordinator.viewController)
+        XCTAssertNil(coordinator.mountedViewController)
+        XCTAssertFalse(coordinator.canResumeVerification)
+        XCTAssertEqual(authorization.invalidateCount, 1)
+        XCTAssertEqual(lease.endCount, 1)
+        XCTAssertEqual(runtime.revokeCount, 1)
+    }
+
+    func testSynchronousTerminalExitDuringDiagnosticCONTDoesNotReopenUI() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeSignalDiagnosticGuestRuntime(available: true)
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeSignalDiagnosticCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startSignalDiagnosticGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+        lifecycle.lock()
+        _ = try unlock(lifecycle)
+        let resumeCheck = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await checker.waitForCall(2)
+        let checkSucceeded = await checker.succeed(2)
+        XCTAssertTrue(checkSucceeded)
+        await resumeCheck.value
+
+        runtime.onResumeRequest = { [weak runtime] in runtime?.terminate() }
+        coordinator.surfaceReady()
+
+        XCTAssertEqual(runtime.resumeRequestCount, 1)
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertNil(coordinator.viewController)
+        XCTAssertNil(coordinator.mountedViewController)
+        XCTAssertFalse(coordinator.canResumeSignalDiagnostic)
+        XCTAssertEqual(lease.endCount, 1)
+        XCTAssertEqual(runtime.revokeCount, 1)
+    }
+
+    func testTerminalExitAfterSuccessfulDiagnosticResumeSubmissionEndsGuest() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeSignalDiagnosticGuestRuntime(available: true)
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeSignalDiagnosticCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startSignalDiagnosticGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+        lifecycle.lock()
+        _ = try unlock(lifecycle)
+        let resumeCheck = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await checker.waitForCall(2)
+        let checkSucceeded = await checker.succeed(2)
+        XCTAssertTrue(checkSucceeded)
+        await resumeCheck.value
+
+        coordinator.surfaceReady()
+        XCTAssertEqual(coordinator.state, .running)
+        XCTAssertEqual(lease.endCount, 1)
+        XCTAssertTrue(coordinator.summary.contains("Resume request submitted"))
+        runtime.terminate()
+
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertNil(coordinator.viewController)
+        XCTAssertNil(coordinator.mountedViewController)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertTrue(coordinator.summary.contains("stage=runtime-termination; reason=guest-ended"))
+    }
+
+    func testExplicitLockInvalidatesSynchronousAndLateTerminalCallbacks() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeGuestRuntime()
+        let coordinator = makeCoordinator(lifecycle: lifecycle, checker: checker, runtime: runtime)
+        try await completeCheck(coordinator, checker: checker)
+        coordinator.surfaceReady()
+        runtime.completeStart(true)
+        let terminalCallback = try XCTUnwrap(runtime.terminationHandler)
+        runtime.reportsTerminationDuringRevoke = true
+
+        lifecycle.lock()
+        terminalCallback()
+        runtime.terminate()
+
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertNil(coordinator.viewController)
+        XCTAssertNil(coordinator.mountedViewController)
+        // Explicit lock publishes two lifecycle states; both revoke attempts
+        // are intentional and the terminal callback from revoke remains stale.
+        XCTAssertEqual(runtime.revokeCount, 2)
+        XCTAssertFalse(coordinator.summary.contains("stage=runtime-termination; reason=guest-ended"))
+    }
+
     func testHandoffCanBeginOnlyForRunningVerificationCapableRuntime() async throws {
         let lifecycle = SessionLifecycleCoordinator()
         _ = try unlock(lifecycle)
@@ -1218,6 +1509,24 @@ final class NativeGuestCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.canResumeSignalDiagnostic)
     }
 
+    private func makeBiometricBoundaryFailure() throws -> NativeGuestCredentialBoundaryFailure {
+        let groups = try KeychainAccessGroups(legacy: "TEST.legacy", hostOnly: "TEST.hostonly")
+        let storage = HostOnlyKeychainStorage(
+            groups: { groups },
+            backend: { _ in CoordinatorBiometricFailureBackend() }
+        )
+        do {
+            try NativeGuestCredentialInventory.checkForLaunch(
+                biometricEnabled: true,
+                storage: storage
+            )
+            XCTFail("Expected a synthetic biometric credential boundary failure")
+            throw SyntheticFactoryFailure.failed
+        } catch let failure as NativeGuestCredentialBoundaryFailure {
+            return failure
+        }
+    }
+
     private func completeCheck(
         _ coordinator: NativeGuestCoordinator,
         checker: SuspendedGuestChecker
@@ -1344,9 +1653,11 @@ final class NativeGuestCoordinatorTests: XCTestCase {
 }
 
 @MainActor
-private final class FakeGuestRuntime: NativeGuestRuntime {
+private final class FakeGuestRuntime: NativeGuestTerminationReportingRuntime {
     let viewController = UIViewController()
     let summary = "Guest runtime is ready."
+    var terminationHandler: (@MainActor () -> Void)?
+    var reportsTerminationDuringRevoke = false
     private(set) var factoryCount = 0
     private(set) var startCount = 0
     private(set) var revokeCount = 0
@@ -1363,7 +1674,10 @@ private final class FakeGuestRuntime: NativeGuestRuntime {
 
     func revoke() {
         revokeCount += 1
+        if reportsTerminationDuringRevoke { terminate() }
     }
+
+    func terminate() { terminationHandler?() }
 
     func completeStart(_ started: Bool) {
         completion?(started)
@@ -1371,9 +1685,11 @@ private final class FakeGuestRuntime: NativeGuestRuntime {
 }
 
 @MainActor
-private final class FakeVerificationGuestRuntime: NativeGuestVerificationRuntime {
+private final class FakeVerificationGuestRuntime: NativeGuestVerificationRuntime, NativeGuestTerminationReportingRuntime {
     let viewController = UIViewController()
     let summary = "Verification guest is ready."
+    var terminationHandler: (@MainActor () -> Void)?
+    var reportsTerminationDuringRevoke = false
     private(set) var factoryCount = 0
     private(set) var startCount = 0
     private(set) var suspendCount = 0
@@ -1407,7 +1723,10 @@ private final class FakeVerificationGuestRuntime: NativeGuestVerificationRuntime
     func revoke() {
         revokeCount += 1
         isSuspended = true
+        if reportsTerminationDuringRevoke { terminate() }
     }
+
+    func terminate() { terminationHandler?() }
 
     func completeStart(_ started: Bool) {
         startCompletion?(started)
@@ -1424,9 +1743,11 @@ private final class FakeVerificationGuestRuntime: NativeGuestVerificationRuntime
 }
 
 @MainActor
-private final class FakeSignalDiagnosticGuestRuntime: NativeGuestSignalDiagnosticRuntime {
+private final class FakeSignalDiagnosticGuestRuntime: NativeGuestSignalDiagnosticRuntime, NativeGuestTerminationReportingRuntime {
     let viewController = UIViewController()
     let summary = "Signal diagnostic runtime is ready."
+    var terminationHandler: (@MainActor () -> Void)?
+    var reportsTerminationDuringRevoke = false
     var signalDiagnosticAvailable: Bool
     var pauseSubmission = true
     var resumeSubmission = true
@@ -1462,8 +1783,12 @@ private final class FakeSignalDiagnosticGuestRuntime: NativeGuestSignalDiagnosti
         return resumeSubmission
     }
 
-    func revoke() { revokeCount += 1 }
+    func revoke() {
+        revokeCount += 1
+        if reportsTerminationDuringRevoke { terminate() }
+    }
 
+    func terminate() { terminationHandler?() }
     func completeStart(_ started: Bool) { startCompletion?(started) }
 }
 
@@ -1494,6 +1819,45 @@ private final class FakeGuestHandoffLease: NativeGuestHandoffLease {
         endCount += 1
         isValid = false
         onEndDuringEnd?()
+    }
+}
+
+@MainActor
+private final class ReentrantTerminationAuthorization: NativeGuestCredentialAuthorization {
+    private let onInvalidate: @MainActor () -> Void
+    private var authentication: CheckedContinuation<Void, Error>?
+    private var authenticationWaiter: CheckedContinuation<Void, Never>?
+    private(set) var invalidateCount = 0
+
+    init(onInvalidate: @escaping @MainActor () -> Void) {
+        self.onInvalidate = onInvalidate
+    }
+
+    func authenticate() async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            authentication = continuation
+            authenticationWaiter?.resume()
+            authenticationWaiter = nil
+        }
+    }
+
+    func check(biometricEnabled: Bool) async throws {
+        _ = biometricEnabled
+        XCTFail("The invalidated authentication must not run a credential retry")
+        throw NativeGuestCredentialAuthorizationError.invalidated
+    }
+
+    func invalidate() {
+        invalidateCount += 1
+        onInvalidate()
+        let pending = authentication
+        authentication = nil
+        pending?.resume(throwing: NativeGuestCredentialAuthorizationError.invalidated)
+    }
+
+    func waitForAuthentication() async {
+        if authentication != nil { return }
+        await withCheckedContinuation { authenticationWaiter = $0 }
     }
 }
 
@@ -1538,4 +1902,37 @@ private actor SuspendedGuestChecker {
 
 private enum SyntheticFactoryFailure: Error {
     case failed
+}
+
+private final class CoordinatorBiometricFailureBackend: HostOnlyKeychainBackend {
+    func contains(_ item: KeychainMigrationItem, accessGroup: String) throws -> Bool {
+        _ = item
+        _ = accessGroup
+        return false
+    }
+
+    func validateProtection(_ item: KeychainMigrationItem, accessGroup: String) throws -> Bool {
+        _ = accessGroup
+        if item.protection == .biometryCurrentSet {
+            throw HostOnlyKeychainStorageError.unexpectedStatus(-25308)
+        }
+        return true
+    }
+
+    func replace(_ data: Data, item: KeychainMigrationItem, accessGroup: String) throws {
+        XCTFail("The synthetic credential check must not write Keychain items")
+    }
+
+    func read(_ item: KeychainMigrationItem, accessGroup: String) throws -> Data? {
+        XCTFail("The synthetic credential check must not read Keychain items")
+        return nil
+    }
+
+    func insert(_ data: Data, item: KeychainMigrationItem, accessGroup: String) throws {
+        XCTFail("The synthetic credential check must not insert Keychain items")
+    }
+
+    func remove(_ item: KeychainMigrationItem, accessGroup: String) throws {
+        XCTFail("The synthetic credential check must not remove Keychain items")
+    }
 }
