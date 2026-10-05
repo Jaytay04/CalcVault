@@ -31,7 +31,7 @@ def transform(sources):
         "    vc.contentView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;",
         '        groupShutdownObserved ? @"observed" : @"unproved"];',
         "- (void)appSceneVCWillActivateScene:(AppSceneViewController *)vc {\n"
-        "    if (self.revoked) return;",
+        "    if (self.revoked || self.sceneEnded) return;",
     )
     scene_anchors = (
         "@property(nonatomic) NSUInteger cvlpPreRevokeAttemptCount;\n"

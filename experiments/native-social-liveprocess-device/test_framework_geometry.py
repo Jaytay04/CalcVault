@@ -32,7 +32,7 @@ def sources():
     return diagnostics;
 }
 - (void)appSceneVCWillActivateScene:(AppSceneViewController *)vc {
-    if (self.revoked) return;
+    if (self.revoked || self.sceneEnded) return;
     [vc updateSettingsWithBlock:^(UIMutableApplicationSceneSettings *settings) {
         [settings setFrame:vc.view.bounds];
     }];
@@ -92,7 +92,7 @@ class FrameworkGeometryTests(unittest.TestCase):
         self.assertEqual(before, snapshot)
         self.assertEqual(set(after), set(before))
         self.assertEqual(after["LiveContainer/LCBootstrap.m"], before["LiveContainer/LCBootstrap.m"])
-        self.assertIn("if (self.revoked) return;", after[geometry.SESSION_PATH])
+        self.assertIn("if (self.revoked || self.sceneEnded) return;", after[geometry.SESSION_PATH])
         self.assertIn("[self.sceneController cvlpRevoke];", after[geometry.SESSION_PATH])
         self.assertIn("if (self.cvlpRevoked) return;", after[geometry.SCENE_PATH])
         self.assertIn("fixed framework selection remains upstream", after[geometry.SCENE_PATH])

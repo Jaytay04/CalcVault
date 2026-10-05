@@ -23,6 +23,18 @@ jobs:
           test "$(xcodebuild -version | tr '\n' ' ')" = "Xcode 16.4 Build version 16F6 "
       - name: Record environment
         run: sh scripts/inspect-environment.sh
+      - name: Prepare explicit iOS 18.5 test simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun simctl list runtimes
+          if ! xcrun simctl list runtimes available -j | python3 -c 'import json,sys; sys.exit(not any(r["identifier"] == "com.apple.CoreSimulator.SimRuntime.iOS-18-5" and r.get("isAvailable") for r in json.load(sys.stdin)["runtimes"]))'; then
+            xcodebuild -downloadPlatform iOS -buildVersion 18.5
+          fi
+          CALCVAULT_TEST_UDID=$(xcrun simctl create CalcVaultCITest com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro com.apple.CoreSimulator.SimRuntime.iOS-18-5)
+          xcrun simctl boot "$CALCVAULT_TEST_UDID"
+          xcrun simctl bootstatus "$CALCVAULT_TEST_UDID" -b
+          echo "CALCVAULT_TEST_DESTINATION=platform=iOS Simulator,id=$CALCVAULT_TEST_UDID" >> "$GITHUB_ENV"
       - name: Install pinned project generator
         run: |
           brew install xcodegen
