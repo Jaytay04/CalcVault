@@ -1885,12 +1885,14 @@ final class NativeGuestCoordinatorTests: XCTestCase {
         lease.backgroundTimeRemainingSeconds = 23
         let notification = UIApplication.didBecomeActiveNotification
 
-        let postedOffMainActor = await Task.detached {
-            let isOffMainActor = !Thread.isMainThread
-            NotificationCenter.default.post(name: notification, object: nil)
-            return isOffMainActor
-        }.value
-        XCTAssertTrue(postedOffMainActor)
+        let postedOffMainThread: Bool = await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let isOffMainThread = !Thread.isMainThread
+                NotificationCenter.default.post(name: notification, object: nil)
+                continuation.resume(returning: isOffMainThread)
+            }
+        }
+        XCTAssertTrue(postedOffMainThread)
 
         for _ in 0..<20 {
             let eventArrived = cooperativeHoldEvents(in: coordinator.summary).contains {
