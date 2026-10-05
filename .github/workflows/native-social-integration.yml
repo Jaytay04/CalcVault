@@ -121,8 +121,7 @@ jobs:
           brew install xcodegen
           test "$(xcodegen version | awk '{print $2}')" = 2.46.0
           source="$RUNNER_TEMP/cvlp-integration-upstream"
-          git clone --depth 1 --branch 3.8.0 --recurse-submodules \
-            https://github.com/LiveContainer/LiveContainer.git "$source"
+          bash experiments/native-social-liveprocess-device/fetch-pinned-upstream.sh "$source"
           test "$(git -C "$source" rev-parse HEAD)" = e370a92dfc03ce109ebce00ed4a7cfc64ad1c801
           python3 experiments/native-social-liveprocess-device/prepare-upstream.py "$source"
           python3 experiments/native-social-liveprocess-device/prepare-framework-guest.py "$source"
