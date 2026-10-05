@@ -19,7 +19,7 @@ class CooperativeTransportTests(unittest.TestCase):
                 '- (void)appTerminationCleanUp {',
                 'integration-native-24\n#import "../LiveContainer/CVLPProbe.h"\n'
                 '    NSCAssert(appInfo, @"Failed to retrieve app info");\n'
-                '    NSLog(@"Retrieved app info: %@", appInfo);')
+                '    NSLog(@"CVLP_DEVICE_EXTENSION_STARTED");')
 
     def test_opt_in_preserves_lifecycle_and_namespace(self):
         scene, guest = adapter.transform(*self.fixture())
