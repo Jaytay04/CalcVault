@@ -828,12 +828,13 @@ final class NativeGuestCoordinatorTests: XCTestCase {
 
         lifecycle.lock()
         _ = try unlock(lifecycle)
+        let signalChecker = SuspendedGuestChecker()
         let signalRuntime = FakeSignalDiagnosticGuestRuntime(available: true)
         let signalCoordinator = makeSignalDiagnosticCoordinator(
-            lifecycle: lifecycle, checker: checker, runtime: signalRuntime,
+            lifecycle: lifecycle, checker: signalChecker, runtime: signalRuntime,
             lease: FakeGuestHandoffLease()
         )
-        try await startSignalDiagnosticGuest(signalCoordinator, checker: checker, runtime: signalRuntime)
+        try await startSignalDiagnosticGuest(signalCoordinator, checker: signalChecker, runtime: signalRuntime)
 
         XCTAssertTrue(signalCoordinator.canBeginSignalDiagnostic)
         XCTAssertFalse(signalCoordinator.canBeginVerificationHandoff)
