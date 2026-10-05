@@ -189,6 +189,10 @@ jobs:
           python3 -m unittest discover -s experiments/native-social-integration -p 'test_*.py' -v
           python3 -m unittest discover -s experiments/native-social-liveprocess-device -p 'test_*.py' -v
 
+      - name: Execute real anonymous XPC startup regression
+        if: ${{ inputs.guest_cooperative_pause }}
+        run: bash experiments/native-social-liveprocess-device/Tests/test_cooperative_bootstrap.sh
+
       - name: Build, stage, sign, and verify the selected synthetic integration host
         shell: bash
         env:

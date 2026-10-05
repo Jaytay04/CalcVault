@@ -10,12 +10,23 @@ NS_ASSUME_NONNULL_BEGIN
                   reply:(void (^)(BOOL released, int pid))reply;
 @end
 
+/// Registration only. This receiver has no authentication, storage or command authority.
+@protocol CVLPGuestMediaHoldBootstrap
+- (void)announceForLaunch:(NSUUID *)launch reply:(void (^)(BOOL registered))reply;
+@end
+
+/// Starts the connection with an actual message; resume alone cannot notify a listener.
+NSXPCConnection *CVLPCreateGuestMediaHoldConnection(NSXPCListenerEndpoint *endpoint,
+    NSUUID *launch, id<CVLPGuestMediaHoldControl> control,
+    void (^lostControl)(void), void (^startupReply)(BOOL registered));
+
 /// One anonymous endpoint and one connection per existing extension request.
 @interface CVLPCooperativePauseClient : NSObject <NSXPCListenerDelegate>
 @property(nonatomic, readonly) NSXPCListenerEndpoint *endpoint;
 @property(nonatomic, readonly) NSUUID *launchToken;
 @property(nonatomic, copy, nullable) void (^failureHandler)(void);
 - (BOOL)isAvailableForPID:(int)pid;
+- (NSString *)diagnosticForPID:(int)pid;
 - (void)pauseForPID:(int)pid reply:(void (^)(BOOL))reply;
 - (void)resumeForPID:(int)pid reply:(void (^)(BOOL))reply;
 - (void)invalidate;

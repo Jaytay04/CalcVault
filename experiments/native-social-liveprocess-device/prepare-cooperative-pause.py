@@ -26,6 +26,7 @@ def transform(scene, extension):
 @property(nonatomic) BOOL cvlpCooperativePauseTargetVerified;
 @property(nonatomic, strong) CVLPCooperativePauseClient *cvlpMediaControl;
 - (BOOL)cvlpCooperativePauseAvailable;
+- (NSString *)cvlpCooperativePauseReadinessDiagnostic;
 - (void)cvlpPauseMediaWithReply:(void (^)(BOOL))reply;
 - (void)cvlpResumeMediaWithReply:(void (^)(BOOL))reply;''')
     scene = once(scene, '    item.userInfo = userInfo;', '''    id cooperative = NSBundle.mainBundle.infoDictionary[@"CVNativeCooperativePauseEnabled"];
@@ -48,7 +49,15 @@ def transform(scene, extension):
         userInfo[@"cvlpMediaHoldLaunch"] = self.cvlpMediaControl.launchToken;
     }
     item.userInfo = userInfo;''')
-    scene = once(scene, '- (void)cvlpRevoke {', '''- (BOOL)cvlpCooperativePauseAvailable {
+    scene = once(scene, '- (void)cvlpRevoke {', '''- (NSString *)cvlpCooperativePauseReadinessDiagnostic {
+    NSString *channel = self.cvlpMediaControl ?
+        [self.cvlpMediaControl diagnosticForPID:self.cvlpObservedPID] : @"reason=no-channel";
+    return [NSString stringWithFormat:@"sceneBegin=%d target=%d pidMatch=%d sceneEnded=%d sceneRevoked=%d %@",
+        self.cvlpBeginCompleted, self.cvlpCooperativePauseTargetVerified,
+        self.pid > 0 && self.pid == self.cvlpObservedPID, self.cvlpSceneEnded, self.cvlpRevoked, channel];
+}
+
+- (BOOL)cvlpCooperativePauseAvailable {
     return !self.cvlpRevoked && !self.cvlpSceneEnded && self.cvlpBeginCompleted &&
         self.cvlpCooperativePauseTargetVerified && self.pid == self.cvlpObservedPID &&
         [self.cvlpMediaControl isAvailableForPID:self.cvlpObservedPID];

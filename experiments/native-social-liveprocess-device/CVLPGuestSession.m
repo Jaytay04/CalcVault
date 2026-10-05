@@ -26,6 +26,7 @@
 - (BOOL)cvlpRequestNativeSignalDiagnostic:(int)signal;
 @property(nonatomic) BOOL cvlpCooperativePauseTargetVerified;
 - (BOOL)cvlpCooperativePauseAvailable;
+- (NSString *)cvlpCooperativePauseReadinessDiagnostic;
 - (void)cvlpPauseMediaWithReply:(void (^)(BOOL))reply;
 - (void)cvlpResumeMediaWithReply:(void (^)(BOOL))reply;
 @property(nonatomic, readonly) NSUInteger cvlpPreRevokeAttemptCount;
@@ -64,6 +65,7 @@
 @property(nonatomic) BOOL cooperativePauseAcknowledged;
 @property(nonatomic) BOOL cooperativeResumeAttempted;
 @property(nonatomic) BOOL cooperativeResumeAcknowledged;
+@property(nonatomic, copy) NSString *cooperativeReadinessSnapshot;
 @property(nonatomic, strong) NSMutableArray<NSString *> *diagnosticEvents;
 @property(nonatomic, strong) NSMutableArray *hostLifecycleObservers;
 @property(nonatomic) NSTimeInterval diagnosticStartUptime;
@@ -329,7 +331,16 @@ static NSString *CVLPDiagnosticAllowlistedReason(NSString *phase, NSString *reas
 }
 
 - (BOOL)isCooperativePauseAvailable {
-    return [self cooperativePauseRequestIsReady] && [self.sceneController cvlpCooperativePauseAvailable];
+    BOOL requestReady = [self cooperativePauseRequestIsReady];
+    BOOL available = requestReady && [self.sceneController cvlpCooperativePauseAvailable];
+    if (!self.revoked) {
+        NSString *scene = [self.sceneController respondsToSelector:@selector(cvlpCooperativePauseReadinessDiagnostic)] ?
+            [self.sceneController cvlpCooperativePauseReadinessDiagnostic] : @"reason=scene-diagnostic-unavailable";
+        self.cooperativeReadinessSnapshot = [NSString stringWithFormat:
+            @"requestReady=%d available=%d identity=%d %@", requestReady, available,
+            [self cooperativePauseIdentityIsVerified], scene];
+    }
+    return available;
 }
 
 - (void)pauseMediaWithCompletion:(void (^)(BOOL))completion {
@@ -493,6 +504,8 @@ static NSString *CVLPDiagnosticAllowlistedReason(NSString *phase, NSString *reas
 - (void)revoke {
     NSAssert(NSThread.isMainThread, @"Guest revocation must run on main");
     if (self.revoked) return;
+    // Preserve the latest pre-revoke readiness; cleanup intentionally invalidates the channel.
+    (void)[self isCooperativePauseAvailable];
     self.revoked = YES;
     CVLPLivenessSample unavailable = {0};
     [self recordDiagnosticPhase:@"revoke" reason:@"explicit" sample:unavailable hasSample:NO];
@@ -572,6 +585,9 @@ static NSString *CVLPDiagnosticAllowlistedReason(NSString *phase, NSString *reas
         @"\nCooperative media diagnostic v1: pause attempted=%d acknowledged=%d; resume attempted=%d acknowledged=%d; known API gate only; universal media coverage and two-minute device retention unproved",
         self.cooperativePauseAttempted, self.cooperativePauseAcknowledged,
         self.cooperativeResumeAttempted, self.cooperativeResumeAcknowledged];
+    diagnostics = [diagnostics stringByAppendingFormat:
+        @"\nCooperative startup diagnostic v2 (last pre-revoke sample): %@",
+        self.cooperativeReadinessSnapshot ?: @"not-sampled"];
     NSString *eventRing = self.diagnosticEvents.count > 0 ?
         [self.diagnosticEvents componentsJoinedByString:@"\n"] : @"empty";
     diagnostics = [diagnostics stringByAppendingFormat:

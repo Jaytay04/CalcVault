@@ -8,6 +8,7 @@ spec = importlib.util.spec_from_file_location('cooperative_adapter', ROOT / 'pre
 adapter = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(adapter)
 CONTROL = (ROOT / 'CVLPCooperativePause.m').read_text(encoding='utf-8')
+HEADER = (ROOT / 'CVLPCooperativePause.h').read_text(encoding='utf-8')
 SESSION = (ROOT / 'CVLPGuestSession.m').read_text(encoding='utf-8')
 
 
@@ -74,6 +75,51 @@ class CooperativeTransportTests(unittest.TestCase):
         self.assertIn('BOOL current = applied && [self cooperativePauseRequestIsReady]', SESSION)
         self.assertIn('BOOL current = released && [self cooperativePauseRequestIsReady]', SESSION)
         self.assertIn('Cooperative media diagnostic v1', SESSION)
+
+    def test_startup_sends_a_message_and_never_grants_host_storage_authority(self):
+        connector = CONTROL.split('NSXPCConnection *CVLPCreateGuestMediaHoldConnection(')[1].split(
+            '#if defined(CVLP_COOPERATIVE_GUEST)')[0]
+        self.assertIn('@protocol(CVLPGuestMediaHoldBootstrap)', connector)
+        self.assertLess(connector.index('[connection resume]'), connector.index('[bootstrap announceForLaunch:'))
+        self.assertIn('10 * NSEC_PER_SEC', connector)
+        self.assertIn('if (startupFinished) return', connector)
+        guest = CONTROL.split('#if defined(CVLP_COOPERATIVE_GUEST)')[1].split('#else')[0]
+        self.assertIn('CVLPCreateGuestMediaHoldConnection(endpoint, token, control, lostControl', guest)
+        protocol = HEADER.split('@protocol CVLPGuestMediaHoldBootstrap')[1].split('@end')[0]
+        self.assertEqual(protocol.count('- (void)'), 1)
+        self.assertIn('announceForLaunch:(NSUUID *)launch', protocol)
+        self.assertNotIn('NSString', protocol)
+        self.assertNotIn('NSDictionary', protocol)
+        self.assertNotIn('NSData', protocol)
+        self.assertNotIn('exportedObject = self', CONTROL)
+
+    def test_registration_is_not_media_authorization_and_is_connection_fenced(self):
+        registration = CONTROL.split('- (void)registerLaunch:(NSUUID *)launch connection:')[2].split(
+            '- (BOOL)peerIsCurrent:')[0]
+        for guard in ('!self.invalidated', 'connection == self.connection',
+                      '[launch isEqual:self.launchToken]', '!self.bootstrapReceived', '[self failConnection]'):
+            self.assertIn(guard, registration)
+        self.assertIn('NSXPCConnection.currentConnection', CONTROL)
+        self.assertIn('@property(atomic) BOOL transportLost', CONTROL)
+        loss = CONTROL.split('void (^lostControl)(void) = ^{')[-1].split('connection.interruptionHandler')[0]
+        self.assertLess(loss.index('weakSelf.transportLost = YES'), loss.index('dispatch_async'))
+        peer = CONTROL.split('- (BOOL)peerIsCurrent:')[1].split('- (BOOL)isAvailableForPID:')[0]
+        self.assertIn('self.bootstrapReceived', peer)
+        self.assertIn('!self.transportLost', peer)
+        self.assertIn('self.connection.processIdentifier == pid', peer)
+        self.assertIn('CVLPProcessPresenceObserved', peer)
+        self.assertNotIn('pauseForPID', registration)
+        self.assertNotIn('resumeForPID', registration)
+
+    def test_readiness_diagnostics_are_fixed_content_and_saved_before_cleanup(self):
+        for field in ('connection=%d', 'startup=%d', 'peerMatch=%d', 'presence=%d', 'reason=%@'):
+            self.assertIn(field, CONTROL)
+        self.assertIn('Cooperative startup diagnostic v2', SESSION)
+        revoke = SESSION.split('- (void)revoke {')[1].split('- (void)observeExit')[0]
+        self.assertLess(revoke.index('[self isCooperativePauseAvailable]'), revoke.index('self.revoked = YES'))
+        scene, _ = adapter.transform(*self.fixture())
+        self.assertIn('cvlpCooperativePauseReadinessDiagnostic', scene)
+        self.assertIn('reason=no-channel', scene)
 
 
 if __name__ == '__main__':
