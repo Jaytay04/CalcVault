@@ -1671,6 +1671,299 @@ final class NativeGuestCoordinatorTests: XCTestCase {
         XCTAssertEqual(runtime.signalResumeRequestCount, 0)
     }
 
+    func testCooperativeHoldDiagnosticDistinguishesDeadlineExpiry() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeCooperativePauseGuestRuntime()
+        let coordinator = makeCooperativePauseCoordinator(
+            lifecycle: lifecycle,
+            checker: checker,
+            runtime: runtime,
+            lease: FakeGuestHandoffLease(),
+            handoffDuration: .milliseconds(20)
+        )
+        try await startCooperativePauseGuest(coordinator, checker: checker, runtime: runtime)
+
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+        runtime.completePause(true)
+        try await Task.sleep(nanoseconds: 70_000_000)
+
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertTrue(coordinator.summary.contains("hold-deadline-expired"))
+        XCTAssertTrue(coordinator.summary.contains("phase=end-hold-deadline-expired"))
+    }
+
+    func testCooperativeHoldDiagnosticDistinguishesExpiryCallbackAndIgnoresLateAck() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeCooperativePauseGuestRuntime()
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeCooperativePauseCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startCooperativePauseGuest(coordinator, checker: checker, runtime: runtime)
+
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+        runtime.completePause(true)
+        lease.expire()
+        lease.expire()
+        runtime.completePause(true)
+        runtime.completePause(true)
+
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertEqual(lease.endCount, 1)
+        XCTAssertFalse(coordinator.isCooperativePauseHeld)
+        XCTAssertTrue(coordinator.summary.contains("system-background-expired"))
+        XCTAssertTrue(coordinator.summary.contains("phase=end-system-background-expired"))
+        XCTAssertEqual(cooperativeHoldEvents(in: coordinator.summary).count, 3)
+    }
+
+    func testCooperativeHoldDiagnosticDistinguishesObservedLeaseInvalidity() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeCooperativePauseGuestRuntime()
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeCooperativePauseCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startCooperativePauseGuest(coordinator, checker: checker, runtime: runtime)
+
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+        runtime.completePause(true)
+        lease.invalidateWithoutCallback()
+        XCTAssertNil(coordinator.start(biometricEnabled: false))
+
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertEqual(lease.endCount, 1)
+        XCTAssertTrue(coordinator.summary.contains("background-lease-invalid"))
+        XCTAssertTrue(coordinator.summary.contains("phase=end-background-lease-invalid"))
+        XCTAssertTrue(cooperativeHoldEvents(in: coordinator.summary).contains {
+            $0.contains("phase=resume-request")
+        })
+    }
+
+    func testCooperativePauseStartGetterExpiryCannotRestoreHoldingOrSubmitPause() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeCooperativePauseGuestRuntime()
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeCooperativePauseCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startCooperativePauseGuest(coordinator, checker: checker, runtime: runtime)
+        lease.onBackgroundTimeRemainingRead = { lease.expire() }
+
+        XCTAssertFalse(coordinator.beginSignalDiagnostic())
+
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertFalse(coordinator.isCooperativePauseHeld)
+        XCTAssertEqual(runtime.pauseRequestCount, 0)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertEqual(lease.endCount, 1)
+        XCTAssertTrue(coordinator.summary.contains("system-background-expired"))
+    }
+
+    func testCooperativeResumeAcknowledgementGetterExpiryCannotRestoreGuest() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeCooperativePauseGuestRuntime()
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeCooperativePauseCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startCooperativePauseGuest(coordinator, checker: checker, runtime: runtime)
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+        runtime.completePause(true)
+        lifecycle.lock()
+        _ = try unlock(lifecycle)
+
+        let task = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await checker.waitForCall(2)
+        let succeeded = await checker.succeed(2)
+        XCTAssertTrue(succeeded)
+        await task.value
+        XCTAssertEqual(runtime.resumeRequestCount, 1)
+        lease.onBackgroundTimeRemainingRead = { lease.expire() }
+
+        runtime.completeResume(true)
+
+        XCTAssertEqual(coordinator.state, .ended)
+        XCTAssertFalse(coordinator.showingGuest)
+        XCTAssertNil(coordinator.viewController)
+        XCTAssertEqual(runtime.revokeCount, 1)
+        XCTAssertEqual(lease.endCount, 1)
+        XCTAssertTrue(coordinator.summary.contains("system-background-expired"))
+        XCTAssertFalse(coordinator.summary.contains("phase=resume-acknowledged"))
+    }
+
+    func testCooperativeHoldDiagnosticSanitizesSystemRemainingTime() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeCooperativePauseGuestRuntime()
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeCooperativePauseCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startCooperativePauseGuest(coordinator, checker: checker, runtime: runtime)
+
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+        runtime.completePause(true)
+        let samples: [(Double?, Int)] = [
+            (nil, -1),
+            (Double.nan, -1),
+            (Double.infinity, -1),
+            (-Double.infinity, -1),
+            (-0.25, -1),
+            (100_000, 86_400_000)
+        ]
+        for (sample, expectedMilliseconds) in samples {
+            lease.backgroundTimeRemainingSeconds = sample
+            NotificationCenter.default.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        }
+
+        let events = cooperativeHoldEvents(in: coordinator.summary)
+        XCTAssertEqual(events.suffix(samples.count).count, samples.count)
+        for (event, sample) in zip(events.suffix(samples.count), samples) {
+            XCTAssertTrue(event.contains("systemRemainingMs=\(sample.1)"), event)
+            XCTAssertTrue(event.contains("elapsedMs="), event)
+            XCTAssertTrue(event.contains("deadlineRemainingMs="), event)
+            XCTAssertTrue(event.contains("leaseValid=1"), event)
+            XCTAssertTrue(event.contains("appState="), event)
+        }
+
+        coordinator.endVerificationHandoff()
+    }
+
+    func testCooperativeHoldDiagnosticRetainsOnlyNewestSixteenForegroundSamples() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeCooperativePauseGuestRuntime()
+        let coordinator = makeCooperativePauseCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: FakeGuestHandoffLease()
+        )
+        try await startCooperativePauseGuest(coordinator, checker: checker, runtime: runtime)
+
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+        runtime.completePause(true)
+        for _ in 0..<20 {
+            NotificationCenter.default.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        }
+
+        let summary = coordinator.summary
+        let events = cooperativeHoldEvents(in: summary)
+        XCTAssertTrue(summary.contains("Cooperative hold diagnostic v1 (newest 16)"))
+        XCTAssertEqual(events.count, 16)
+        XCTAssertTrue(events.allSatisfy { $0.contains("phase=host-active") })
+        coordinator.endVerificationHandoff()
+    }
+
+    func testCooperativeHoldDiagnosticNotificationPostedOffMainActorHopsSafely() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeCooperativePauseGuestRuntime()
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeCooperativePauseCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startCooperativePauseGuest(coordinator, checker: checker, runtime: runtime)
+
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+        runtime.completePause(true)
+        lease.backgroundTimeRemainingSeconds = 23
+        let notification = UIApplication.didBecomeActiveNotification
+
+        let postedOffMainActor = await Task.detached {
+            let isOffMainActor = !Thread.isMainThread
+            NotificationCenter.default.post(name: notification, object: nil)
+            return isOffMainActor
+        }.value
+        XCTAssertTrue(postedOffMainActor)
+
+        for _ in 0..<20 {
+            let eventArrived = cooperativeHoldEvents(in: coordinator.summary).contains {
+                $0.contains("phase=host-active") && $0.contains("systemRemainingMs=23000")
+            }
+            if eventArrived { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        XCTAssertTrue(cooperativeHoldEvents(in: coordinator.summary).contains {
+            $0.contains("phase=host-active") && $0.contains("systemRemainingMs=23000")
+        })
+        coordinator.endVerificationHandoff()
+    }
+
+    func testCooperativeHoldDiagnosticIsRedactedWhileLockedAndAuthenticating() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeCooperativePauseGuestRuntime()
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeCooperativePauseCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startCooperativePauseGuest(coordinator, checker: checker, runtime: runtime)
+
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+        runtime.completePause(true)
+        XCTAssertTrue(coordinator.summary.contains("Cooperative hold diagnostic v1 (newest 16)"))
+
+        lifecycle.lock()
+        XCTAssertFalse(coordinator.summary.contains("Cooperative hold diagnostic"))
+        XCTAssertFalse(coordinator.summary.contains("phase="))
+        lifecycle.beginAuthentication()
+        XCTAssertFalse(coordinator.summary.contains("Cooperative hold diagnostic"))
+        XCTAssertFalse(coordinator.summary.contains("phase="))
+
+        lease.expire()
+    }
+
+    func testCooperativeHoldDiagnosticSurvivesSuccessfulResume() async throws {
+        let lifecycle = SessionLifecycleCoordinator()
+        _ = try unlock(lifecycle)
+        let checker = SuspendedGuestChecker()
+        let runtime = FakeCooperativePauseGuestRuntime()
+        let lease = FakeGuestHandoffLease()
+        let coordinator = makeCooperativePauseCoordinator(
+            lifecycle: lifecycle, checker: checker, runtime: runtime, lease: lease
+        )
+        try await startCooperativePauseGuest(coordinator, checker: checker, runtime: runtime)
+
+        XCTAssertTrue(coordinator.beginSignalDiagnostic())
+        runtime.completePause(true)
+        lifecycle.lock()
+        _ = try unlock(lifecycle)
+        let task = try XCTUnwrap(coordinator.start(biometricEnabled: false))
+        await checker.waitForCall(2)
+        let succeeded = await checker.succeed(2)
+        XCTAssertTrue(succeeded)
+        await task.value
+        runtime.completeResume(true)
+
+        XCTAssertEqual(coordinator.state, .running)
+        XCTAssertTrue(coordinator.showingGuest)
+        XCTAssertTrue(coordinator.summary.contains("Cooperative hold diagnostic v1 (newest 16)"))
+        XCTAssertTrue(coordinator.summary.contains("phase=resume-acknowledged"))
+        XCTAssertEqual(lease.endCount, 1)
+    }
+
+    private func cooperativeHoldEvents(in summary: String) -> [String] {
+        summary.components(separatedBy: .newlines).filter { $0.hasPrefix("phase=") }
+    }
+
     func testCooperativeResumeWaitsForFreshCheckAndRevokesAfterBackground() async throws {
         let lifecycle = SessionLifecycleCoordinator()
         _ = try unlock(lifecycle)
@@ -2199,6 +2492,17 @@ private final class FakeSignalDiagnosticGuestRuntime: NativeGuestSignalDiagnosti
 private final class FakeGuestHandoffLease: NativeGuestHandoffLease {
     private(set) var isValid = true
     private(set) var endCount = 0
+    private var remainingTimeSeconds: Double?
+    var backgroundTimeRemainingSeconds: Double? {
+        get {
+            let hook = onBackgroundTimeRemainingRead
+            onBackgroundTimeRemainingRead = nil
+            hook?()
+            return remainingTimeSeconds
+        }
+        set { remainingTimeSeconds = newValue }
+    }
+    var onBackgroundTimeRemainingRead: (@MainActor () -> Void)?
     var onEndDuringEnd: (@MainActor () -> Void)?
     private var onEnd: (@MainActor () -> Void)?
     private let expiresDuringInstall: Bool
@@ -2216,6 +2520,10 @@ private final class FakeGuestHandoffLease: NativeGuestHandoffLease {
         guard isValid else { return }
         isValid = false
         onEnd?()
+    }
+
+    func invalidateWithoutCallback() {
+        isValid = false
     }
 
     func end() {

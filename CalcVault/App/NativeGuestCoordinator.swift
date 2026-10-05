@@ -55,7 +55,14 @@ public protocol NativeGuestCooperativePauseRuntime: NativeGuestRuntime {
 @MainActor
 public protocol NativeGuestHandoffLease: AnyObject {
     var isValid: Bool { get }
+    /// A diagnostic sample only, not a promised remaining runtime. Nil means
+    /// unavailable (including a foreground host).
+    var backgroundTimeRemainingSeconds: Double? { get }
     func end()
+}
+
+public extension NativeGuestHandoffLease {
+    var backgroundTimeRemainingSeconds: Double? { nil }
 }
 
 /// Allowlisted preparation failures only. Never carry an underlying error,
@@ -154,6 +161,7 @@ public final class NativeGuestCoordinator: ObservableObject {
         let originatingSession: SessionContext
         let runtime: any NativeGuestCooperativePauseRuntime
         let lease: any NativeGuestHandoffLease
+        let startedAt: ContinuousClock.Instant
         let deadline: ContinuousClock.Instant
         var pauseOperationID: UUID
         var pauseAcknowledged = false
@@ -174,6 +182,63 @@ public final class NativeGuestCoordinator: ObservableObject {
     private var cooperativePauseReadinessRefreshTask: Task<Void, Never>?
     private var signalDiagnosticAttemptConsumed = false
     private var handoffReport: String?
+    private var cooperativeHoldEvents: [String] = []
+    private var cooperativeHostObservations: [AnyCancellable] = []
+
+    private var cooperativeHoldReport: String {
+        guard !cooperativeHoldEvents.isEmpty else { return "" }
+        return "\n\nCooperative hold diagnostic v1 (newest 16)\n"
+            + cooperativeHoldEvents.joined(separator: "\n")
+    }
+
+    private static func diagnosticMilliseconds(_ seconds: Double?) -> Int {
+        guard let seconds, seconds.isFinite, seconds >= 0 else { return -1 }
+        // Bound diagnostic conversion, including injected or sentinel values.
+        return Int(min(seconds, 86_400) * 1_000)
+    }
+
+    private static func diagnosticMilliseconds(_ duration: Duration) -> Int {
+        let parts = duration.components
+        return diagnosticMilliseconds(max(0,
+            Double(parts.seconds) + Double(parts.attoseconds) / 1e18))
+    }
+
+    @discardableResult
+    private func recordCooperativeHold(_ phase: String) -> Bool {
+        guard let handoff = cooperativePauseHandoff else { return false }
+        let systemSeconds = handoff.lease.backgroundTimeRemainingSeconds
+        guard cooperativePauseHandoff?.token == handoff.token else { return false }
+        let leaseValid = handoff.lease.isValid
+        guard cooperativePauseHandoff?.token == handoff.token else { return false }
+        appendCooperativeHold(phase, handoff: handoff, systemSeconds: systemSeconds, leaseValid: leaseValid)
+        return true
+    }
+
+    private func appendCooperativeHold(
+        _ phase: String,
+        handoff: CooperativePauseHandoff,
+        systemSeconds: Double?,
+        leaseValid: Bool
+    ) {
+        let now = ContinuousClock().now
+        let elapsed = Self.diagnosticMilliseconds(handoff.startedAt.duration(to: now))
+        let remaining = Self.diagnosticMilliseconds(now.duration(to: handoff.deadline))
+        let system = Self.diagnosticMilliseconds(systemSeconds)
+        cooperativeHoldEvents.append("phase=\(phase) elapsedMs=\(elapsed) deadlineRemainingMs=\(remaining) systemRemainingMs=\(system) leaseValid=\(leaseValid ? 1 : 0) appState=\(UIApplication.shared.applicationState.rawValue)")
+        if cooperativeHoldEvents.count > 16 {
+            cooperativeHoldEvents.removeFirst(cooperativeHoldEvents.count - 16)
+        }
+    }
+
+    /// Checkpoints distinguish observed invalidity from the actual UIKit expiry
+    /// callback. No sample extends the lease or changes resume authority.
+    private func cooperativeExpiryReason(_ handoff: CooperativePauseHandoff) -> String? {
+        if ContinuousClock().now >= handoff.deadline { return "hold-deadline-expired" }
+        let leaseValid = handoff.lease.isValid
+        guard cooperativePauseHandoff?.token == handoff.token else { return "stale-handoff" }
+        if !leaseValid { return "background-lease-invalid" }
+        return nil
+    }
 
     public init(
         lifecycle: SessionLifecycleCoordinator,
@@ -219,6 +284,22 @@ public final class NativeGuestCoordinator: ObservableObject {
     }
 
     private func observeLifecycle() {
+        // Observe timing only. These subscriptions do not grant background
+        // execution or replace the existing lifecycle revocation policy.
+        for (name, phase) in [
+            (UIApplication.willResignActiveNotification, "host-inactive"),
+            (UIApplication.didEnterBackgroundNotification, "host-background"),
+            (UIApplication.didBecomeActiveNotification, "host-active")
+        ] {
+            cooperativeHostObservations.append(NotificationCenter.default.publisher(for: name)
+                .sink { [weak self] _ in
+                    if Thread.isMainThread {
+                        MainActor.assumeIsolated { self?.recordCooperativeHold(phase) }
+                    } else {
+                        Task { @MainActor [weak self] in self?.recordCooperativeHold(phase) }
+                    }
+                })
+        }
         lifecycleObservation = lifecycle.$state
             .dropFirst()
             .sink { [weak self] _ in
@@ -362,7 +443,7 @@ public final class NativeGuestCoordinator: ObservableObject {
     public var summary: String {
         if validSessionContext() != nil {
             if let launchFailure {
-                let diagnostic = "Native launch diagnostic v1\n\(launchFailure)"
+                let diagnostic = "Native launch diagnostic v1\n\(launchFailure)" + cooperativeHoldReport
                 return runtime.map { diagnostic + "\n\n" + $0.summary } ?? diagnostic
             }
             if let handoffReport {
@@ -370,8 +451,9 @@ public final class NativeGuestCoordinator: ObservableObject {
                     ?? verificationHandoff?.runtime.summary
                     ?? signalDiagnosticHandoff?.runtime.summary
                     ?? cooperativePauseHandoff?.runtime.summary
-                return runtimeSummary.map { handoffReport + "\n\n" + $0 }
-                    ?? handoffReport
+                let report = handoffReport + cooperativeHoldReport
+                return runtimeSummary.map { report + "\n\n" + $0 }
+                    ?? report
             }
             if let runtime { return runtime.summary }
         }
@@ -427,9 +509,9 @@ public final class NativeGuestCoordinator: ObservableObject {
             guard handoff.resumeOperationID == nil,
                   state == .holding || state == .blocked else { return nil }
             guard handoff.pauseAcknowledged else { return nil }
-            guard handoff.lease.isValid,
-                  ContinuousClock().now < handoff.deadline else {
-                endCooperativePause(reason: "lease-expired")
+            guard recordCooperativeHold("resume-request") else { return nil }
+            if let reason = cooperativeExpiryReason(handoff) {
+                endCooperativePause(reason: reason)
                 return nil
             }
             guard session != handoff.originatingSession else { return nil }
@@ -641,13 +723,15 @@ public final class NativeGuestCoordinator: ObservableObject {
         }
 
         let clock = ContinuousClock()
-        let deadline = clock.now.advanced(by: handoffDuration)
+        let startedAt = clock.now
+        let deadline = startedAt.advanced(by: handoffDuration)
         let pauseOperationID = UUID()
         cooperativePauseHandoff = CooperativePauseHandoff(
             token: token,
             originatingSession: originatingSession,
             runtime: cooperativeRuntime,
             lease: lease,
+            startedAt: startedAt,
             deadline: deadline,
             pauseOperationID: pauseOperationID
         )
@@ -662,6 +746,8 @@ public final class NativeGuestCoordinator: ObservableObject {
         runtimeRevoked = false
         launchFailure = nil
         handoffReport = nil
+        cooperativeHoldEvents.removeAll(keepingCapacity: true)
+        guard recordCooperativeHold("pause-start") else { return false }
         state = .holding
         cooperativePauseDeadlineTask = Task { @MainActor [weak self] in
             do {
@@ -670,7 +756,7 @@ public final class NativeGuestCoordinator: ObservableObject {
                 return
             }
             guard self?.cooperativePauseHandoff?.token == token else { return }
-            self?.endCooperativePause(reason: "lease-expired")
+            self?.endCooperativePause(reason: "hold-deadline-expired")
         }
 
         // The host covers and locks the vault synchronously here. Its lifecycle
@@ -682,11 +768,12 @@ public final class NativeGuestCoordinator: ObservableObject {
               active.pauseOperationID == pauseOperationID,
               active.lease.isValid,
               ContinuousClock().now < active.deadline else {
-            if cooperativePauseHandoff?.token == token {
-                endCooperativePause(reason: "lease-expired")
+            if let current = cooperativePauseHandoff, current.token == token {
+                endCooperativePause(reason: cooperativeExpiryReason(current) ?? "stale-pause")
             }
             return false
         }
+        guard cooperativePauseHandoff?.token == token else { return false }
 
         let acknowledgementTimeout = cooperativePauseAcknowledgementTimeout
         cooperativePauseAcknowledgementTask = Task { @MainActor [weak self] in
@@ -695,11 +782,11 @@ public final class NativeGuestCoordinator: ObservableObject {
             } catch {
                 return
             }
-            guard let self,
-                  self.cooperativePauseHandoff?.token == token,
-                  self.cooperativePauseHandoff?.pauseOperationID == pauseOperationID,
-                  self.cooperativePauseHandoff?.pauseAcknowledged == false else { return }
-            self.endCooperativePause(reason: "pause-ack-timeout")
+            guard let self, let handoff = self.cooperativePauseHandoff,
+                  handoff.token == token,
+                  handoff.pauseOperationID == pauseOperationID,
+                  !handoff.pauseAcknowledged else { return }
+            self.endCooperativePause(reason: self.cooperativeExpiryReason(handoff) ?? "pause-ack-timeout")
         }
         cooperativeRuntime.pauseMediaForHandoff { [weak self] acknowledged in
             self?.cooperativeMediaPaused(
@@ -720,8 +807,8 @@ public final class NativeGuestCoordinator: ObservableObject {
               handoff.token == token,
               handoff.pauseOperationID == operationID,
               !handoff.pauseAcknowledged else { return }
-        guard handoff.lease.isValid, ContinuousClock().now < handoff.deadline else {
-            endCooperativePause(reason: "lease-expired")
+        if let reason = cooperativeExpiryReason(handoff) {
+            endCooperativePause(reason: reason)
             return
         }
         guard acknowledged else {
@@ -730,6 +817,7 @@ public final class NativeGuestCoordinator: ObservableObject {
         }
 
         cooperativePauseHandoff?.pauseAcknowledged = true
+        guard recordCooperativeHold("pause-acknowledged") else { return }
         cooperativePauseAcknowledgementTask?.cancel()
         cooperativePauseAcknowledgementTask = nil
         handoffReport = "Cooperative media handoff\nPause acknowledged. The runtime confirms only that its narrow media gate was applied; whole-process suspension, coverage of every media source, and device behavior are unverified."
@@ -739,6 +827,10 @@ public final class NativeGuestCoordinator: ObservableObject {
         _ handoff: CooperativePauseHandoff,
         request: CheckRequest
     ) {
+        if let reason = cooperativeExpiryReason(handoff) {
+            endCooperativePause(reason: reason)
+            return
+        }
         guard let active = cooperativePauseHandoff,
               active.token == handoff.token,
               active.pauseAcknowledged,
@@ -747,13 +839,14 @@ public final class NativeGuestCoordinator: ObservableObject {
               ContinuousClock().now < active.deadline,
               request.session != active.originatingSession,
               isValid(request.session) else {
-            endCooperativePause(reason: "stale-authentication")
+            endCooperativePause(reason: cooperativeExpiryReason(handoff) ?? "stale-authentication")
             return
         }
 
         let operationID = UUID()
         cooperativePauseHandoff?.resumeOperationID = operationID
         cooperativePauseHandoff?.resumeRequest = request
+        guard recordCooperativeHold("resume-submitted") else { return }
         state = .holding
         let clock = ContinuousClock()
         let acknowledgementTimeout = cooperativePauseAcknowledgementTimeout
@@ -763,10 +856,10 @@ public final class NativeGuestCoordinator: ObservableObject {
             } catch {
                 return
             }
-            guard let self,
-                  self.cooperativePauseHandoff?.token == handoff.token,
-                  self.cooperativePauseHandoff?.resumeOperationID == operationID else { return }
-            self.endCooperativePause(reason: "resume-ack-timeout")
+            guard let self, let current = self.cooperativePauseHandoff,
+                  current.token == handoff.token,
+                  current.resumeOperationID == operationID else { return }
+            self.endCooperativePause(reason: self.cooperativeExpiryReason(current) ?? "resume-ack-timeout")
         }
         handoff.runtime.resumeMediaAfterHandoff { [weak self] resumed in
             self?.cooperativeMediaResumed(
@@ -789,8 +882,8 @@ public final class NativeGuestCoordinator: ObservableObject {
               handoff.pauseAcknowledged,
               handoff.resumeOperationID == operationID,
               handoff.resumeRequest == request else { return }
-        guard handoff.lease.isValid, ContinuousClock().now < handoff.deadline else {
-            endCooperativePause(reason: "lease-expired")
+        if let reason = cooperativeExpiryReason(handoff) {
+            endCooperativePause(reason: reason)
             return
         }
         guard state == .holding,
@@ -807,6 +900,7 @@ public final class NativeGuestCoordinator: ObservableObject {
 
         // Transfer the still-running guest only after the fenced media resume
         // acknowledgement. Duplicate and late callbacks now find no token.
+        guard recordCooperativeHold("resume-acknowledged") else { return }
         cooperativePauseHandoff = nil
         cooperativePauseDeadlineTask?.cancel()
         cooperativePauseDeadlineTask = nil
@@ -1097,11 +1191,16 @@ public final class NativeGuestCoordinator: ObservableObject {
         }
 
         if let handoff = cooperativePauseHandoff {
+            guard recordCooperativeHold("credential-check-completed") else { return }
+            if let reason = cooperativeExpiryReason(handoff) {
+                endCooperativePause(reason: reason)
+                return
+            }
             guard handoff.pauseAcknowledged,
                   handoff.lease.isValid,
                   ContinuousClock().now < handoff.deadline,
                   request.session != handoff.originatingSession else {
-                endCooperativePause(reason: "lease-expired")
+                endCooperativePause(reason: "stale-authentication")
                 return
             }
             beginCooperativeResume(handoff, request: request)
@@ -1411,7 +1510,7 @@ public final class NativeGuestCoordinator: ObservableObject {
 
     private func cooperativePauseLeaseDidEnd(_ token: UUID) {
         guard cooperativePauseHandoff?.token == token else { return }
-        endCooperativePause(reason: "lease-expired")
+        endCooperativePause(reason: "system-background-expired")
     }
 
     private func endSignalDiagnostic(reason: String) {
@@ -1467,6 +1566,12 @@ public final class NativeGuestCoordinator: ObservableObject {
             ? nil
             : "stage=cooperative-media-handoff; reason=" + reason
         state = .ended
+        // Callback authority is already gone before injected diagnostic getters
+        // or cleanup code can reenter. A sample never restores a runtime.
+        let systemSeconds = handoff.lease.backgroundTimeRemainingSeconds
+        let leaseValid = handoff.lease.isValid
+        appendCooperativeHold("end-" + reason, handoff: handoff,
+                              systemSeconds: systemSeconds, leaseValid: leaseValid)
         if let authorizationRequest { endAuthorization(authorizationRequest) }
         handoff.lease.end()
         revokeRuntime(handoff.runtime, evenIfPreviouslyRevoked: true)
@@ -1520,6 +1625,7 @@ public final class NativeGuestCoordinator: ObservableObject {
 
     private func invalidateForLifecycleTransition() {
         if let handoff = cooperativePauseHandoff {
+            guard recordCooperativeHold("lifecycle-transition") else { return }
             switch lifecycle.state {
             case .authenticating(let attemptID):
                 cooperativeAuthenticationAttemptID = attemptID

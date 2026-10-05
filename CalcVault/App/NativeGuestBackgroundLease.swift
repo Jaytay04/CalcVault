@@ -24,6 +24,14 @@ final class NativeGuestBackgroundLease: NativeGuestHandoffLease {
 
     var isValid: Bool { !expired && identifier != .invalid }
 
+    var backgroundTimeRemainingSeconds: Double? {
+        guard UIApplication.shared.applicationState == .background else { return nil }
+        let remaining = UIApplication.shared.backgroundTimeRemaining
+        // Do not render a huge finite "unlimited" sentinel as an allowance.
+        guard remaining.isFinite, remaining >= 0, remaining < 86_400 else { return nil }
+        return remaining
+    }
+
     func end() {
         let previous = identifier
         identifier = .invalid
