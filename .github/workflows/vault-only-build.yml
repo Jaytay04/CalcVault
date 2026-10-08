@@ -85,7 +85,7 @@ jobs:
       name: Checkout private build source
       with:
         repository: Jaytay04/Calculator
-        ref: 39f5ef69a7d2b4ac858635316775dad2a4f17509
+        ref: ab2a020836d7cefa7c957aa5735d2bc109be7c65
         ssh-key: ${{ secrets.CV_VAULT_ONLY1_SOURCE_KEY }}
         persist-credentials: false
         fetch-depth: 1
@@ -112,73 +112,78 @@ jobs:
       shell: bash
       run: "mkdir -p \"$RUNNER_TEMP/private-step-logs\"\nexec >\"$RUNNER_TEMP/private-step-logs/step-05.log\" 2>&1\nset -euo pipefail\nsudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer\nsudo xcodebuild -runFirstLaunch\nxcodebuild -version | tee \"$RUNNER_TEMP/integration-xcode-version.log\"\ntest \"$(uname -m)\" = arm64\nbrew install xcodegen\ntest \"$(xcodegen version | awk '{print $2}')\" = 2.46.0\nsource=\"$RUNNER_TEMP/cvlp-integration-upstream\"\nbash experiments/native-social-liveprocess-device/fetch-pinned-upstream.sh \"$source\"\ntest \"$(git -C \"$source\" rev-parse HEAD)\" = e370a92dfc03ce109ebce00ed4a7cfc64ad1c801\npython3 experiments/native-social-liveprocess-device/prepare-upstream.py \"$source\"\npython3 experiments/native-social-liveprocess-device/prepare-framework-guest.py \"$source\"\nif [[ \"$TIKTOK47_HOST\" == true ]]; then\n  python3 experiments/native-social-integration/prepare-tiktok47-integration.py \"$source\"\nelse\n  python3 experiments/native-social-integration/prepare-integration.py\
         \ \"$source\"\nfi\necho \"CV_INTEGRATION_UPSTREAM=$source\" >> \"$GITHUB_ENV\"\n"
+    - name: Inspect Xcode simulator eligibility before fixtures
+      shell: bash
+      run: "mkdir -p \"$RUNNER_TEMP/private-step-logs\"\nexec >\"$RUNNER_TEMP/private-step-logs/step-06.log\" 2>&1\nset -euo pipefail\nevidence=\"$RUNNER_TEMP/guest-download-xctests\"\nmkdir -p \"$evidence\"\nsh scripts/generate-project.sh\nxcode-select -p > \"$evidence/developer-directory.txt\"\nxcrun --find simctl > \"$evidence/simctl-path.txt\"\nxcrun simctl list --json > \"$evidence/simulator-inventory.json\"\nxcrun simctl list runtimes --json > \"$evidence/simulator-runtimes.json\"\npython3 - \"$evidence/simulator-inventory.json\" > \"$evidence/preflight-device.txt\" <<'PY'\nimport json,sys\ndata=json.load(open(sys.argv[1]))\nrows=[(runtime,device) for runtime,devices in data['devices'].items()\n      if '.iOS-' in runtime for device in devices\n      if device.get('isAvailable') and device.get('name','').startswith('iPhone')]\nif not rows: raise SystemExit('No available iPhone simulator')\nruntime,device=max(rows,key=lambda row: tuple(int(n) for n in row[0].rsplit('iOS-',1)[-1].split('-')))\n\
+        print(device['udid'],device['state'])\nPY\nread -r preflight_id preflight_state < \"$evidence/preflight-device.txt\"\nif [[ \"$preflight_state\" != Booted ]]; then xcrun simctl boot \"$preflight_id\"; fi\nxcrun simctl bootstatus \"$preflight_id\" -b > \"$evidence/preflight-boot.txt\" 2>&1\nxcodebuild -showsdks > \"$evidence/installed-sdks.txt\" 2>&1\nxcodebuild -project CalcVault.xcodeproj -scheme CalcVault -configuration Debug \\\n  -sdk iphonesimulator -showBuildSettings -json \\\n  > \"$evidence/build-settings.json\" 2> \"$evidence/build-settings-stderr.txt\"\nxcodebuild -project CalcVault.xcodeproj -scheme CalcVault -configuration Debug \\\n  -sdk iphonesimulator -showdestinations \\\n  > \"$evidence/default-destinations.txt\" 2>&1\nxcodebuild -project CalcVault.xcodeproj -scheme CalcVault -configuration Debug \\\n  -sdk iphonesimulator ARCHS=arm64 ONLY_ACTIVE_ARCH=YES -showdestinations \\\n  > \"$evidence/arm64-destinations.txt\" 2>&1\npython3 - \"$evidence/arm64-destinations.txt\"\
+        \ <<'PY'\nfrom pathlib import Path\nimport re,sys\ntext = Path(sys.argv[1]).read_text(errors='replace')\nsection = text.split('Available destinations for',1)[-1].split('Ineligible destinations for',1)[0]\nif not any('platform:iOS Simulator' in line and re.search(r'\\bid:\\s*[0-9A-Fa-f-]{36}\\b', line) for line in section.splitlines()):\n    raise SystemExit('No concrete arm64 Xcode simulator destination; inspect encrypted preflight evidence.')\nPY\n"
     - name: Prepare opt-in cooperative media pause adapter
       run: 'mkdir -p "$RUNNER_TEMP/private-step-logs"
 
-        exec >"$RUNNER_TEMP/private-step-logs/step-06.log" 2>&1
+        exec >"$RUNNER_TEMP/private-step-logs/step-07.log" 2>&1
 
         python3 experiments/native-social-liveprocess-device/prepare-cooperative-pause.py "$CV_INTEGRATION_UPSTREAM"'
       shell: bash
     - name: Prepare opt-in provider startup observations
       run: 'mkdir -p "$RUNNER_TEMP/private-step-logs"
 
-        exec >"$RUNNER_TEMP/private-step-logs/step-07.log" 2>&1
+        exec >"$RUNNER_TEMP/private-step-logs/step-08.log" 2>&1
 
         python3 experiments/native-social-liveprocess-device/prepare-startup-diagnostics.py "$CV_INTEGRATION_UPSTREAM"'
       shell: bash
     - name: Prepare opt-in manual native sign-in dismissal control
       run: 'mkdir -p "$RUNNER_TEMP/private-step-logs"
 
-        exec >"$RUNNER_TEMP/private-step-logs/step-09.log" 2>&1
+        exec >"$RUNNER_TEMP/private-step-logs/step-10.log" 2>&1
 
         python3 experiments/native-social-liveprocess-device/prepare-login-dismissal.py "$CV_INTEGRATION_UPSTREAM"'
       shell: bash
     - name: Prepare opt-in vault-only guest downloads
       run: 'mkdir -p "$RUNNER_TEMP/private-step-logs"
 
-        exec >"$RUNNER_TEMP/private-step-logs/step-11.log" 2>&1
+        exec >"$RUNNER_TEMP/private-step-logs/step-12.log" 2>&1
 
         python3 experiments/native-social-liveprocess-device/prepare-guest-downloads.py "$CV_INTEGRATION_UPSTREAM"'
       shell: bash
     - name: Test vault-only routing and storage with synthetic files
       run: 'mkdir -p "$RUNNER_TEMP/private-step-logs"
 
-        exec >"$RUNNER_TEMP/private-step-logs/step-12.log" 2>&1
+        exec >"$RUNNER_TEMP/private-step-logs/step-13.log" 2>&1
 
         bash experiments/native-social-liveprocess-device/Tests/test_guest_download_outbox.sh "$RUNNER_TEMP/guest-download-outbox-tests"'
       shell: bash
     - name: Test startup observation forwarding and privacy using synthetic classes
       run: 'mkdir -p "$RUNNER_TEMP/private-step-logs"
 
-        exec >"$RUNNER_TEMP/private-step-logs/step-08.log" 2>&1
+        exec >"$RUNNER_TEMP/private-step-logs/step-09.log" 2>&1
 
         bash experiments/native-social-liveprocess-device/Tests/test_startup_diagnostics.sh "$RUNNER_TEMP/startup-diagnostics-tests"'
       shell: bash
     - name: Test manual sign-in dismissal guards with synthetic classes
       run: 'mkdir -p "$RUNNER_TEMP/private-step-logs"
 
-        exec >"$RUNNER_TEMP/private-step-logs/step-10.log" 2>&1
+        exec >"$RUNNER_TEMP/private-step-logs/step-11.log" 2>&1
 
         bash experiments/native-social-liveprocess-device/Tests/test_login_dismissal.sh "$RUNNER_TEMP/login-dismissal-tests"'
       shell: bash
     - name: Test CalcVault vault recovery and encrypted guest imports
       shell: bash
-      run: "mkdir -p \"$RUNNER_TEMP/private-step-logs\"\nexec >\"$RUNNER_TEMP/private-step-logs/step-13.log\" 2>&1\nset -euo pipefail\nmkdir -p \"$RUNNER_TEMP/guest-download-xctests\"\nsh scripts/generate-project.sh\nfor attempt in 1 2 3; do\n  xcodebuild -project CalcVault.xcodeproj -scheme CalcVault -configuration Debug \\\n    -sdk iphonesimulator -showdestinations \\\n    > \"$RUNNER_TEMP/guest-download-xctests/eligible-destinations.txt\" 2>&1\n  if grep -Eq 'platform:iOS Simulator,.*id:[0-9A-Fa-f-]{36}' \\\n      \"$RUNNER_TEMP/guest-download-xctests/eligible-destinations.txt\"; then break; fi\n  if [[ \"$attempt\" != 3 ]]; then sleep 10; fi\ndone\nxcrun simctl list devices available --json > \"$RUNNER_TEMP/guest-download-xctests/available-simulators.json\"\nread -r simulator_id simulator_name simulator_runtime simulator_state < <(\n  python3 - \"$RUNNER_TEMP/guest-download-xctests/available-simulators.json\" \"$RUNNER_TEMP/guest-download-xctests/eligible-destinations.txt\" <<'PY'\n\
-        import json\nimport re\nimport sys\nfrom pathlib import Path\n\ninventory = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))\ndestinations = Path(sys.argv[2]).read_text(encoding='utf-8', errors='replace')\nmarker = 'Available destinations for'\navailable = destinations.split(marker, 1)[1].split('Ineligible destinations for', 1)[0] if marker in destinations else ''\neligible = set()\nfor line in available.splitlines():\n    if 'platform:iOS Simulator' in line:\n        eligible.update(value.upper() for value in re.findall(r'\\bid:\\s*([0-9A-Fa-f-]{36})\\b', line))\nrows = []\nfor runtime, devices in inventory.get('devices', {}).items():\n    if not runtime.startswith('com.apple.CoreSimulator.SimRuntime.iOS-'):\n        continue\n    for device in devices:\n        if device.get('isAvailable') and device.get('name', '').startswith('iPhone') and device['udid'].upper() in eligible:\n            rows.append((runtime, device))\nif not rows:\n    raise SystemExit('No installed\
-        \ iPhone simulator is eligible for the CalcVault Xcode test scheme.')\nruntime, device = sorted(rows, key=lambda row: (row[1].get('state') == 'Booted', tuple(int(n) for n in row[0].rsplit('iOS-', 1)[-1].split('-'))), reverse=True)[0]\nprint(device['udid'], device['name'].replace(' ', '_'), runtime.rsplit('.', 1)[-1], device.get('state', 'Unknown'))\nPY\n)\nif [[ \"$simulator_state\" != Booted ]]; then\n  xcrun simctl boot \"$simulator_id\"\nfi\nxcrun simctl bootstatus \"$simulator_id\" -b\ndestination=\"platform=iOS Simulator,id=$simulator_id\"\nprintf 'destination=%s\\nsimulator=%s\\nruntime=%s\\n' \\\n  \"$destination\" \"$simulator_name\" \"$simulator_runtime\" \\\n  | tee \"$RUNNER_TEMP/guest-download-xctests/simulator-destination.txt\"\nset +e\nCALCVAULT_TEST_DESTINATION=\"$destination\" sh scripts/test-macos.sh \\\n  2>&1 | tee \"$RUNNER_TEMP/guest-download-xctests/xcodebuild-test.log\"\ntest_status=$?\nset -e\nresult_bundle=\"$(find build/DerivedData-tests/Logs/Test -maxdepth\
-        \ 1 -type d -name '*.xcresult' -print -quit 2>/dev/null || true)\"\nif [[ -n \"$result_bundle\" ]]; then\n  ditto \"$result_bundle\" \"$RUNNER_TEMP/guest-download-xctests/CalcVault-guest-downloads.xcresult\"\nelse\n  printf 'No xcresult bundle was produced.\\n' \\\n    | tee -a \"$RUNNER_TEMP/guest-download-xctests/xcodebuild-test.log\"\n  if [[ \"$test_status\" == 0 ]]; then test_status=1; fi\nfi\nexit \"$test_status\"\n"
+      run: "mkdir -p \"$RUNNER_TEMP/private-step-logs\"\nexec >\"$RUNNER_TEMP/private-step-logs/step-14.log\" 2>&1\nset -euo pipefail\nmkdir -p \"$RUNNER_TEMP/guest-download-xctests\"\nsh scripts/generate-project.sh\nfor attempt in 1 2 3; do\n  xcodebuild -project CalcVault.xcodeproj -scheme CalcVault -configuration Debug \\\n    -sdk iphonesimulator ARCHS=arm64 ONLY_ACTIVE_ARCH=YES -showdestinations \\\n    > \"$RUNNER_TEMP/guest-download-xctests/eligible-destinations.txt\" 2>&1\n  if grep -Eq 'platform:iOS Simulator,.*id:[0-9A-Fa-f-]{36}' \\\n      \"$RUNNER_TEMP/guest-download-xctests/eligible-destinations.txt\"; then break; fi\n  if [[ \"$attempt\" != 3 ]]; then sleep 10; fi\ndone\nxcrun simctl list devices available --json > \"$RUNNER_TEMP/guest-download-xctests/available-simulators.json\"\nread -r simulator_id simulator_name simulator_runtime simulator_state < <(\n  python3 - \"$RUNNER_TEMP/guest-download-xctests/available-simulators.json\" \"$RUNNER_TEMP/guest-download-xctests/eligible-destinations.txt\"\
+        \ <<'PY'\nimport json\nimport re\nimport sys\nfrom pathlib import Path\n\ninventory = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))\ndestinations = Path(sys.argv[2]).read_text(encoding='utf-8', errors='replace')\nmarker = 'Available destinations for'\navailable = destinations.split(marker, 1)[1].split('Ineligible destinations for', 1)[0] if marker in destinations else ''\neligible = set()\nfor line in available.splitlines():\n    if 'platform:iOS Simulator' in line:\n        eligible.update(value.upper() for value in re.findall(r'\\bid:\\s*([0-9A-Fa-f-]{36})\\b', line))\nrows = []\nfor runtime, devices in inventory.get('devices', {}).items():\n    if not runtime.startswith('com.apple.CoreSimulator.SimRuntime.iOS-'):\n        continue\n    for device in devices:\n        if device.get('isAvailable') and device.get('name', '').startswith('iPhone') and device['udid'].upper() in eligible:\n            rows.append((runtime, device))\nif not rows:\n    raise SystemExit('No\
+        \ installed iPhone simulator is eligible for the CalcVault Xcode test scheme.')\nruntime, device = sorted(rows, key=lambda row: (row[1].get('state') == 'Booted', tuple(int(n) for n in row[0].rsplit('iOS-', 1)[-1].split('-'))), reverse=True)[0]\nprint(device['udid'], device['name'].replace(' ', '_'), runtime.rsplit('.', 1)[-1], device.get('state', 'Unknown'))\nPY\n)\nif [[ \"$simulator_state\" != Booted ]]; then\n  xcrun simctl boot \"$simulator_id\"\nfi\nxcrun simctl bootstatus \"$simulator_id\" -b\ndestination=\"platform=iOS Simulator,id=$simulator_id\"\nprintf 'destination=%s\\nsimulator=%s\\nruntime=%s\\n' \\\n  \"$destination\" \"$simulator_name\" \"$simulator_runtime\" \\\n  | tee \"$RUNNER_TEMP/guest-download-xctests/simulator-destination.txt\"\nset +e\nxcodebuild -project CalcVault.xcodeproj -scheme CalcVault -configuration Debug \\\n  -sdk iphonesimulator -destination \"$destination\" -derivedDataPath build/DerivedData-tests \\\n  CODE_SIGNING_ALLOWED=NO ARCHS=arm64 ONLY_ACTIVE_ARCH=YES\
+        \ test \\\n  2>&1 | tee \"$RUNNER_TEMP/guest-download-xctests/xcodebuild-test.log\"\ntest_status=$?\nset -e\nresult_bundle=\"$(find build/DerivedData-tests/Logs/Test -maxdepth 1 -type d -name '*.xcresult' -print -quit 2>/dev/null || true)\"\nif [[ -n \"$result_bundle\" ]]; then\n  ditto \"$result_bundle\" \"$RUNNER_TEMP/guest-download-xctests/CalcVault-guest-downloads.xcresult\"\nelse\n  printf 'No xcresult bundle was produced.\\n' \\\n    | tee -a \"$RUNNER_TEMP/guest-download-xctests/xcodebuild-test.log\"\n  if [[ \"$test_status\" == 0 ]]; then test_status=1; fi\nfi\nexit \"$test_status\"\n"
     - name: Compile opt-in media control against target SDKs
       if: 'true'
       shell: bash
-      run: "mkdir -p \"$RUNNER_TEMP/private-step-logs\"\nexec >\"$RUNNER_TEMP/private-step-logs/step-14.log\" 2>&1\nset -euo pipefail\nsource_file=experiments/native-social-liveprocess-device/CVLPCooperativePause.m\nfor sdk in iphoneos iphonesimulator; do\n  target=arm64-apple-ios15.0\n  if [[ \"$sdk\" == iphonesimulator ]]; then target=arm64-apple-ios15.0-simulator; fi\n  sdk_path=\"$(xcrun --sdk \"$sdk\" --show-sdk-path)\"\n  xcrun --sdk \"$sdk\" clang -fobjc-arc -fmodules -target \"$target\" \\\n    -isysroot \"$sdk_path\" -fsyntax-only \"$source_file\"\n  xcrun --sdk \"$sdk\" clang -fobjc-arc -fmodules -target \"$target\" \\\n    -isysroot \"$sdk_path\" -DCVLP_COOPERATIVE_GUEST=1 -fsyntax-only \"$source_file\"\ndone\n"
+      run: "mkdir -p \"$RUNNER_TEMP/private-step-logs\"\nexec >\"$RUNNER_TEMP/private-step-logs/step-15.log\" 2>&1\nset -euo pipefail\nsource_file=experiments/native-social-liveprocess-device/CVLPCooperativePause.m\nfor sdk in iphoneos iphonesimulator; do\n  target=arm64-apple-ios15.0\n  if [[ \"$sdk\" == iphonesimulator ]]; then target=arm64-apple-ios15.0-simulator; fi\n  sdk_path=\"$(xcrun --sdk \"$sdk\" --show-sdk-path)\"\n  xcrun --sdk \"$sdk\" clang -fobjc-arc -fmodules -target \"$target\" \\\n    -isysroot \"$sdk_path\" -fsyntax-only \"$source_file\"\n  xcrun --sdk \"$sdk\" clang -fobjc-arc -fmodules -target \"$target\" \\\n    -isysroot \"$sdk_path\" -DCVLP_COOPERATIVE_GUEST=1 -fsyntax-only \"$source_file\"\ndone\n"
     - name: Test synthetic integration adapter
-      run: "mkdir -p \"$RUNNER_TEMP/private-step-logs\"\nexec >\"$RUNNER_TEMP/private-step-logs/step-15.log\" 2>&1\nxcrun swiftc -swift-version 6 CalcVault/App/NativeGuestIntegrationProfile.swift \\\n  experiments/native-social-integration/test_native_profile.swift \\\n  -o \"$RUNNER_TEMP/native-guest-profile-tests\"\n\"$RUNNER_TEMP/native-guest-profile-tests\"\npython3 -m unittest discover -s experiments/native-social-integration -p 'test_*.py' -v\npython3 -m unittest discover -s experiments/native-social-liveprocess-device -p 'test_*.py' -v\n"
+      run: "mkdir -p \"$RUNNER_TEMP/private-step-logs\"\nexec >\"$RUNNER_TEMP/private-step-logs/step-16.log\" 2>&1\nxcrun swiftc -swift-version 6 CalcVault/App/NativeGuestIntegrationProfile.swift \\\n  experiments/native-social-integration/test_native_profile.swift \\\n  -o \"$RUNNER_TEMP/native-guest-profile-tests\"\n\"$RUNNER_TEMP/native-guest-profile-tests\"\npython3 -m unittest discover -s experiments/native-social-integration -p 'test_*.py' -v\npython3 -m unittest discover -s experiments/native-social-liveprocess-device -p 'test_*.py' -v\n"
       shell: bash
     - name: Execute real anonymous XPC startup regression
       if: 'true'
       run: 'mkdir -p "$RUNNER_TEMP/private-step-logs"
 
-        exec >"$RUNNER_TEMP/private-step-logs/step-16.log" 2>&1
+        exec >"$RUNNER_TEMP/private-step-logs/step-17.log" 2>&1
 
         bash experiments/native-social-liveprocess-device/Tests/test_cooperative_bootstrap.sh'
       shell: bash
@@ -194,7 +199,7 @@ jobs:
         CV_HIGHLIGHTS_DIAGNOSTICS: '0'
       run: 'mkdir -p "$RUNNER_TEMP/private-step-logs"
 
-        exec >"$RUNNER_TEMP/private-step-logs/step-17.log" 2>&1
+        exec >"$RUNNER_TEMP/private-step-logs/step-18.log" 2>&1
 
         bash experiments/native-social-integration/build.sh "$CV_INTEGRATION_UPSTREAM" "$RUNNER_TEMP/cv-integration"'
     - name: Encrypt private build outputs
@@ -202,7 +207,7 @@ jobs:
       shell: bash
       env:
         CV_SEAL_PASSWORD: ${{ secrets.CV_VAULT_ONLY1_OUTPUT_PASSWORD }}
-        CV_SOURCE_SHA: 39f5ef69a7d2b4ac858635316775dad2a4f17509
+        CV_SOURCE_SHA: ab2a020836d7cefa7c957aa5735d2bc109be7c65
       run: "set -euo pipefail\nmkdir -p \"$RUNNER_TEMP/private-step-logs\" \"$RUNNER_TEMP/sealed-output\"\nexec >\"$RUNNER_TEMP/private-step-logs/seal.log\" 2>&1\n\"$RUNNER_TEMP/seal-tools/bin/python\" - <<'PY'\nimport hashlib,json,os,subprocess\nfrom pathlib import Path\nimport py7zr\nroot=Path(os.environ['RUNNER_TEMP'])\nsecret=os.environ['CV_SEAL_PASSWORD']\nassert len(secret)>=64\ntry: actual=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()\nexcept subprocess.CalledProcessError: actual=None\nmetadata={'private_source_commit':actual,'expected_source_commit':os.environ['CV_SOURCE_SHA'],'public_ci_commit':os.environ['GITHUB_SHA'],'run_id':os.environ['GITHUB_RUN_ID']}\n(root/'ci-source.json').write_text(json.dumps(metadata,indent=2))\npaths=['integration-xcode-version.log','startup-diagnostics-tests','login-dismissal-tests','guest-download-outbox-tests','guest-download-xctests','cv-integration/logs','cv-integration/evidence','cv-integration/output','private-step-logs','ci-source.json']\n\
         output=root/'sealed-output/CalcVault-build-private.7z'\nfilters=[{'id':py7zr.FILTER_LZMA2,'preset':1},{'id':py7zr.FILTER_CRYPTO_AES256_SHA256}]\nwith py7zr.SevenZipFile(output,'w',password=secret,header_encryption=True,filters=filters) as archive:\n    for name in paths:\n        entry=root/name\n        if not entry.exists():continue\n        if entry.is_file():archive.write(entry,name)\n        else:\n            for file in sorted(entry.rglob('*')):\n                if file.is_file() and not file.is_symlink() and file.name!='seal.log':archive.write(file,file.relative_to(root).as_posix())\nwith output.open('rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()\n(output.parent/'CalcVault-build-private.7z.sha256').write_text(digest+'  '+output.name+'\\n')\nPY\n"
     - name: Upload encrypted build outputs
