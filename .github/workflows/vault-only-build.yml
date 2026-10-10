@@ -85,7 +85,7 @@ jobs:
       name: Checkout private build source
       with:
         repository: Jaytay04/Calculator
-        ref: 203cfd2fa48ac84e225cc58bcc54efefb8d69e97
+        ref: 9f7d20e4c81dc807a190a26d6bb20e72c9d60e55
         ssh-key: ${{ secrets.CV_PASSWORD1_SOURCE_KEY }}
         persist-credentials: false
         fetch-depth: 1
@@ -207,7 +207,7 @@ jobs:
       shell: bash
       env:
         CV_SEAL_PASSWORD: ${{ secrets.CV_PASSWORD1_OUTPUT_PASSWORD }}
-        CV_SOURCE_SHA: 203cfd2fa48ac84e225cc58bcc54efefb8d69e97
+        CV_SOURCE_SHA: 9f7d20e4c81dc807a190a26d6bb20e72c9d60e55
       run: "set -euo pipefail\nmkdir -p \"$RUNNER_TEMP/private-step-logs\" \"$RUNNER_TEMP/sealed-output\"\nexec >\"$RUNNER_TEMP/private-step-logs/seal.log\" 2>&1\n\"$RUNNER_TEMP/seal-tools/bin/python\" - <<'PY'\nimport hashlib,json,os,subprocess\nfrom pathlib import Path\nimport py7zr\nroot=Path(os.environ['RUNNER_TEMP'])\nsecret=os.environ['CV_SEAL_PASSWORD']\nassert len(secret)>=64\ntry: actual=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()\nexcept subprocess.CalledProcessError: actual=None\nmetadata={'private_source_commit':actual,'expected_source_commit':os.environ['CV_SOURCE_SHA'],'public_ci_commit':os.environ['GITHUB_SHA'],'run_id':os.environ['GITHUB_RUN_ID']}\n(root/'ci-source.json').write_text(json.dumps(metadata,indent=2))\npaths=['integration-xcode-version.log','startup-diagnostics-tests','login-dismissal-tests','guest-download-outbox-tests','guest-download-xctests','cv-integration/logs','cv-integration/evidence','cv-integration/output','calculator-visual-evidence','private-step-logs','ci-source.json']\n\
         output=root/'sealed-output/CalcVault-build-private.7z'\nfilters=[{'id':py7zr.FILTER_LZMA2,'preset':1},{'id':py7zr.FILTER_CRYPTO_AES256_SHA256}]\nwith py7zr.SevenZipFile(output,'w',password=secret,header_encryption=True,filters=filters) as archive:\n    for name in paths:\n        entry=root/name\n        if not entry.exists():continue\n        if entry.is_file():archive.write(entry,name)\n        else:\n            for file in sorted(entry.rglob('*')):\n                if file.is_file() and not file.is_symlink() and file.name!='seal.log' and not ('guest-download-outbox-tests/storage-fixtures/' in file.relative_to(root).as_posix()):archive.write(file,file.relative_to(root).as_posix())\nwith output.open('rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()\n(output.parent/'CalcVault-build-private.7z.sha256').write_text(digest+'  '+output.name+'\\n')\nPY\n"
     - name: Upload encrypted build outputs
